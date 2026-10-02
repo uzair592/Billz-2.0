@@ -87,6 +87,12 @@ export function createPostgresAuthRepository(pool) {
           [restaurantId, branchId, input.restaurantName],
         );
         await client.query(
+          `INSERT INTO financial_accounts (
+             restaurant_id, branch_id, account_type, display_name
+           ) VALUES ($1, $2, 'cash', 'Cash')`,
+          [restaurantId, branchId],
+        );
+        await client.query(
           `INSERT INTO email_verification_tokens (
              id, user_id, restaurant_id, token_hash, expires_at
            ) VALUES ($1, $2, $3, $4, $5)`,

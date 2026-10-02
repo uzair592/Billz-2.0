@@ -35,6 +35,45 @@ const businessSettingsSchema = z
   .strict()
   .refine((value) => Object.keys(value).length > 0, "At least one setting is required.");
 
+const flatChargeSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  type: z.literal("flat"),
+  valueMinor: z.number().int().min(0),
+}).strict();
+
+const percentChargeSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  type: z.literal("percent"),
+  value: z.number().min(0).max(100),
+}).strict();
+
+const orderSchema = z.object({
+  idempotencyKey: z.uuid(),
+  businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  orderType: z.enum(["dine_in", "takeaway", "delivery"]),
+  tableId: z.uuid().nullable().optional(),
+  customerName: z.string().trim().max(160).nullable().optional(),
+  customerPhone: z.string().trim().max(40).nullable().optional(),
+  riderName: z.string().trim().max(120).nullable().optional(),
+  items: z.array(z.object({
+    menuItemId: z.uuid(),
+    quantity: z.number().int().min(1).max(999),
+  }).strict()).min(1).max(100),
+  discount: z.discriminatedUnion("type", [
+    z.object({ type: z.literal("flat"), valueMinor: z.number().int().min(0) }).strict(),
+    z.object({ type: z.literal("percent"), value: z.number().min(0).max(100) }).strict(),
+  ]).optional(),
+  deliveryMinor: z.number().int().min(0).default(0),
+  additionalCharges: z.array(
+    z.discriminatedUnion("type", [flatChargeSchema, percentChargeSchema]),
+  ).max(20).default([]),
+  payment: z.object({
+    method: z.enum(["cash", "bank_account", "other"]),
+    amountReceivedMinor: z.number().int().positive(),
+    financialAccountId: z.uuid().optional(),
+  }).strict().optional(),
+}).strict();
+
 function setSessionCookie(reply, session, secureCookies) {
   reply.setCookie(SESSION_COOKIE_NAME, session.token, {
     path: "/",
@@ -57,6 +96,7 @@ export async function buildHttpApp({
   tenantContextService = null,
   menuService = null,
   businessSettingsService = null,
+  orderService = null,
   trustedOrigin,
   secureCookies = true,
   logger = false,
@@ -145,7 +185,7 @@ export async function buildHttpApp({
     return { user: session.user, expiresAt: session.expiresAt };
   });
 
-  if (tenantContextService && (menuService || businessSettingsService)) {
+  if (tenantContextService && (menuService || businessSettingsService || orderService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -197,6 +237,26 @@ export async function buildHttpApp({
           }),
       );
     }
+
+    if (orderService) {
+      app.post(
+        "/api/pos/orders",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.ORDER_CREATE),
+          ],
+        },
+        async (request, reply) => {
+          const result = await orderService.create({
+            tenant: request.tenant,
+            userId: request.auth.user.id,
+            input: orderSchema.parse(request.body),
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+    }
   }
 
   app.setErrorHandler((error, _request, reply) => {
@@ -211,7 +271,11 @@ export async function buildHttpApp({
     }
     const statusCode = Number(error.statusCode) || 500;
     const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
-    return reply.code(statusCode).send({ error: publicMessage, code: error.code });
+    return reply.code(statusCode).send({
+      error: publicMessage,
+      code: error.code,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    });
   });
 
   return app;

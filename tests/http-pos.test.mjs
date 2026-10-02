@@ -47,6 +47,15 @@ async function makeApp({ role = "owner", subscriptionStatus = "active" } = {}) {
         return { businessName: input.changes.businessName, currencyCode: "PKR" };
       },
     },
+    orderService: {
+      async create(input) {
+        calls.push(["order:create", input]);
+        return {
+          order: { id: "order-1", orderNumber: 1, totalMinor: 1250 },
+          replayed: false,
+        };
+      },
+    },
   });
   apps.push(app);
   return { app, calls };
@@ -110,6 +119,51 @@ describe("tenant-protected POS HTTP endpoints", () => {
     });
 
     assert.equal(response.statusCode, 402);
+    assert.equal(calls.length, 0);
+  });
+
+  it("validates and creates an order from trusted tenant context", async () => {
+    const { app, calls } = await makeApp({ role: "cashier" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/orders",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: {
+        idempotencyKey: "33333333-3333-4333-8333-333333333333",
+        orderType: "takeaway",
+        items: [{
+          menuItemId: "44444444-4444-4444-8444-444444444444",
+          quantity: 2,
+        }],
+        payment: { method: "cash", amountReceivedMinor: 1250 },
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(calls.at(-1)[0], "order:create");
+    assert.equal(calls.at(-1)[1].tenant.restaurant.id, restaurantId);
+    assert.equal(calls.at(-1)[1].userId, userId);
+    assert.equal(calls.at(-1)[1].input.deliveryMinor, 0);
+  });
+
+  it("rejects client-supplied prices from the order contract", async () => {
+    const { app, calls } = await makeApp({ role: "cashier" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/orders",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: {
+        idempotencyKey: "33333333-3333-4333-8333-333333333333",
+        orderType: "takeaway",
+        items: [{
+          menuItemId: "44444444-4444-4444-8444-444444444444",
+          quantity: 1,
+          priceMinor: 1,
+        }],
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
     assert.equal(calls.length, 0);
   });
 });

@@ -2,9 +2,11 @@
 
 ## Current milestone
 
-Milestone 1: baseline and characterization.
+Milestone 7: server-backed POS APIs.
 
-The existing standalone POS HTML remains the production application during this milestone. Tests execute selected business logic directly from the inline script so they characterize the real application rather than a rewritten copy.
+The authenticated menu, business-settings, and standard-item order boundaries
+are implemented. The original standalone POS HTML remains operational while the
+browser UI is incrementally connected to these APIs.
 
 ## Completed
 
@@ -34,6 +36,17 @@ The existing standalone POS HTML remains the production application during this 
 - Added authenticated session restoration and tenant-context loading under PostgreSQL RLS.
 - Added reusable request guards enforcing session, restaurant membership, subscription, and role permission in the required order.
 - Added the first server-backed POS APIs for active menu data and owner-managed business settings.
+- Added `POST /api/pos/orders` behind session, restaurant membership,
+  subscription, and `ORDER_CREATE` permission checks.
+- Added server-authoritative order pricing; request payloads cannot supply item
+  prices or costs.
+- Added tenant-scoped idempotent order retries and atomic per-branch order
+  numbering.
+- Added transactional stock locking and deduction, recipe/cost snapshots,
+  customer-payment records, and financial ledger credits.
+- Added a default cash account during restaurant onboarding and validation for
+  explicitly selected cash or bank accounts.
+- Added order service, HTTP contract, migration, replay, and rollback tests.
 
 ## Migration guardrails
 
@@ -45,7 +58,14 @@ The existing standalone POS HTML remains the production application during this 
 
 ## Next milestone
 
-Validate both migrations against a real PostgreSQL instance, then implement transactional order creation and stock deduction on top of the completed tenant request guards. Docker Desktop is installed but its Linux engine could not start in the current non-interactive session, so the migrations are contract-tested but have not yet been executed by PostgreSQL.
+Implement recursive deal-component expansion and snapshots, then connect the
+legacy browser checkout flow to the order API with a durable retry/outbox key.
+Cancellation/refund compensation and order history APIs follow that work.
+
+All three migrations still need validation against a real PostgreSQL instance.
+Docker Desktop is installed but its Linux engine could not start in the current
+non-interactive session, so the migrations are contract-tested but have not yet
+been executed by PostgreSQL.
 
 When Docker is available, run:
 
@@ -60,4 +80,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-No package installation is required for the current test suite.
+The current suite has 86 tests and runs without external services.

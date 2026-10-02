@@ -67,7 +67,7 @@ describe("PostgreSQL authentication repository", () => {
     assert.equal(statements[0], "BEGIN");
     for (const table of [
       "users", "restaurants", "branches", "restaurant_memberships",
-      "business_settings", "email_verification_tokens",
+      "business_settings", "financial_accounts", "email_verification_tokens",
     ]) {
       assert.ok(statements.some((sql) => sql.startsWith(`INSERT INTO ${table}`)));
     }
