@@ -69,6 +69,10 @@ browser UI is incrementally connected to these APIs.
   direct or indirect deal cycles.
 - Made catalog imports atomic, idempotent by legacy menu ID, merge-based, and
   able to return the cloud UUID mapping required by the browser adapter.
+- Extended that transaction to kitchen stock definitions and balances, dynamic
+  menu recipes, dining areas, numbered tables, and bank accounts.
+- Added tenant-unique legacy bank-account reconciliation keys and stored only a
+  masked last-four account reference from the old browser data.
 
 ## Migration guardrails
 
@@ -80,12 +84,12 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Implement stock definitions/recipes/balances plus table and financial-account
-import, returning their legacy-to-cloud mappings. Then the tested outbox can be
-attached to the legacy checkout without trusting browser identifiers or prices.
-Cancellation/refund compensation and order history APIs follow that work.
+Import the legacy soft-drink and ice-cream SKU inventories and their recipe
+links. Then persist the returned mappings in the browser and attach the tested
+outbox to checkout without trusting browser identifiers or prices. Cancellation,
+refund compensation, and order history APIs follow that work.
 
-All four migrations still need validation against a real PostgreSQL instance.
+All five migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
 non-interactive session, so the migrations are contract-tested but have not yet
 been executed by PostgreSQL.
@@ -103,4 +107,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 104 tests and runs without external services.
+The current suite has 105 tests and runs without external services.

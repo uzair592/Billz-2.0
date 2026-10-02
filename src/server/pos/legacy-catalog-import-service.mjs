@@ -30,9 +30,32 @@ function minor(value) {
   return Math.round(Number(value) * 100);
 }
 
+function gramsPerPiece(definition, balance) {
+  return Number(balance?.avgUnitWeightGrams) || Number(definition.gramsPerPiece) || 0;
+}
+
+function recipeBaseQuantity(definition, balance, quantity) {
+  const value = Number(quantity) || 0;
+  if (definition.buyUnit === definition.sellUnit) return value;
+  const conversion = gramsPerPiece(definition, balance);
+  if (definition.buyUnit === "kg" && definition.sellUnit === "number") {
+    return value * conversion;
+  }
+  if (definition.buyUnit === "number" && definition.sellUnit === "kg") {
+    return conversion > 0 ? value / conversion : 0;
+  }
+  return value;
+}
+
+function maskedAccountNumber(value) {
+  const clean = String(value ?? "").replace(/\s+/g, "");
+  if (!clean) return null;
+  return clean.length <= 4 ? clean : `••••${clean.slice(-4)}`;
+}
+
 export function createLegacyCatalogImportService(pool) {
   return Object.freeze({
-    async import({ restaurantId, userId, snapshot }) {
+    async import({ restaurantId, branchId, userId, snapshot }) {
       unique(snapshot.pos_categories, "category");
       unique(snapshot.pos_menu.map((item) => item.id), "legacy menu item ID");
       const itemNumbers = snapshot.pos_menu.map((item) => item.itemNumber ?? item.id);
@@ -79,6 +102,14 @@ export function createLegacyCatalogImportService(pool) {
           (item.dealComponents ?? []).map((component) => component.itemId),
           `deal component in menu item ${item.id}`,
         );
+      }
+      unique(snapshot.pos_halls_list, "dining area");
+      unique(snapshot.pos_bank_accounts.map((account) => account.id), "bank account ID");
+      unique(snapshot.pos_bank_accounts.map((account) => account.displayName), "bank display name");
+      for (const key of Object.keys(snapshot.pos_ingredient_stock)) {
+        if (!snapshot.pos_stock_item_defs[key]) {
+          throw importError(`Stock balance references an unknown stock definition: ${key}`);
+        }
       }
 
       const importedLegacyIds = new Set(snapshot.pos_menu.map((item) => String(item.id)));
@@ -236,14 +267,147 @@ export function createLegacyCatalogImportService(pool) {
           );
         }
 
+        const stockItemIds = new Map();
+        for (const [legacyKey, definition] of Object.entries(snapshot.pos_stock_item_defs)) {
+          const balance = snapshot.pos_ingredient_stock[legacyKey] ?? {};
+          const baseUnit = definition.buyUnit === "number" ? "piece" : "gram";
+          const conversion = definition.buyUnit === "kg"
+            ? (definition.sellUnit === "number" ? gramsPerPiece(definition, balance) || null : 1000)
+            : 1;
+          const result = await client.query(
+            `INSERT INTO stock_items (
+               id, restaurant_id, legacy_key, name, stock_type, base_unit,
+               sell_unit, base_units_per_sell_unit, low_stock_threshold,
+               metadata, is_active
+             ) VALUES ($1, $2, $3, $4, 'ingredient', $5, $6, $7, $8, $9, true)
+             ON CONFLICT (restaurant_id, legacy_key)
+             DO UPDATE SET name = EXCLUDED.name, base_unit = EXCLUDED.base_unit,
+               sell_unit = EXCLUDED.sell_unit,
+               base_units_per_sell_unit = EXCLUDED.base_units_per_sell_unit,
+               low_stock_threshold = EXCLUDED.low_stock_threshold,
+               metadata = EXCLUDED.metadata, is_active = true
+             RETURNING id`,
+            [
+              randomUUID(), restaurantId, legacyKey, definition.label, baseUnit,
+              definition.sellUnit, conversion, Number(balance.minThresholdGrams) || 0,
+              JSON.stringify({
+                importedFrom: "legacy-pos",
+                buyUnit: definition.buyUnit,
+                icon: definition.icon ?? null,
+                color: definition.color ?? null,
+              }),
+            ],
+          );
+          const stockItemId = result.rows[0].id;
+          stockItemIds.set(legacyKey, stockItemId);
+          await client.query(
+            `INSERT INTO inventory_balances (
+               restaurant_id, branch_id, stock_item_id, quantity_base_units,
+               average_cost_minor_per_base_unit
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (restaurant_id, branch_id, stock_item_id)
+             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
+               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
+               version = inventory_balances.version + 1`,
+            [
+              restaurantId, branchId, stockItemId,
+              Number(balance.stockGrams) || 0,
+              Number(balance.avgCostPerGram) * 100 || 0,
+            ],
+          );
+        }
+
+        for (const item of snapshot.pos_menu) {
+          const menuItemId = menuItemIds.get(String(item.id));
+          await client.query(`DELETE FROM menu_item_recipe_items WHERE menu_item_id = $1`, [menuItemId]);
+          for (const [legacyKey, stockItemId] of stockItemIds) {
+            const definition = snapshot.pos_stock_item_defs[legacyKey];
+            const quantity = recipeBaseQuantity(
+              definition,
+              snapshot.pos_ingredient_stock[legacyKey],
+              item[`recipe${legacyKey}`],
+            );
+            if (quantity <= 0) continue;
+            await client.query(
+              `INSERT INTO menu_item_recipe_items (
+                 restaurant_id, menu_item_id, stock_item_id, quantity_base_units
+               ) VALUES ($1, $2, $3, $4)`,
+              [restaurantId, menuItemId, stockItemId, quantity],
+            );
+          }
+        }
+
+        const diningAreaIds = new Map();
+        for (let index = 0; index < snapshot.pos_halls_list.length; index += 1) {
+          const name = snapshot.pos_halls_list[index];
+          const result = await client.query(
+            `INSERT INTO dining_areas (
+               id, restaurant_id, branch_id, name, sort_order, is_active
+             ) VALUES ($1, $2, $3, $4, $5, true)
+             ON CONFLICT (restaurant_id, branch_id, name)
+             DO UPDATE SET sort_order = EXCLUDED.sort_order, is_active = true
+             RETURNING id`,
+            [randomUUID(), restaurantId, branchId, name, index],
+          );
+          diningAreaIds.set(name, result.rows[0].id);
+        }
+
+        const tableIds = new Map();
+        for (let tableNumber = 1; tableNumber <= snapshot.pos_total_tables; tableNumber += 1) {
+          const result = await client.query(
+            `INSERT INTO restaurant_tables (
+               id, restaurant_id, branch_id, table_number, is_active
+             ) VALUES ($1, $2, $3, $4, true)
+             ON CONFLICT (restaurant_id, branch_id, table_number)
+             DO UPDATE SET is_active = true
+             RETURNING id`,
+            [randomUUID(), restaurantId, branchId, String(tableNumber)],
+          );
+          tableIds.set(String(tableNumber), result.rows[0].id);
+        }
+
+        const financialAccountIds = new Map();
+        for (const account of snapshot.pos_bank_accounts) {
+          const legacyAccountId = String(account.id);
+          const result = await client.query(
+            `INSERT INTO financial_accounts (
+               id, restaurant_id, branch_id, legacy_account_id, account_type,
+               display_name, bank_name, masked_account_number,
+               opening_balance_minor, opening_balance_date, is_active
+             ) VALUES ($1, $2, $3, $4, 'bank', $5, $6, $7, $8, $9, $10)
+             ON CONFLICT (restaurant_id, legacy_account_id)
+             DO UPDATE SET display_name = EXCLUDED.display_name,
+               bank_name = EXCLUDED.bank_name,
+               masked_account_number = EXCLUDED.masked_account_number,
+               opening_balance_minor = EXCLUDED.opening_balance_minor,
+               opening_balance_date = EXCLUDED.opening_balance_date,
+               is_active = EXCLUDED.is_active
+             RETURNING id`,
+            [
+              randomUUID(), restaurantId, branchId, legacyAccountId,
+              account.displayName, account.bankName,
+              maskedAccountNumber(account.accountNumber), minor(account.openingBalance),
+              account.asOfDate ?? null, account.active !== false,
+            ],
+          );
+          financialAccountIds.set(legacyAccountId, result.rows[0].id);
+        }
+
         return {
           categories: Object.fromEntries(categoryIds),
           subcategories: Object.fromEntries(subcategoryIds),
           menuItems: Object.fromEntries(menuItemIds),
+          stockItems: Object.fromEntries(stockItemIds),
+          diningAreas: Object.fromEntries(diningAreaIds),
+          tables: Object.fromEntries(tableIds),
+          financialAccounts: Object.fromEntries(financialAccountIds),
           counts: {
             categories: categoryIds.size,
             subcategories: subcategoryIds.size,
             menuItems: menuItemIds.size,
+            stockItems: stockItemIds.size,
+            tables: tableIds.size,
+            financialAccounts: financialAccountIds.size,
           },
         };
       });

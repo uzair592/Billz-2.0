@@ -111,6 +111,29 @@ const legacyCatalogSchema = z.object({
   ).default({}),
   pos_category_offers: z.record(z.string(), legacyCategoryOfferSchema).default({}),
   pos_menu: z.array(legacyMenuItemSchema).max(10_000),
+  pos_stock_item_defs: z.record(z.string(), z.object({
+    label: z.string().trim().min(1).max(200),
+    buyUnit: z.enum(["kg", "number"]),
+    sellUnit: z.enum(["kg", "number"]),
+    gramsPerPiece: z.number().positive().optional(),
+  }).passthrough()).default({}),
+  pos_ingredient_stock: z.record(z.string(), z.object({
+    stockGrams: z.number().finite().default(0),
+    avgCostPerGram: z.number().finite().min(0).default(0),
+    minThresholdGrams: z.number().finite().min(0).default(0),
+    avgUnitWeightGrams: z.number().finite().min(0).optional(),
+  }).passthrough()).default({}),
+  pos_total_tables: z.number().int().min(0).max(10_000).default(0),
+  pos_halls_list: z.array(z.string().trim().min(1).max(160)).max(1_000).default([]),
+  pos_bank_accounts: z.array(z.object({
+    id: z.union([z.string().min(1).max(100), z.number().int().safe()]),
+    displayName: z.string().trim().min(1).max(160),
+    bankName: z.string().trim().min(1).max(160),
+    accountNumber: z.string().trim().max(100).optional(),
+    openingBalance: z.number().finite().default(0),
+    asOfDate: legacyDateSchema,
+    active: z.boolean().optional(),
+  }).passthrough()).max(1_000).default([]),
 }).strict();
 
 function setSessionCookie(reply, session, secureCookies) {
@@ -311,6 +334,7 @@ export async function buildHttpApp({
         },
         async (request) => catalogImportService.import({
           restaurantId: request.tenant.restaurant.id,
+          branchId: request.tenant.membership.defaultBranchId,
           userId: request.auth.user.id,
           snapshot: legacyCatalogSchema.parse(request.body),
         }),

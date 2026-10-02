@@ -41,6 +41,9 @@ Implemented foundations:
   a reconciled migration instead of trusting browser-supplied identifiers.
 - Manager/owner legacy catalog import endpoint with atomic upserts, deal-graph
   validation, offer migration, and returned cloud ID mappings.
+- The same atomic import reconciles kitchen stock definitions/balances, menu
+  recipes, halls, numbered tables, and masked bank accounts against the default
+  branch.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
@@ -233,9 +236,11 @@ npm run test:legacy
 
 The catalog migration boundary is `POST /api/pos/import/legacy-catalog`. It
 accepts the existing backup collections `pos_categories`, `pos_subcategories`,
-`pos_category_offers`, and `pos_menu`. The response maps every imported legacy
-menu ID to its authoritative cloud UUID. This endpoint is merge-based and does
-not delete cloud records omitted from a snapshot.
+`pos_category_offers`, `pos_menu`, `pos_stock_item_defs`,
+`pos_ingredient_stock`, `pos_halls_list`, `pos_total_tables`, and
+`pos_bank_accounts`. The response maps imported legacy menu, stock, table, and
+financial-account identifiers to authoritative cloud UUIDs. This endpoint is
+merge-based and does not delete cloud records omitted from a snapshot.
 
 Validate the Docker Compose file:
 
