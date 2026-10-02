@@ -4,7 +4,7 @@
 
 Milestone 7: server-backed POS APIs.
 
-The authenticated menu, business-settings, and standard-item order boundaries
+The authenticated menu, business-settings, and transactional order boundaries
 are implemented. The original standalone POS HTML remains operational while the
 browser UI is incrementally connected to these APIs.
 
@@ -47,6 +47,9 @@ browser UI is incrementally connected to these APIs.
 - Added a default cash account during restaurant onboarding and validation for
   explicitly selected cash or bank accounts.
 - Added order service, HTTP contract, migration, replay, and rollback tests.
+- Added recursive deal-component expansion with cycle and unavailable-component
+  rejection, aggregated stock usage, nested cost calculation, and immutable
+  component snapshots.
 
 ## Migration guardrails
 
@@ -58,9 +61,9 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Implement recursive deal-component expansion and snapshots, then connect the
-legacy browser checkout flow to the order API with a durable retry/outbox key.
-Cancellation/refund compensation and order history APIs follow that work.
+Connect the legacy browser checkout flow to the order API with a durable
+retry/outbox key. Cancellation/refund compensation and order history APIs
+follow that work.
 
 All three migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
@@ -80,4 +83,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 86 tests and runs without external services.
+The current suite has 87 tests and runs without external services.

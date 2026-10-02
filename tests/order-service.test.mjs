@@ -9,6 +9,7 @@ const menuItemId = "44444444-4444-4444-8444-444444444444";
 const stockItemId = "55555555-5555-4555-8555-555555555555";
 const accountId = "66666666-6666-4666-8666-666666666666";
 const idempotencyKey = "77777777-7777-4777-8777-777777777777";
+const componentItemId = "99999999-9999-4999-8999-999999999999";
 const now = new Date("2026-10-02T12:00:00.000Z");
 
 function tenant() {
@@ -31,7 +32,7 @@ function input(overrides = {}) {
   };
 }
 
-function fakePool({ existingOrder = null, stockQuantity = 10, menuType = "standard" } = {}) {
+function fakePool({ existingOrder = null, stockQuantity = 10, menuRows = null } = {}) {
   const calls = [];
   let released = false;
   const client = {
@@ -42,13 +43,14 @@ function fakePool({ existingOrder = null, stockQuantity = 10, menuType = "standa
         return { rows: existingOrder ? [existingOrder] : [] };
       }
       if (normalized.includes("FROM menu_items")) {
-        return { rows: [{
+        return { rows: menuRows ?? [{
           id: menuItemId,
           name: "Burger",
-          item_type: menuType,
+          item_type: "standard",
           price_minor: "500",
           other_cost_minor: "10",
           recipe: [{ stockItemId, quantityBaseUnits: "0.5" }],
+          components: [],
         }] };
       }
       if (normalized.includes("FROM inventory_balances")) {
@@ -114,7 +116,8 @@ describe("transactional order service", () => {
     assert.equal(orderInsert.values[18], 46);
     assert.equal(itemInsert.values[8], 23);
     assert.deepEqual(JSON.parse(itemInsert.values[9]), {
-      items: [{ stockItemId, quantityBaseUnits: "0.5" }],
+      items: [{ stockItemId, quantityBaseUnits: 0.5 }],
+      components: [],
     });
     assert.equal(stockUpdate.values[3], 1);
     assert.ok(pool.calls.some((call) => call.text.startsWith("INSERT INTO order_payments")));
@@ -164,13 +167,66 @@ describe("transactional order service", () => {
     assert.equal(pool.released, true);
   });
 
-  it("rejects deal lines until their recursive component snapshots are implemented", async () => {
-    const pool = fakePool({ menuType: "deal" });
+  it("recursively expands deal components into stock, cost, and immutable snapshots", async () => {
+    const pool = fakePool({
+      menuRows: [
+        {
+          id: menuItemId,
+          name: "Burger Deal",
+          item_type: "deal",
+          price_minor: "900",
+          other_cost_minor: "5",
+          recipe: [],
+          components: [{ menuItemId: componentItemId, quantity: "2" }],
+        },
+        {
+          id: componentItemId,
+          name: "Burger",
+          item_type: "standard",
+          price_minor: "500",
+          other_cost_minor: "10",
+          recipe: [{ stockItemId, quantityBaseUnits: "0.5" }],
+          components: [],
+        },
+      ],
+    });
+    const result = await createOrderService(pool, { clock: () => now }).create({
+      tenant: tenant(), userId, input: input(),
+    });
+
+    assert.equal(result.replayed, false);
+    const orderInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO orders"));
+    const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO order_items"));
+    const stockUpdate = pool.calls.find((call) => call.text.startsWith("UPDATE inventory_balances"));
+    const snapshot = JSON.parse(itemInsert.values[9]);
+    assert.equal(stockUpdate.values[3], 2);
+    assert.equal(itemInsert.values[8], 51);
+    assert.equal(orderInsert.values[18], 102);
+    assert.equal(snapshot.components[0].menuItemId, componentItemId);
+    assert.equal(snapshot.components[0].quantity, 2);
+    assert.equal(snapshot.items[0].quantityBaseUnits, 1);
+  });
+
+  it("rolls back a circular deal component graph", async () => {
+    const pool = fakePool({
+      menuRows: [
+        {
+          id: menuItemId, name: "Deal A", item_type: "deal", price_minor: "900",
+          other_cost_minor: "0", recipe: [],
+          components: [{ menuItemId: componentItemId, quantity: "1" }],
+        },
+        {
+          id: componentItemId, name: "Deal B", item_type: "deal", price_minor: "800",
+          other_cost_minor: "0", recipe: [],
+          components: [{ menuItemId, quantity: "1" }],
+        },
+      ],
+    });
     await assert.rejects(
       createOrderService(pool, { clock: () => now }).create({
         tenant: tenant(), userId, input: input(),
       }),
-      (error) => error.code === "DEAL_SYNC_NOT_READY" && error.statusCode === 422,
+      (error) => error.code === "INVALID_DEAL_CONFIGURATION" && error.statusCode === 409,
     );
     assert.equal(pool.calls.at(-1).text, "ROLLBACK");
   });

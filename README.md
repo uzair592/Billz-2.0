@@ -29,16 +29,16 @@ Implemented foundations:
 - PostgreSQL authentication repository with atomic restaurant-owner onboarding.
 - Authenticated tenant-context resolution and membership, subscription, and permission request guards.
 - Tenant-protected menu and business-settings HTTP APIs.
-- Tenant-protected transactional order API for standard menu items, with
+- Tenant-protected transactional order API for standard items and deals, with
   server-authoritative pricing, idempotent retries, stock reservation,
-  cost snapshots, payment validation, and ledger writes.
+  recursive component/recipe snapshots, cost snapshots, payment validation,
+  and ledger writes.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
 Not yet complete:
 
 - Transactional email provider connection.
-- Deal-component expansion in the transactional order API.
 - Browser-to-server order synchronization.
 - Legacy IndexedDB backup importer.
 - Payment-provider adapter and signed webhook endpoint.
@@ -345,7 +345,7 @@ Before commercial deployment:
 - Add migration rollback/recovery documentation.
 - Connect transactional email and payment providers.
 - Add tenant-isolation integration tests using two restaurants.
-- Add cancellation, refund, deal-order, and report API tests.
+- Add cancellation, refund, and report API tests.
 - Configure object storage and signed access.
 - Add CSP after frontend extraction removes incompatible inline handlers.
 - Configure HTTPS, HSTS, monitoring, structured logs, and alerts.

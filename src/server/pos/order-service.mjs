@@ -94,40 +94,106 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
           const menuResult = await client.query(
             `SELECT mi.id, mi.name, mi.item_type, mi.price_minor,
                     mi.other_cost_minor,
-                    COALESCE(
-                      jsonb_agg(jsonb_build_object(
+                    COALESCE(recipes.items, '[]'::jsonb) AS recipe,
+                    COALESCE(components.items, '[]'::jsonb) AS components
+               FROM menu_items mi
+               LEFT JOIN LATERAL (
+                 SELECT jsonb_agg(jsonb_build_object(
                         'stockItemId', r.stock_item_id,
                         'quantityBaseUnits', r.quantity_base_units
-                      )) FILTER (WHERE r.stock_item_id IS NOT NULL),
-                      '[]'::jsonb
-                    ) AS recipe
-               FROM menu_items mi
-               LEFT JOIN menu_item_recipe_items r
-                 ON r.restaurant_id = mi.restaurant_id
-                AND r.menu_item_id = mi.id
-              WHERE mi.id = ANY($1::uuid[]) AND mi.is_active = true
-              GROUP BY mi.id`,
-            [requestedIds],
+                      ) ORDER BY r.stock_item_id) AS items
+                   FROM menu_item_recipe_items r
+                  WHERE r.restaurant_id = mi.restaurant_id
+                    AND r.menu_item_id = mi.id
+               ) recipes ON true
+               LEFT JOIN LATERAL (
+                 SELECT jsonb_agg(jsonb_build_object(
+                        'menuItemId', c.component_menu_item_id,
+                        'quantity', c.quantity
+                      ) ORDER BY c.component_menu_item_id) AS items
+                   FROM menu_item_components c
+                  WHERE c.restaurant_id = mi.restaurant_id
+                    AND c.menu_item_id = mi.id
+               ) components ON true
+              WHERE mi.is_active = true`,
           );
-          if (menuResult.rows.length !== requestedIds.length) {
+          const byId = new Map(menuResult.rows.map((row) => [row.id, row]));
+          if (requestedIds.some((id) => !byId.has(id))) {
             throw apiError("One or more menu items are no longer available.", "MENU_CHANGED", 409);
           }
-          const byId = new Map(menuResult.rows.map((row) => [row.id, row]));
-          const menuLines = input.items.map((line) => {
-            const item = byId.get(line.menuItemId);
-            if (item.item_type === "deal") {
+
+          function expandMenuItem(itemId, path = []) {
+            if (path.includes(itemId)) {
               throw apiError(
-                "Deal orders are not enabled on the server yet.",
-                "DEAL_SYNC_NOT_READY",
-                422,
+                "A deal contains a circular component reference.",
+                "INVALID_DEAL_CONFIGURATION",
+                409,
+                { menuItemId: itemId },
               );
             }
+            const item = byId.get(itemId);
+            if (!item) {
+              throw apiError(
+                "A deal component is no longer available.",
+                "DEAL_COMPONENT_UNAVAILABLE",
+                409,
+                { menuItemId: itemId },
+              );
+            }
+
+            const recipeByStockItem = new Map();
+            for (const recipeItem of item.recipe ?? []) {
+              recipeByStockItem.set(
+                recipeItem.stockItemId,
+                (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
+                  + Number(recipeItem.quantityBaseUnits),
+              );
+            }
+
+            let otherCostMinor = Number(item.other_cost_minor);
+            const componentSnapshots = [];
+            for (const component of item.components ?? []) {
+              const quantity = Number(component.quantity);
+              const expanded = expandMenuItem(component.menuItemId, [...path, itemId]);
+              for (const recipeItem of expanded.recipe) {
+                recipeByStockItem.set(
+                  recipeItem.stockItemId,
+                  (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
+                    + recipeItem.quantityBaseUnits * quantity,
+                );
+              }
+              otherCostMinor += expanded.otherCostMinor * quantity;
+              componentSnapshots.push({
+                menuItemId: expanded.item.id,
+                name: expanded.item.name,
+                itemType: expanded.item.item_type,
+                quantity,
+                unitPriceMinor: Number(expanded.item.price_minor),
+                components: expanded.componentSnapshots,
+              });
+            }
+
+            return {
+              item,
+              recipe: [...recipeByStockItem].map(([stockItemId, quantityBaseUnits]) => ({
+                stockItemId,
+                quantityBaseUnits,
+              })),
+              otherCostMinor,
+              componentSnapshots,
+            };
+          }
+
+          const menuLines = input.items.map((line) => {
+            const expanded = expandMenuItem(line.menuItemId);
+            const item = expanded.item;
             return {
               ...line,
               name: item.name,
               priceMinor: Number(item.price_minor),
-              otherCostMinor: Number(item.other_cost_minor),
-              recipe: item.recipe ?? [],
+              otherCostMinor: expanded.otherCostMinor,
+              recipe: expanded.recipe,
+              componentSnapshots: expanded.componentSnapshots,
             };
           });
 
@@ -249,7 +315,12 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
               [
                 lineId, restaurantId, orderId, line.menuItemId, line.name,
                 line.quantity, line.priceMinor, line.priceMinor * line.quantity,
-                line.unitCostMinor, JSON.stringify({ items: line.recipe }), index,
+                line.unitCostMinor,
+                JSON.stringify({
+                  items: line.recipe,
+                  components: line.componentSnapshots,
+                }),
+                index,
               ],
             );
           }
