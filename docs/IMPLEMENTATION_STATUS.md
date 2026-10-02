@@ -50,6 +50,11 @@ browser UI is incrementally connected to these APIs.
 - Added recursive deal-component expansion with cycle and unavailable-component
   rejection, aggregated stock usage, nested cost calculation, and immutable
   component snapshots.
+- Added a durable browser order outbox and HTTP transport. Each locally saved
+  order keeps one idempotency key through network/server retries; validation
+  failures are held for review rather than retried forever.
+- Serialized outbox mutations so a new checkout cannot be lost while an older
+  order is being synchronized, and coalesced concurrent flush requests.
 
 ## Migration guardrails
 
@@ -61,9 +66,12 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Connect the legacy browser checkout flow to the order API with a durable
-retry/outbox key. Cancellation/refund compensation and order history APIs
-follow that work.
+Import/map legacy numeric menu, table, and financial-account IDs to their cloud
+UUIDs and move offer-price rules to the authoritative server catalog. Those are
+required before attaching the tested outbox to the legacy checkout; sending the
+current browser price directly would violate the server-authoritative pricing
+boundary. Cancellation/refund compensation and order history APIs follow that
+work.
 
 All three migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
@@ -83,4 +91,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 87 tests and runs without external services.
+The current suite has 94 tests and runs without external services.
