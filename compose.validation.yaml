@@ -1,0 +1,34 @@
+name: bite-tech-pos-schema-validation
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: restaurant_pos_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: validation-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d restaurant_pos_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  migrations:
+    image: postgres:17-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: validation-only
+    volumes:
+      - ./database/migrations:/migrations:ro
+    command:
+      - sh
+      - -ec
+      - |
+        for migration in /migrations/*.sql; do
+          echo "Applying $${migration}"
+          psql -h postgres -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$${migration}"
+        done
