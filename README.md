@@ -35,14 +35,18 @@ Implemented foundations:
   and ledger writes.
 - Durable browser order outbox with stable idempotency keys, exponential retry
   backoff, permanent-failure holding, and in-process concurrency protection.
+- Tenant-owned item and category offer rules, evaluated by the order service in
+  integer minor units and frozen into order snapshots.
+- Menu responses expose legacy numeric item IDs alongside cloud UUIDs to support
+  a reconciled migration instead of trusting browser-supplied identifiers.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
 Not yet complete:
 
 - Transactional email provider connection.
-- Legacy menu/account ID migration and authoritative offer-price support before
-  attaching the outbox to the existing checkout screen.
+- Legacy menu/table/account data import and ID reconciliation before attaching
+  the outbox to the existing checkout screen.
 - Legacy IndexedDB backup importer.
 - Payment-provider adapter and signed webhook endpoint.
 - Billing and platform-admin interfaces.

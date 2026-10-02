@@ -32,10 +32,22 @@ describe("server-backed POS services", () => {
       }
       if (text.includes("FROM menu_items")) {
         return { rows: [{
-          id: "item-1", item_number: 1, category_id: "cat-1",
+          id: "item-1", legacy_item_id: "41", item_number: 1, category_id: "cat-1",
           subcategory_id: "sub-1", name: "Large Pizza", description: null,
           item_type: "standard", price_minor: "120000", image_object_key: null,
           metadata: {},
+        }] };
+      }
+      if (text.includes("FROM menu_item_offers")) {
+        return { rows: [{
+          menu_item_id: "item-1", offer_price_minor: "100000",
+          starts_on: "2026-10-01", ends_on: "2026-10-31",
+        }] };
+      }
+      if (text.includes("FROM menu_category_offers")) {
+        return { rows: [{
+          category_id: "cat-1", discount_type: "percent", discount_minor: null,
+          discount_percent: "10", starts_on: null, ends_on: null,
         }] };
       }
       return { rows: [] };
@@ -44,6 +56,9 @@ describe("server-backed POS services", () => {
 
     assert.equal(result.categories[0].name, "Pizza");
     assert.equal(result.items[0].priceMinor, 120000);
+    assert.equal(result.items[0].legacyItemId, 41);
+    assert.equal(result.itemOffers[0].offerPriceMinor, 100000);
+    assert.equal(result.categoryOffers[0].discountPercent, 10);
     const tenantCall = pool.calls.find((call) => call.text.includes("set_config('app.restaurant_id'"));
     assert.deepEqual(tenantCall.values, [restaurantId]);
   });

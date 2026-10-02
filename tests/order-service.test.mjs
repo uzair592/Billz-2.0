@@ -118,6 +118,7 @@ describe("transactional order service", () => {
     assert.deepEqual(JSON.parse(itemInsert.values[9]), {
       items: [{ stockItemId, quantityBaseUnits: 0.5 }],
       components: [],
+      offer: null,
     });
     assert.equal(stockUpdate.values[3], 1);
     assert.ok(pool.calls.some((call) => call.text.startsWith("INSERT INTO order_payments")));
@@ -205,6 +206,62 @@ describe("transactional order service", () => {
     assert.equal(snapshot.components[0].menuItemId, componentItemId);
     assert.equal(snapshot.components[0].quantity, 2);
     assert.equal(snapshot.items[0].quantityBaseUnits, 1);
+  });
+
+  it("applies an active server-side item offer before category offers", async () => {
+    const pool = fakePool({
+      menuRows: [{
+        id: menuItemId,
+        name: "Burger",
+        item_type: "standard",
+        price_minor: "500",
+        other_cost_minor: "10",
+        offer_price_minor: "350",
+        category_discount_type: "percent",
+        category_discount_percent: "50",
+        category_discount_minor: null,
+        recipe: [{ stockItemId, quantityBaseUnits: "0.5" }],
+        components: [],
+      }],
+    });
+    await createOrderService(pool, { clock: () => now }).create({
+      tenant: tenant(), userId, input: input({ discount: undefined }),
+    });
+
+    const menuQuery = pool.calls.find((call) => call.text.includes("FROM menu_items"));
+    const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO order_items"));
+    const snapshot = JSON.parse(itemInsert.values[9]);
+    assert.deepEqual(menuQuery.values, ["2026-10-02"]);
+    assert.equal(itemInsert.values[6], 350);
+    assert.equal(snapshot.offer.type, "item");
+    assert.equal(snapshot.offer.regularPriceMinor, 500);
+  });
+
+  it("calculates category percentage offers with integer minor-unit rounding", async () => {
+    const pool = fakePool({
+      menuRows: [{
+        id: menuItemId,
+        name: "Burger",
+        item_type: "standard",
+        price_minor: "505",
+        other_cost_minor: "10",
+        offer_price_minor: null,
+        category_discount_type: "percent",
+        category_discount_percent: "10",
+        category_discount_minor: null,
+        recipe: [{ stockItemId, quantityBaseUnits: "0.5" }],
+        components: [],
+      }],
+    });
+    await createOrderService(pool, { clock: () => now }).create({
+      tenant: tenant(), userId, input: input({ discount: undefined }),
+    });
+
+    const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO order_items"));
+    const snapshot = JSON.parse(itemInsert.values[9]);
+    assert.equal(itemInsert.values[6], 454);
+    assert.equal(snapshot.offer.type, "category");
+    assert.equal(snapshot.offer.discountPercent, 10);
   });
 
   it("rolls back a circular deal component graph", async () => {

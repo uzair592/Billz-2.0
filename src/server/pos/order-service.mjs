@@ -55,6 +55,43 @@ function pricingInput(menuLines, input) {
   };
 }
 
+function effectiveItemPrice(item) {
+  const regularPriceMinor = Number(item.price_minor);
+  const itemOfferMinor = Number(item.offer_price_minor);
+  if (item.offer_price_minor !== null && item.offer_price_minor !== undefined
+      && itemOfferMinor > 0 && itemOfferMinor < regularPriceMinor) {
+    return {
+      priceMinor: itemOfferMinor,
+      offer: { type: "item", regularPriceMinor, offerPriceMinor: itemOfferMinor },
+    };
+  }
+
+  let categoryPriceMinor = regularPriceMinor;
+  if (item.category_discount_type === "percent") {
+    const percent = Math.min(100, Math.max(0, Number(item.category_discount_percent)));
+    categoryPriceMinor = regularPriceMinor - Math.round((regularPriceMinor * percent) / 100);
+  } else if (item.category_discount_type === "flat") {
+    categoryPriceMinor = Math.max(0, regularPriceMinor - Number(item.category_discount_minor));
+  }
+  if (categoryPriceMinor < regularPriceMinor) {
+    return {
+      priceMinor: categoryPriceMinor,
+      offer: {
+        type: "category",
+        regularPriceMinor,
+        discountType: item.category_discount_type,
+        discountMinor: item.category_discount_type === "flat"
+          ? Number(item.category_discount_minor)
+          : null,
+        discountPercent: item.category_discount_type === "percent"
+          ? Number(item.category_discount_percent)
+          : null,
+      },
+    };
+  }
+  return { priceMinor: regularPriceMinor, offer: null };
+}
+
 export function createOrderService(pool, { clock = () => new Date() } = {}) {
   return Object.freeze({
     async create({ tenant, userId, input }) {
@@ -94,9 +131,25 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
           const menuResult = await client.query(
             `SELECT mi.id, mi.name, mi.item_type, mi.price_minor,
                     mi.other_cost_minor,
+                    io.offer_price_minor,
+                    co.discount_type AS category_discount_type,
+                    co.discount_minor AS category_discount_minor,
+                    co.discount_percent AS category_discount_percent,
                     COALESCE(recipes.items, '[]'::jsonb) AS recipe,
                     COALESCE(components.items, '[]'::jsonb) AS components
                FROM menu_items mi
+               LEFT JOIN menu_item_offers io
+                 ON io.restaurant_id = mi.restaurant_id
+                AND io.menu_item_id = mi.id
+                AND io.is_active = true
+                AND (io.starts_on IS NULL OR io.starts_on <= $1::date)
+                AND (io.ends_on IS NULL OR io.ends_on >= $1::date)
+               LEFT JOIN menu_category_offers co
+                 ON co.restaurant_id = mi.restaurant_id
+                AND co.category_id = mi.category_id
+                AND co.is_active = true
+                AND (co.starts_on IS NULL OR co.starts_on <= $1::date)
+                AND (co.ends_on IS NULL OR co.ends_on >= $1::date)
                LEFT JOIN LATERAL (
                  SELECT jsonb_agg(jsonb_build_object(
                         'stockItemId', r.stock_item_id,
@@ -116,6 +169,7 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
                     AND c.menu_item_id = mi.id
                ) components ON true
               WHERE mi.is_active = true`,
+            [businessDate],
           );
           const byId = new Map(menuResult.rows.map((row) => [row.id, row]));
           if (requestedIds.some((id) => !byId.has(id))) {
@@ -187,10 +241,12 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
           const menuLines = input.items.map((line) => {
             const expanded = expandMenuItem(line.menuItemId);
             const item = expanded.item;
+            const pricing = effectiveItemPrice(item);
             return {
               ...line,
               name: item.name,
-              priceMinor: Number(item.price_minor),
+              priceMinor: pricing.priceMinor,
+              offer: pricing.offer,
               otherCostMinor: expanded.otherCostMinor,
               recipe: expanded.recipe,
               componentSnapshots: expanded.componentSnapshots,
@@ -319,6 +375,7 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
                 JSON.stringify({
                   items: line.recipe,
                   components: line.componentSnapshots,
+                  offer: line.offer,
                 }),
                 index,
               ],

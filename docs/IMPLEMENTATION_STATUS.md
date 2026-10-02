@@ -55,6 +55,12 @@ browser UI is incrementally connected to these APIs.
   failures are held for review rather than retried forever.
 - Serialized outbox mutations so a new checkout cannot be lost while an older
   order is being synchronized, and coalesced concurrent flush requests.
+- Added tenant-isolated item and category offer tables, including schedule and
+  unit-consistency constraints.
+- Added authoritative item-first/category-second offer evaluation to order
+  creation and froze the applied offer in the order-item snapshot.
+- Exposed legacy item IDs, cloud UUIDs, and offer schedules through the menu API
+  as the mapping contract for the upcoming importer/browser adapter.
 
 ## Migration guardrails
 
@@ -66,14 +72,13 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Import/map legacy numeric menu, table, and financial-account IDs to their cloud
-UUIDs and move offer-price rules to the authoritative server catalog. Those are
-required before attaching the tested outbox to the legacy checkout; sending the
-current browser price directly would violate the server-authoritative pricing
-boundary. Cancellation/refund compensation and order history APIs follow that
+Implement the validated legacy catalog importer and reconcile numeric menu,
+table, stock, and financial-account IDs to cloud UUIDs. Then the tested outbox
+can be attached to the legacy checkout without trusting browser identifiers or
+prices. Cancellation/refund compensation and order history APIs follow that
 work.
 
-All three migrations still need validation against a real PostgreSQL instance.
+All four migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
 non-interactive session, so the migrations are contract-tested but have not yet
 been executed by PostgreSQL.
@@ -91,4 +96,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 94 tests and runs without external services.
+The current suite has 98 tests and runs without external services.
