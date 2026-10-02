@@ -46,18 +46,23 @@ Implemented foundations:
   branch.
 - Soft-drink unit inventory and ice-cream gram inventory are imported as typed
   stock SKUs and linked to their menu items through server-side recipes.
+- Legacy-to-cloud ID mappings persisted in the browser after an accepted catalog
+  import, with cloud ordering inactive until that import succeeds.
+- Guarded checkout hook that queues each locally committed order into the
+  durable outbox without ever blocking or failing the local POS save.
+- Cross-tab outbox serialization through the browser Web Locks API.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
 Not yet complete:
 
 - Transactional email provider connection.
-- Legacy menu/table/account data import and ID reconciliation before attaching
-  the outbox to the existing checkout screen.
-- Legacy IndexedDB backup importer.
+- Browser sign-in, restaurant selection, and catalog-import trigger for the
+  legacy single-file POS interface.
+- Legacy IndexedDB order/expense/stock history import.
+- Order cancellation, refund, and order-history APIs.
 - Payment-provider adapter and signed webhook endpoint.
 - Billing and platform-admin interfaces.
-- Offline outbox synchronization.
 - Production deployment.
 
 The current implementation checklist is also maintained in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
@@ -179,10 +184,17 @@ Customer names and phone numbers currently exist only as order snapshots. A sepa
 ├── database/
 │   └── migrations/
 │       ├── 001_platform_foundation.sql
-│       └── 002_tenant_pos.sql
+│       ├── 002_tenant_pos.sql
+│       ├── 003_order_idempotency.sql
+│       ├── 004_menu_offers.sql
+│       └── 005_legacy_operational_keys.sql
 ├── docs/
 │   └── IMPLEMENTATION_STATUS.md
 ├── src/
+│   ├── client/
+│   │   ├── legacy-cloud-adapter.mjs
+│   │   ├── legacy-cloud-bootstrap.mjs
+│   │   └── order-outbox.mjs
 │   ├── domain/
 │   │   ├── money-engine.mjs
 │   │   └── order-status.mjs
@@ -191,7 +203,9 @@ Customer names and phone numbers currently exist only as order snapshots. A sepa
 │       ├── authorization/
 │       ├── database/
 │       ├── http/
-│       └── subscriptions/
+│       ├── pos/
+│       ├── subscriptions/
+│       └── tenancy/
 ├── tests/
 ├── compose.validation.yaml
 ├── .env.example
@@ -369,8 +383,6 @@ Before commercial deployment:
 - Connect transactional email and payment providers.
 - Add tenant-isolation integration tests using two restaurants.
 - Add cancellation, refund, and report API tests.
-- Add a cross-tab browser lock around outbox mutation before enabling multiple
-  tabs on the same POS device.
 - Configure object storage and signed access.
 - Add CSP after frontend extraction removes incompatible inline handlers.
 - Configure HTTPS, HSTS, monitoring, structured logs, and alerts.

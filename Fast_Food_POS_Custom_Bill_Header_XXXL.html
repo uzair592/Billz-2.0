@@ -13162,6 +13162,7 @@
       <div class="receipt-footer"><p style="font-size:10px;">Software by Uzair<br>03015929230</p></div>
     </div>
 
+    <script type="module" src="./src/client/legacy-cloud-bootstrap.mjs"></script>
     <script>
 
 
@@ -18023,6 +18024,14 @@
         } finally {
           orderSubmitSaving = false;
           document.querySelector("#screen-new-order .pos-layout").inert = false;
+        }
+
+        // Cloud sync activates only after a successful authenticated catalog import.
+        // The durable local transaction above never waits for network availability.
+        if (window.BiteTechCloudSync) {
+          window.BiteTechCloudSync.enqueueLegacyOrder(finalOrder).catch((error) => {
+            console.warn("Order saved locally but cloud queueing failed:", error);
+          });
         }
 
         // 2. 🖨️ Populate the print slip template and launch the print dialog (shared helper — also reused for reprints)

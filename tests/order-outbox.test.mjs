@@ -110,6 +110,20 @@ describe("durable browser order outbox", () => {
     assert.equal(records[0].idempotencyKey, idempotencyKey);
   });
 
+  it("does not share an idempotency record across restaurants", async () => {
+    const { outbox } = setup();
+    await outbox.enqueue({ localOrderId: 14, restaurantId, payload });
+
+    const other = await outbox.enqueue({
+      localOrderId: 14,
+      restaurantId: "99999999-9999-4999-8999-999999999999",
+      payload,
+    });
+
+    assert.equal(other.localOrderId, 14);
+    assert.equal((await outbox.list()).length, 2);
+  });
+
   it("coalesces concurrent flush calls into one network request", async () => {
     let calls = 0;
     let resolveSend;

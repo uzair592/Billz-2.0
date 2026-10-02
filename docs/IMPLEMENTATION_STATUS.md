@@ -2,11 +2,12 @@
 
 ## Current milestone
 
-Milestone 7: server-backed POS APIs.
+Milestone 8: order history, cancellation, and refund compensation.
 
-The authenticated menu, business-settings, and transactional order boundaries
-are implemented. The original standalone POS HTML remains operational while the
-browser UI is incrementally connected to these APIs.
+The authenticated menu, business-settings, transactional order, and legacy
+catalog import boundaries are implemented. The original standalone POS HTML now
+queues every locally committed order into the durable cloud outbox without
+changing its local behavior.
 
 ## Completed
 
@@ -78,6 +79,22 @@ browser UI is incrementally connected to these APIs.
 - Linked drink menu items at one unit per sale and ice-cream menu items at their
   legacy grams-per-serving value through authoritative recipe records.
 - Added preflight rejection for missing SKU references and stock-key collisions.
+- Added a browser cloud adapter that translates a committed legacy order into the
+  server order contract using only stored legacy-to-cloud UUID mappings; browser
+  prices and costs are never transmitted.
+- Adapter payloads refuse any order that references an unmapped menu item,
+  table, or bank account instead of guessing identifiers.
+- Cloud ordering stays inactive until a successful authenticated catalog import
+  has persisted the restaurant ID and its mappings, so an unconfigured device
+  behaves exactly as before.
+- Persisted those mappings in the existing `BiteTechPOS_DB`/`posData` IndexedDB
+  store, reusing the legacy connection parameters.
+- Attached the outbox to checkout through a guarded hook that runs only after the
+  durable local transaction succeeds, is never awaited, and cannot fail the sale.
+- Serialized outbox mutation across tabs and same-origin windows through the
+  browser Web Locks API, and scoped idempotency records per restaurant.
+- Added integrity tests that keep the bootstrap module reference, the
+  post-commit ordering of the cloud hook, and the never-await rule in place.
 
 ## Migration guardrails
 
@@ -89,10 +106,10 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Persist the returned legacy-to-cloud mappings in the browser and attach the
-tested outbox to checkout without trusting browser identifiers or prices. Add a
-cross-tab synchronization lock before enabling simultaneous tabs. Cancellation,
-refund compensation, and order history APIs follow that work.
+Add the tenant-scoped order history, cancellation, and refund compensation APIs
+with idempotent stock and ledger reversal, and their tests. Then add browser
+sign-in and the catalog-import trigger to the legacy interface. Report APIs,
+the payment adapter, and the platform admin area follow that work.
 
 All five migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
@@ -112,4 +129,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 106 tests and runs without external services.
+The current suite has 115 tests and runs without external services.

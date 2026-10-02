@@ -73,6 +73,7 @@ export function createHttpOrderTransport({ fetchImpl = globalThis.fetch, baseUrl
 export function createOrderOutbox({
   storage,
   transport,
+  withLock = (operation) => operation(),
   clock = () => new Date(),
   createId = () => crypto.randomUUID(),
   storageKey = DEFAULT_STORAGE_KEY,
@@ -85,11 +86,15 @@ export function createOrderOutbox({
   if (!transport || typeof transport.send !== "function") {
     throw new TypeError("transport must provide a send function.");
   }
+  if (typeof withLock !== "function") {
+    throw new TypeError("withLock must be a function.");
+  }
   let activeFlush = null;
   let mutationQueue = Promise.resolve();
 
   function serialize(operation) {
-    const result = mutationQueue.then(operation, operation);
+    const lockedOperation = () => withLock(operation);
+    const result = mutationQueue.then(lockedOperation, lockedOperation);
     mutationQueue = result.catch(() => undefined);
     return result;
   }
@@ -124,7 +129,9 @@ export function createOrderOutbox({
 
       return serialize(async () => {
         const records = await read();
-        const existing = records.find((record) => record.localOrderId === localOrderId);
+        const existing = records.find((record) => (
+          record.localOrderId === localOrderId && record.restaurantId === restaurantId
+        ));
         if (existing) return clone(existing);
         const createdAt = clock().toISOString();
         const idempotencyKey = createId();

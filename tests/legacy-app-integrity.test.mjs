@@ -63,4 +63,39 @@ describe("legacy POS application integrity", () => {
     assert.ok(html.includes("applyOrderStockUsage(finalOrder.stockUsage, -1)"));
     assert.ok(html.includes("await saveToStorage()"));
   });
+
+  it("loads the cloud bootstrap module alongside the inline application", async () => {
+    const html = await readLegacyApp();
+
+    assert.match(
+      html,
+      /<script type="module" src="\.\/src\/client\/legacy-cloud-bootstrap\.mjs"><\/script>/,
+    );
+  });
+
+  it("queues cloud synchronization only after the durable local commit", async () => {
+    const html = await readLegacyApp();
+    const orderCommit = html.indexOf("orders.push(finalOrder)");
+    const localSave = html.indexOf("await saveToStorage()", orderCommit);
+    const cloudHook = html.indexOf(
+      "BiteTechCloudSync.enqueueLegacyOrder",
+      orderCommit,
+    );
+
+    assert.ok(orderCommit !== -1);
+    assert.ok(localSave > orderCommit, "The local order save must be awaited.");
+    assert.ok(
+      cloudHook > localSave,
+      "Cloud queueing must happen after the local save succeeds.",
+    );
+  });
+
+  it("never blocks checkout on the cloud", async () => {
+    const html = await readLegacyApp();
+
+    assert.ok(
+      !html.includes("await window.BiteTechCloudSync"),
+      "Checkout must not await a network call.",
+    );
+  });
 });
