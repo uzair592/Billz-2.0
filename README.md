@@ -51,6 +51,11 @@ Implemented foundations:
 - Guarded checkout hook that queues each locally committed order into the
   durable outbox without ever blocking or failing the local POS save.
 - Cross-tab outbox serialization through the browser Web Locks API.
+- Tenant-scoped order history with a keyset cursor, status and customer search,
+  and a revenue summary that excludes cancelled orders.
+- A compensating order cancellation that returns consumed stock, refunds captured
+  payments into the same account, reverses the ledger, and records an auditable
+  cancellation event. Replays never double-compensate.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
@@ -60,8 +65,8 @@ Not yet complete:
 - Browser sign-in, restaurant selection, and catalog-import trigger for the
   legacy single-file POS interface.
 - Legacy IndexedDB order/expense/stock history import.
-- Order cancellation, refund, and order-history APIs.
-- Payment-provider adapter and signed webhook endpoint.
+- Partial refunds and the payment-provider adapter with a signed webhook
+  endpoint.
 - Billing and platform-admin interfaces.
 - Production deployment.
 
@@ -187,7 +192,8 @@ Customer names and phone numbers currently exist only as order snapshots. A sepa
 │       ├── 002_tenant_pos.sql
 │       ├── 003_order_idempotency.sql
 │       ├── 004_menu_offers.sql
-│       └── 005_legacy_operational_keys.sql
+│       ├── 005_legacy_operational_keys.sql
+│       └── 006_order_cancellations.sql
 ├── docs/
 │   └── IMPLEMENTATION_STATUS.md
 ├── src/
@@ -258,6 +264,20 @@ accepts the existing backup collections `pos_categories`, `pos_subcategories`,
 imported legacy menu, stock, table, and financial-account identifiers to
 authoritative cloud UUIDs. This endpoint is merge-based and does not delete
 cloud records omitted from a snapshot.
+
+The order history boundary is `GET /api/pos/orders`, which accepts an optional
+`businessDate` or `from`/`to` range, `orderStatus`, `paymentStatus`, `search`,
+`limit`, and an opaque `cursor`. It returns the page, a same-range summary, and
+the next cursor. `GET /api/pos/orders/:orderId` returns one order with its
+frozen lines, charges, payments, and edit events.
+
+`POST /api/pos/orders/:orderId/cancel` is the compensating transaction for a
+sale. It requires an `idempotencyKey` and optional `reason`, returns consumed
+stock to the branch as `sale_reversal` movements, marks captured payments as
+refunded, writes the matching ledger debits into the same financial accounts,
+and records an `order_edit_events` entry with the reason and the exact restocked
+quantities. Replaying the same request returns the stored cancellation instead
+of compensating twice. Partial refunds are not yet implemented.
 
 Validate the Docker Compose file:
 
@@ -382,7 +402,7 @@ Before commercial deployment:
 - Add migration rollback/recovery documentation.
 - Connect transactional email and payment providers.
 - Add tenant-isolation integration tests using two restaurants.
-- Add cancellation, refund, and report API tests.
+- Add partial-refund and report API tests.
 - Configure object storage and signed access.
 - Add CSP after frontend extraction removes incompatible inline handlers.
 - Configure HTTPS, HSTS, monitoring, structured logs, and alerts.

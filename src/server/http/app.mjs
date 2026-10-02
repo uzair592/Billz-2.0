@@ -74,6 +74,24 @@ const orderSchema = z.object({
   }).strict().optional(),
 }).strict();
 
+const orderHistoryQuerySchema = z.object({
+  businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  orderStatus: z.enum(["new", "preparing", "ready", "served", "completed", "cancelled"]).optional(),
+  paymentStatus: z.enum(["unpaid", "partially_paid", "paid", "refunded"]).optional(),
+  search: z.string().trim().max(160).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().trim().max(120).optional(),
+}).strict();
+
+const orderParamsSchema = z.object({ orderId: z.uuid() }).strict();
+
+const cancelOrderSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+  idempotencyKey: z.uuid(),
+}).strict();
+
 const legacyDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
 const legacyCategoryOfferSchema = z.object({
   active: z.boolean(),
@@ -174,6 +192,8 @@ export async function buildHttpApp({
   menuService = null,
   businessSettingsService = null,
   orderService = null,
+  orderHistoryService = null,
+  orderCancellationService = null,
   catalogImportService = null,
   trustedOrigin,
   secureCookies = true,
@@ -264,7 +284,8 @@ export async function buildHttpApp({
   });
 
   if (tenantContextService
-      && (menuService || businessSettingsService || orderService || catalogImportService)) {
+      && (menuService || businessSettingsService || orderService
+        || orderHistoryService || orderCancellationService || catalogImportService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -331,6 +352,62 @@ export async function buildHttpApp({
             tenant: request.tenant,
             userId: request.auth.user.id,
             input: orderSchema.parse(request.body),
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+    }
+
+    if (orderHistoryService) {
+      app.get(
+        "/api/pos/orders",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.ORDER_VIEW),
+          ],
+        },
+        async (request) =>
+          orderHistoryService.list({
+            tenant: request.tenant,
+            filters: orderHistoryQuerySchema.parse(request.query ?? {}),
+          }),
+      );
+
+      app.get(
+        "/api/pos/orders/:orderId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.ORDER_VIEW),
+          ],
+        },
+        async (request) =>
+          orderHistoryService.get({
+            tenant: request.tenant,
+            orderId: orderParamsSchema.parse(request.params).orderId,
+          }),
+      );
+    }
+
+    if (orderCancellationService) {
+      app.post(
+        "/api/pos/orders/:orderId/cancel",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.ORDER_CANCEL),
+          ],
+        },
+        async (request, reply) => {
+          const { orderId } = orderParamsSchema.parse(request.params);
+          const body = cancelOrderSchema.parse(request.body);
+          const result = await orderCancellationService.cancel({
+            tenant: request.tenant,
+            userId: request.auth.user.id,
+            orderId,
+            reason: body.reason ?? null,
+            idempotencyKey: body.idempotencyKey,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
         },

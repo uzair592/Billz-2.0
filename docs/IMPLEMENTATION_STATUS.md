@@ -5,7 +5,8 @@
 Milestone 8: order history, cancellation, and refund compensation.
 
 The authenticated menu, business-settings, transactional order, and legacy
-catalog import boundaries are implemented. The original standalone POS HTML now
+catalog import boundaries are implemented, together with tenant-scoped order
+history and a compensating order cancellation. The original standalone POS HTML
 queues every locally committed order into the durable cloud outbox without
 changing its local behavior.
 
@@ -95,6 +96,23 @@ changing its local behavior.
   browser Web Locks API, and scoped idempotency records per restaurant.
 - Added integrity tests that keep the bootstrap module reference, the
   post-commit ordering of the cloud hook, and the never-await rule in place.
+- Added tenant-scoped order history with a keyset cursor, status and customer
+  search, and a same-range revenue summary that excludes cancelled orders and
+  counts only captured payments.
+- Added a single-order detail response returning the frozen lines, charges,
+  payments, and edit events exactly as they were sold.
+- Added the compensating cancellation flow: locked order row, one durable
+  cancellation record per order, stock returned to the branch balance as
+  `sale_reversal` movements, captured payments refunded into the same financial
+  account, matching ledger debits, and an order edit event recording the reason
+  and exactly what was restocked.
+- Made cancellation replay-safe at every layer: the stored record is returned
+  for a repeated request, a partial unique index allows only one stock reversal
+  per order and stock item, and ledger debits are keyed per payment.
+- Added a partial unique index that makes a duplicated reversal a no-op even if
+  a retry reaches the database after the transaction boundary.
+- Added `ORDER_VIEW` history access for every operational role and
+  `ORDER_CANCEL` restricted to owners and managers.
 
 ## Migration guardrails
 
@@ -106,12 +124,11 @@ changing its local behavior.
 
 ## Next milestone
 
-Add the tenant-scoped order history, cancellation, and refund compensation APIs
-with idempotent stock and ledger reversal, and their tests. Then add browser
-sign-in and the catalog-import trigger to the legacy interface. Report APIs,
-the payment adapter, and the platform admin area follow that work.
+Add browser sign-in, restaurant selection, and the catalog-import trigger to the
+legacy interface, then drive the history and cancellation APIs from it. Report
+APIs, the payment adapter, and the platform admin area follow that work.
 
-All five migrations still need validation against a real PostgreSQL instance.
+All six migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
 non-interactive session, so the migrations are contract-tested but have not yet
 been executed by PostgreSQL.
@@ -129,4 +146,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 115 tests and runs without external services.
+The current suite has 138 tests and runs without external services.

@@ -1,15 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { MoneyEngine } from "../../domain/money-engine.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
-
-function businessDateInTimezone(now, timezone) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
+import { apiError, businessDateInTimezone } from "./business-date.mjs";
 
 function publicOrder(row) {
   return {
@@ -26,14 +18,6 @@ function publicOrder(row) {
     businessDate: row.business_date,
     orderedAt: row.ordered_at,
   };
-}
-
-function apiError(message, code, statusCode = 400, details = undefined) {
-  const error = new Error(message);
-  error.code = code;
-  error.statusCode = statusCode;
-  if (details !== undefined) error.details = details;
-  return error;
 }
 
 function pricingInput(menuLines, input) {

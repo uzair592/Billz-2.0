@@ -56,6 +56,26 @@ async function makeApp({ role = "owner", subscriptionStatus = "active" } = {}) {
         };
       },
     },
+    orderHistoryService: {
+      async list(input) {
+        calls.push(["orders:list", input]);
+        return { orders: [{ id: "order-1" }], summary: { orderCount: 1 }, nextCursor: null };
+      },
+      async get(input) {
+        calls.push(["orders:get", input]);
+        return { order: { id: input.orderId }, items: [], charges: [], payments: [] };
+      },
+    },
+    orderCancellationService: {
+      async cancel(input) {
+        calls.push(["order:cancel", input]);
+        return {
+          order: { id: input.orderId, orderStatus: "cancelled" },
+          cancellation: { refundedMinor: 1250, restocked: [] },
+          replayed: false,
+        };
+      },
+    },
     catalogImportService: {
       async import(input) {
         calls.push(["catalog:import", input]);
@@ -191,7 +211,6 @@ describe("tenant-protected POS HTTP endpoints", () => {
     assert.equal(calls.at(-1)[0], "catalog:import");
     assert.equal(calls.at(-1)[1].restaurantId, restaurantId);
   });
-
   it("does not allow cashiers to import a catalog", async () => {
     const { app, calls } = await makeApp({ role: "cashier" });
     const response = await app.inject({
@@ -202,7 +221,107 @@ describe("tenant-protected POS HTTP endpoints", () => {
         pos_categories: [], pos_subcategories: {}, pos_category_offers: {}, pos_menu: [],
       },
     });
+
     assert.equal(response.statusCode, 403);
+    assert.equal(calls.length, 0);
+  });
+
+  it("lets any order-reading role page through tenant-scoped order history", async () => {
+    const { app, calls } = await makeApp({ role: "waiter" });
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/pos/orders?businessDate=2026-10-02&limit=25",
+      headers: authenticatedHeaders,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)[0], "orders:list");
+    assert.equal(calls.at(-1)[1].tenant.restaurant.id, restaurantId);
+    assert.deepEqual(calls.at(-1)[1].filters, { businessDate: "2026-10-02", limit: 25 });
+  });
+
+  it("rejects unusable history query parameters before the service runs", async () => {
+    const { app, calls } = await makeApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/pos/orders?orderStatus=deleted",
+      headers: authenticatedHeaders,
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(calls.length, 0);
+  });
+
+  it("requires a real order identifier for the detail route", async () => {
+    const { app, calls } = await makeApp();
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/pos/orders/not-a-uuid",
+      headers: authenticatedHeaders,
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(calls.length, 0);
+  });
+
+  it("serves one order with its lines, charges, and payments", async () => {
+    const { app, calls } = await makeApp({ role: "cashier" });
+    const orderId = "44444444-4444-4444-8444-444444444444";
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/pos/orders/${orderId}`,
+      headers: authenticatedHeaders,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)[0], "orders:get");
+    assert.equal(calls.at(-1)[1].orderId, orderId);
+  });
+
+  it("lets managers cancel an order through trusted tenant context", async () => {
+    const { app, calls } = await makeApp({ role: "manager" });
+    const orderId = "44444444-4444-4444-8444-444444444444";
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/pos/orders/${orderId}/cancel`,
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: {
+        reason: "Customer left",
+        idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.json().order.orderStatus, "cancelled");
+    assert.equal(calls.at(-1)[0], "order:cancel");
+    assert.equal(calls.at(-1)[1].tenant.restaurant.id, restaurantId);
+    assert.equal(calls.at(-1)[1].userId, userId);
+    assert.equal(calls.at(-1)[1].reason, "Customer left");
+  });
+
+  it("does not let waiters cancel an order", async () => {
+    const { app, calls } = await makeApp({ role: "waiter" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/orders/44444444-4444-4444-8444-444444444444/cancel",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: { idempotencyKey: "55555555-5555-4555-8555-555555555555" },
+    });
+
+    assert.equal(response.statusCode, 403);
+    assert.equal(calls.length, 0);
+  });
+
+  it("requires an idempotency key to cancel an order", async () => {
+    const { app, calls } = await makeApp({ role: "manager" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/orders/44444444-4444-4444-8444-444444444444/cancel",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: { reason: "Customer left" },
+    });
+
+    assert.equal(response.statusCode, 400);
     assert.equal(calls.length, 0);
   });
 });
