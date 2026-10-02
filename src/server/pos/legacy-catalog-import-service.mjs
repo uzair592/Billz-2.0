@@ -98,6 +98,24 @@ export function createLegacyCatalogImportService(pool) {
             throw importError(`Menu item ${item.id} has invalid offer dates.`);
           }
         }
+        if (item.softDrinkKey && item.iceCreamKey) {
+          throw importError(`Menu item ${item.id} cannot link both drink and ice-cream stock.`);
+        }
+        if (item.softDrinkKey && !snapshot.pos_softdrink_stock[item.softDrinkKey]) {
+          throw importError(`Menu item ${item.id} references a missing soft-drink SKU.`, undefined, {
+            legacyItemId: item.id, softDrinkKey: item.softDrinkKey,
+          });
+        }
+        if (item.iceCreamKey) {
+          if (!snapshot.pos_icecream_stock[item.iceCreamKey]) {
+            throw importError(`Menu item ${item.id} references a missing ice-cream SKU.`, undefined, {
+              legacyItemId: item.id, iceCreamKey: item.iceCreamKey,
+            });
+          }
+          if (!(Number.parseFloat(item.iceCreamKey.split("|")[2]) > 0)) {
+            throw importError(`Menu item ${item.id} has an invalid ice-cream serving size.`);
+          }
+        }
         unique(
           (item.dealComponents ?? []).map((component) => component.itemId),
           `deal component in menu item ${item.id}`,
@@ -106,6 +124,11 @@ export function createLegacyCatalogImportService(pool) {
       unique(snapshot.pos_halls_list, "dining area");
       unique(snapshot.pos_bank_accounts.map((account) => account.id), "bank account ID");
       unique(snapshot.pos_bank_accounts.map((account) => account.displayName), "bank display name");
+      unique([
+        ...Object.keys(snapshot.pos_stock_item_defs),
+        ...Object.keys(snapshot.pos_softdrink_stock),
+        ...Object.keys(snapshot.pos_icecream_stock),
+      ], "stock key");
       for (const key of Object.keys(snapshot.pos_ingredient_stock)) {
         if (!snapshot.pos_stock_item_defs[key]) {
           throw importError(`Stock balance references an unknown stock definition: ${key}`);
@@ -317,11 +340,81 @@ export function createLegacyCatalogImportService(pool) {
           );
         }
 
+        for (const [legacyKey, balance] of Object.entries(snapshot.pos_softdrink_stock)) {
+          const result = await client.query(
+            `INSERT INTO stock_items (
+               id, restaurant_id, legacy_key, name, stock_type, base_unit,
+               sell_unit, base_units_per_sell_unit, low_stock_threshold,
+               metadata, is_active
+             ) VALUES ($1, $2, $3, $3, 'soft_drink', 'piece', 'number', 1, $4, $5, true)
+             ON CONFLICT (restaurant_id, legacy_key)
+             DO UPDATE SET name = EXCLUDED.name, stock_type = 'soft_drink',
+               base_unit = 'piece', sell_unit = 'number',
+               base_units_per_sell_unit = 1,
+               low_stock_threshold = EXCLUDED.low_stock_threshold,
+               metadata = EXCLUDED.metadata, is_active = true
+             RETURNING id`,
+            [
+              randomUUID(), restaurantId, legacyKey,
+              snapshot.pos_softdrink_threshold,
+              JSON.stringify({ importedFrom: "legacy-pos", sellPriceMinor: minor(balance.sellPrice ?? 0) }),
+            ],
+          );
+          const stockItemId = result.rows[0].id;
+          stockItemIds.set(legacyKey, stockItemId);
+          await client.query(
+            `INSERT INTO inventory_balances (
+               restaurant_id, branch_id, stock_item_id, quantity_base_units,
+               average_cost_minor_per_base_unit
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (restaurant_id, branch_id, stock_item_id)
+             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
+               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
+               version = inventory_balances.version + 1`,
+            [restaurantId, branchId, stockItemId, balance.stockUnits, minor(balance.avgCostPerUnit)],
+          );
+        }
+
+        for (const [legacyKey, balance] of Object.entries(snapshot.pos_icecream_stock)) {
+          const result = await client.query(
+            `INSERT INTO stock_items (
+               id, restaurant_id, legacy_key, name, stock_type, base_unit,
+               sell_unit, base_units_per_sell_unit, low_stock_threshold,
+               metadata, is_active
+             ) VALUES ($1, $2, $3, $3, 'ice_cream', 'gram', 'gram', 1, $4, $5, true)
+             ON CONFLICT (restaurant_id, legacy_key)
+             DO UPDATE SET name = EXCLUDED.name, stock_type = 'ice_cream',
+               base_unit = 'gram', sell_unit = 'gram',
+               base_units_per_sell_unit = 1,
+               low_stock_threshold = EXCLUDED.low_stock_threshold,
+               metadata = EXCLUDED.metadata, is_active = true
+             RETURNING id`,
+            [
+              randomUUID(), restaurantId, legacyKey,
+              balance.minThresholdGrams ?? snapshot.pos_icecream_threshold,
+              JSON.stringify({ importedFrom: "legacy-pos", sellPriceMinor: minor(balance.sellPrice ?? 0) }),
+            ],
+          );
+          const stockItemId = result.rows[0].id;
+          stockItemIds.set(legacyKey, stockItemId);
+          await client.query(
+            `INSERT INTO inventory_balances (
+               restaurant_id, branch_id, stock_item_id, quantity_base_units,
+               average_cost_minor_per_base_unit
+             ) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (restaurant_id, branch_id, stock_item_id)
+             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
+               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
+               version = inventory_balances.version + 1`,
+            [restaurantId, branchId, stockItemId, balance.stockGrams, minor(balance.avgCostPerGram)],
+          );
+        }
+
         for (const item of snapshot.pos_menu) {
           const menuItemId = menuItemIds.get(String(item.id));
           await client.query(`DELETE FROM menu_item_recipe_items WHERE menu_item_id = $1`, [menuItemId]);
-          for (const [legacyKey, stockItemId] of stockItemIds) {
-            const definition = snapshot.pos_stock_item_defs[legacyKey];
+          for (const [legacyKey, definition] of Object.entries(snapshot.pos_stock_item_defs)) {
+            const stockItemId = stockItemIds.get(legacyKey);
             const quantity = recipeBaseQuantity(
               definition,
               snapshot.pos_ingredient_stock[legacyKey],
@@ -333,6 +426,25 @@ export function createLegacyCatalogImportService(pool) {
                  restaurant_id, menu_item_id, stock_item_id, quantity_base_units
                ) VALUES ($1, $2, $3, $4)`,
               [restaurantId, menuItemId, stockItemId, quantity],
+            );
+          }
+          if (item.softDrinkKey) {
+            await client.query(
+              `INSERT INTO menu_item_recipe_items (
+                 restaurant_id, menu_item_id, stock_item_id, quantity_base_units
+               ) VALUES ($1, $2, $3, 1)`,
+              [restaurantId, menuItemId, stockItemIds.get(item.softDrinkKey)],
+            );
+          }
+          if (item.iceCreamKey) {
+            await client.query(
+              `INSERT INTO menu_item_recipe_items (
+                 restaurant_id, menu_item_id, stock_item_id, quantity_base_units
+               ) VALUES ($1, $2, $3, $4)`,
+              [
+                restaurantId, menuItemId, stockItemIds.get(item.iceCreamKey),
+                Number.parseFloat(item.iceCreamKey.split("|")[2]),
+              ],
             );
           }
         }

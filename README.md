@@ -44,6 +44,8 @@ Implemented foundations:
 - The same atomic import reconciles kitchen stock definitions/balances, menu
   recipes, halls, numbered tables, and masked bank accounts against the default
   branch.
+- Soft-drink unit inventory and ice-cream gram inventory are imported as typed
+  stock SKUs and linked to their menu items through server-side recipes.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
@@ -237,10 +239,11 @@ npm run test:legacy
 The catalog migration boundary is `POST /api/pos/import/legacy-catalog`. It
 accepts the existing backup collections `pos_categories`, `pos_subcategories`,
 `pos_category_offers`, `pos_menu`, `pos_stock_item_defs`,
-`pos_ingredient_stock`, `pos_halls_list`, `pos_total_tables`, and
-`pos_bank_accounts`. The response maps imported legacy menu, stock, table, and
-financial-account identifiers to authoritative cloud UUIDs. This endpoint is
-merge-based and does not delete cloud records omitted from a snapshot.
+`pos_ingredient_stock`, `pos_softdrink_stock`, `pos_icecream_stock`,
+`pos_halls_list`, `pos_total_tables`, and `pos_bank_accounts`. The response maps
+imported legacy menu, stock, table, and financial-account identifiers to
+authoritative cloud UUIDs. This endpoint is merge-based and does not delete
+cloud records omitted from a snapshot.
 
 Validate the Docker Compose file:
 

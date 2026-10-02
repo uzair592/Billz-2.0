@@ -73,6 +73,11 @@ browser UI is incrementally connected to these APIs.
   menu recipes, dining areas, numbered tables, and bank accounts.
 - Added tenant-unique legacy bank-account reconciliation keys and stored only a
   masked last-four account reference from the old browser data.
+- Added soft-drink SKU unit balances and ice-cream SKU gram balances to the
+  atomic importer, including their average costs and low-stock thresholds.
+- Linked drink menu items at one unit per sale and ice-cream menu items at their
+  legacy grams-per-serving value through authoritative recipe records.
+- Added preflight rejection for missing SKU references and stock-key collisions.
 
 ## Migration guardrails
 
@@ -84,9 +89,9 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Import the legacy soft-drink and ice-cream SKU inventories and their recipe
-links. Then persist the returned mappings in the browser and attach the tested
-outbox to checkout without trusting browser identifiers or prices. Cancellation,
+Persist the returned legacy-to-cloud mappings in the browser and attach the
+tested outbox to checkout without trusting browser identifiers or prices. Add a
+cross-tab synchronization lock before enabling simultaneous tabs. Cancellation,
 refund compensation, and order history APIs follow that work.
 
 All five migrations still need validation against a real PostgreSQL instance.
@@ -107,4 +112,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 105 tests and runs without external services.
+The current suite has 106 tests and runs without external services.

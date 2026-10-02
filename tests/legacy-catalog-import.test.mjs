@@ -8,8 +8,8 @@ const branchId = "33333333-3333-4333-8333-333333333333";
 
 function snapshot() {
   return {
-    pos_categories: ["Burgers", "Deals"],
-    pos_subcategories: { Burgers: ["Chicken"], Deals: [] },
+    pos_categories: ["Burgers", "Deals", "Drinks", "Ice Cream"],
+    pos_subcategories: { Burgers: ["Chicken"], Deals: [], Drinks: [], "Ice Cream": [] },
     pos_category_offers: {
       Burgers: {
         active: true, discountType: "percent", discountValue: 10,
@@ -27,6 +27,14 @@ function snapshot() {
         id: 2, itemNumber: 201, category: "Deals", name: "Zinger Deal",
         price: 800, dealComponents: [{ itemId: 1, qty: 2 }],
       },
+      {
+        id: 3, itemNumber: 301, category: "Drinks", name: "Cola 300ml",
+        price: 100, softDrinkKey: "Next|Cola|300ml",
+      },
+      {
+        id: 4, itemNumber: 401, category: "Ice Cream", name: "Vanilla 100g",
+        price: 250, iceCreamKey: "Vanilla|Classic|100g",
+      },
     ],
     pos_stock_item_defs: {
       Dough: { label: "Dough", buyUnit: "kg", sellUnit: "kg" },
@@ -34,6 +42,16 @@ function snapshot() {
     pos_ingredient_stock: {
       Dough: { stockGrams: 5_000, avgCostPerGram: 0.2, minThresholdGrams: 500 },
     },
+    pos_softdrink_stock: {
+      "Next|Cola|300ml": { stockUnits: 24, avgCostPerUnit: 50, sellPrice: 100 },
+    },
+    pos_softdrink_threshold: 6,
+    pos_icecream_stock: {
+      "Vanilla|Classic|100g": {
+        stockGrams: 2_000, avgCostPerGram: 0.4, sellPrice: 250, minThresholdGrams: 300,
+      },
+    },
+    pos_icecream_threshold: 500,
     pos_total_tables: 2,
     pos_halls_list: ["Main Hall"],
     pos_bank_accounts: [{
@@ -92,8 +110,8 @@ describe("legacy catalog import service", () => {
     });
 
     assert.deepEqual(result.counts, {
-      categories: 2, subcategories: 1, menuItems: 2,
-      stockItems: 1, tables: 2, financialAccounts: 1,
+      categories: 4, subcategories: 1, menuItems: 4,
+      stockItems: 3, tables: 2, financialAccounts: 1,
     });
     assert.equal(result.menuItems[1], "menu-1");
     assert.equal(result.menuItems[2], "menu-2");
@@ -102,6 +120,8 @@ describe("legacy catalog import service", () => {
     assert.ok(pool.calls.some((call) => call.text.startsWith("INSERT INTO menu_category_offers")));
     assert.ok(pool.calls.some((call) => call.text.startsWith("INSERT INTO menu_item_recipe_items")));
     assert.equal(result.stockItems.Dough, "stock-Dough");
+    assert.equal(result.stockItems["Next|Cola|300ml"], "stock-Next|Cola|300ml");
+    assert.equal(result.stockItems["Vanilla|Classic|100g"], "stock-Vanilla|Classic|100g");
     assert.equal(result.tables[1], "table-1");
     assert.equal(result.financialAccounts[7], "account-7");
     const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO menu_items"));
@@ -109,6 +129,13 @@ describe("legacy catalog import service", () => {
     assert.equal(itemInsert.values[10], 2_000);
     const accountInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO financial_accounts"));
     assert.equal(accountInsert.values[6], "••••7890");
+    const recipeInserts = pool.calls.filter(
+      (call) => call.text.startsWith("INSERT INTO menu_item_recipe_items"),
+    );
+    assert.ok(recipeInserts.some((call) => call.values[2] === "stock-Next|Cola|300ml"));
+    assert.ok(recipeInserts.some((call) => (
+      call.values[2] === "stock-Vanilla|Classic|100g" && call.values[3] === 100
+    )));
     assert.equal(pool.calls.at(-1).text, "COMMIT");
   });
 
@@ -129,6 +156,19 @@ describe("legacy catalog import service", () => {
     invalid.pos_menu[0].dealComponents = [{ itemId: 2, qty: 1 }];
     await assert.rejects(
       createLegacyCatalogImportService(pool).import({ restaurantId, branchId, userId, snapshot: invalid }),
+      (error) => error.code === "INVALID_LEGACY_CATALOG",
+    );
+    assert.equal(pool.connections, 0);
+  });
+
+  it("rejects a menu SKU whose drink inventory is missing", async () => {
+    const pool = fakePool();
+    const invalid = snapshot();
+    invalid.pos_menu[2].softDrinkKey = "Missing|Cola|300ml";
+    await assert.rejects(
+      createLegacyCatalogImportService(pool).import({
+        restaurantId, branchId, userId, snapshot: invalid,
+      }),
       (error) => error.code === "INVALID_LEGACY_CATALOG",
     );
     assert.equal(pool.connections, 0);

@@ -102,6 +102,8 @@ const legacyMenuItemSchema = z.object({
   offerPrice: z.number().finite().min(0).max(10_000_000).optional(),
   offerStartDate: legacyDateSchema,
   offerEndDate: legacyDateSchema,
+  softDrinkKey: z.string().trim().min(1).max(300).optional(),
+  iceCreamKey: z.string().trim().min(1).max(300).optional(),
 }).passthrough();
 const legacyCatalogSchema = z.object({
   pos_categories: z.array(z.string().trim().min(1).max(160)).max(1_000),
@@ -123,6 +125,19 @@ const legacyCatalogSchema = z.object({
     minThresholdGrams: z.number().finite().min(0).default(0),
     avgUnitWeightGrams: z.number().finite().min(0).optional(),
   }).passthrough()).default({}),
+  pos_softdrink_stock: z.record(z.string(), z.object({
+    stockUnits: z.number().finite().default(0),
+    avgCostPerUnit: z.number().finite().min(0).default(0),
+    sellPrice: z.number().finite().min(0).optional(),
+  }).passthrough()).default({}),
+  pos_softdrink_threshold: z.number().finite().min(0).default(6),
+  pos_icecream_stock: z.record(z.string(), z.object({
+    stockGrams: z.number().finite().default(0),
+    avgCostPerGram: z.number().finite().min(0).default(0),
+    sellPrice: z.number().finite().min(0).optional(),
+    minThresholdGrams: z.number().finite().min(0).optional(),
+  }).passthrough()).default({}),
+  pos_icecream_threshold: z.number().finite().min(0).default(500),
   pos_total_tables: z.number().int().min(0).max(10_000).default(0),
   pos_halls_list: z.array(z.string().trim().min(1).max(160)).max(1_000).default([]),
   pos_bank_accounts: z.array(z.object({
