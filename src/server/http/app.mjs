@@ -74,6 +74,45 @@ const orderSchema = z.object({
   }).strict().optional(),
 }).strict();
 
+const legacyDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
+const legacyCategoryOfferSchema = z.object({
+  active: z.boolean(),
+  discountType: z.enum(["flat", "percent"]),
+  discountValue: z.number().positive().max(1_000_000),
+  startDate: legacyDateSchema,
+  endDate: legacyDateSchema,
+}).passthrough().refine(
+  (offer) => offer.discountType !== "percent" || offer.discountValue <= 100,
+  "Percentage discounts cannot exceed 100.",
+);
+const legacyMenuItemSchema = z.object({
+  id: z.number().int().safe().nonnegative(),
+  itemNumber: z.number().int().safe().positive().nullable().optional(),
+  category: z.string().trim().min(1).max(160),
+  subcategory: z.string().trim().max(160).nullable().optional(),
+  name: z.string().trim().min(1).max(200),
+  desc: z.string().max(2_000).nullable().optional(),
+  price: z.number().finite().min(0).max(10_000_000),
+  recipeOthersCost: z.number().finite().min(0).max(10_000_000).optional(),
+  dealComponents: z.array(z.object({
+    itemId: z.number().int().safe().nonnegative(),
+    qty: z.number().positive().max(10_000),
+  }).passthrough()).max(500).optional(),
+  offerActive: z.boolean().optional(),
+  offerPrice: z.number().finite().min(0).max(10_000_000).optional(),
+  offerStartDate: legacyDateSchema,
+  offerEndDate: legacyDateSchema,
+}).passthrough();
+const legacyCatalogSchema = z.object({
+  pos_categories: z.array(z.string().trim().min(1).max(160)).max(1_000),
+  pos_subcategories: z.record(
+    z.string(),
+    z.array(z.string().trim().min(1).max(160)).max(1_000),
+  ).default({}),
+  pos_category_offers: z.record(z.string(), legacyCategoryOfferSchema).default({}),
+  pos_menu: z.array(legacyMenuItemSchema).max(10_000),
+}).strict();
+
 function setSessionCookie(reply, session, secureCookies) {
   reply.setCookie(SESSION_COOKIE_NAME, session.token, {
     path: "/",
@@ -97,6 +136,7 @@ export async function buildHttpApp({
   menuService = null,
   businessSettingsService = null,
   orderService = null,
+  catalogImportService = null,
   trustedOrigin,
   secureCookies = true,
   logger = false,
@@ -185,7 +225,8 @@ export async function buildHttpApp({
     return { user: session.user, expiresAt: session.expiresAt };
   });
 
-  if (tenantContextService && (menuService || businessSettingsService || orderService)) {
+  if (tenantContextService
+      && (menuService || businessSettingsService || orderService || catalogImportService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -255,6 +296,24 @@ export async function buildHttpApp({
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
         },
+      );
+    }
+
+    if (catalogImportService) {
+      app.post(
+        "/api/pos/import/legacy-catalog",
+        {
+          bodyLimit: 5 * 1024 * 1024,
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.MENU_MANAGE),
+          ],
+        },
+        async (request) => catalogImportService.import({
+          restaurantId: request.tenant.restaurant.id,
+          userId: request.auth.user.id,
+          snapshot: legacyCatalogSchema.parse(request.body),
+        }),
       );
     }
   }

@@ -39,6 +39,8 @@ Implemented foundations:
   integer minor units and frozen into order snapshots.
 - Menu responses expose legacy numeric item IDs alongside cloud UUIDs to support
   a reconciled migration instead of trusting browser-supplied identifiers.
+- Manager/owner legacy catalog import endpoint with atomic upserts, deal-graph
+  validation, offer migration, and returned cloud ID mappings.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
@@ -228,6 +230,12 @@ Run only legacy behavior checks:
 ```powershell
 npm run test:legacy
 ```
+
+The catalog migration boundary is `POST /api/pos/import/legacy-catalog`. It
+accepts the existing backup collections `pos_categories`, `pos_subcategories`,
+`pos_category_offers`, and `pos_menu`. The response maps every imported legacy
+menu ID to its authoritative cloud UUID. This endpoint is merge-based and does
+not delete cloud records omitted from a snapshot.
 
 Validate the Docker Compose file:
 

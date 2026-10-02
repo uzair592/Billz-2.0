@@ -61,6 +61,14 @@ browser UI is incrementally connected to these APIs.
   creation and froze the applied offer in the order-item snapshot.
 - Exposed legacy item IDs, cloud UUIDs, and offer schedules through the menu API
   as the mapping contract for the upcoming importer/browser adapter.
+- Added the manager/owner `POST /api/pos/import/legacy-catalog` boundary for the
+  existing backup's category, subcategory, menu, deal-component, item-offer,
+  and category-offer collections.
+- Added pre-transaction validation for duplicate legacy IDs/item numbers,
+  unknown category/subcategory/component references, invalid offer rules, and
+  direct or indirect deal cycles.
+- Made catalog imports atomic, idempotent by legacy menu ID, merge-based, and
+  able to return the cloud UUID mapping required by the browser adapter.
 
 ## Migration guardrails
 
@@ -72,11 +80,10 @@ browser UI is incrementally connected to these APIs.
 
 ## Next milestone
 
-Implement the validated legacy catalog importer and reconcile numeric menu,
-table, stock, and financial-account IDs to cloud UUIDs. Then the tested outbox
-can be attached to the legacy checkout without trusting browser identifiers or
-prices. Cancellation/refund compensation and order history APIs follow that
-work.
+Implement stock definitions/recipes/balances plus table and financial-account
+import, returning their legacy-to-cloud mappings. Then the tested outbox can be
+attached to the legacy checkout without trusting browser identifiers or prices.
+Cancellation/refund compensation and order history APIs follow that work.
 
 All four migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
@@ -96,4 +103,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 98 tests and runs without external services.
+The current suite has 104 tests and runs without external services.

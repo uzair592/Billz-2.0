@@ -56,6 +56,12 @@ async function makeApp({ role = "owner", subscriptionStatus = "active" } = {}) {
         };
       },
     },
+    catalogImportService: {
+      async import(input) {
+        calls.push(["catalog:import", input]);
+        return { counts: { categories: 1, subcategories: 0, menuItems: 1 } };
+      },
+    },
   });
   apps.push(app);
   return { app, calls };
@@ -164,6 +170,39 @@ describe("tenant-protected POS HTTP endpoints", () => {
     });
 
     assert.equal(response.statusCode, 400);
+    assert.equal(calls.length, 0);
+  });
+
+  it("allows managers to import a validated legacy catalog", async () => {
+    const { app, calls } = await makeApp({ role: "manager" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/import/legacy-catalog",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: {
+        pos_categories: ["Burgers"],
+        pos_subcategories: {},
+        pos_category_offers: {},
+        pos_menu: [{ id: 1, category: "Burgers", name: "Zinger", price: 500 }],
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(calls.at(-1)[0], "catalog:import");
+    assert.equal(calls.at(-1)[1].restaurantId, restaurantId);
+  });
+
+  it("does not allow cashiers to import a catalog", async () => {
+    const { app, calls } = await makeApp({ role: "cashier" });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/pos/import/legacy-catalog",
+      headers: { ...authenticatedHeaders, origin: "https://pos.example.com" },
+      payload: {
+        pos_categories: [], pos_subcategories: {}, pos_category_offers: {}, pos_menu: [],
+      },
+    });
+    assert.equal(response.statusCode, 403);
     assert.equal(calls.length, 0);
   });
 });
