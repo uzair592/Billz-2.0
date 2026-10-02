@@ -60,3 +60,49 @@ export async function withTenantTransaction(
     client.release();
   }
 }
+
+/**
+ * Identifies the authenticated caller before a restaurant has been chosen.
+ *
+ * Only `app.user_id` is set, so PostgreSQL row-level security keeps every
+ * tenant table invisible. This is the only boundary where a request may learn
+ * which restaurants a user belongs to, and it can therefore never read tenant
+ * business data.
+ */
+export async function withUserContextTransaction(pool, { userId }, operation) {
+  requireUuid(userId, "userId");
+  if (!pool || typeof pool.connect !== "function") {
+    throw new TypeError("A PostgreSQL-compatible connection pool is required.");
+  }
+  if (typeof operation !== "function") {
+    throw new TypeError("operation must be a function.");
+  }
+
+  const client = await pool.connect();
+  let transactionStarted = false;
+
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+    await client.query("SET LOCAL statement_timeout = '15s'");
+    await client.query("SELECT set_config('app.user_id', $1, true)", [userId]);
+
+    const result = await operation(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "User context transaction failed and rollback also failed.",
+        );
+      }
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}

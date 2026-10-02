@@ -56,17 +56,26 @@ Implemented foundations:
 - A compensating order cancellation that returns consumed stock, refunds captured
   payments into the same account, reverses the ledger, and records an auditable
   cancellation event. Replays never double-compensate.
+- An authenticated-user boundary and read-only policies that let a device list
+  only its own restaurant memberships before any tenant is selected.
+- `GET /api/auth/me` returns the account's own restaurant memberships alongside
+  the user, so a till can send the trusted restaurant header.
+- A browser cloud session client that reads and writes only the selected
+  restaurant, since the session itself stays in an HttpOnly cookie.
+- A catalog snapshot builder that converts this device's IndexedDB collections
+  into the exact import contract and refuses rather than dropping records.
+- A dashboard cloud panel for sign-in, restaurant selection, catalog copy, and
+  sign-out that stays hidden and fully optional for an offline till.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
 Not yet complete:
 
 - Transactional email provider connection.
-- Browser sign-in, restaurant selection, and catalog-import trigger for the
-  legacy single-file POS interface.
 - Legacy IndexedDB order/expense/stock history import.
-- Partial refunds and the payment-provider adapter with a signed webhook
-  endpoint.
+- Partial refunds and sales-report APIs.
+- Driving order history and cancellation from the POS interface.
+- Payment-provider adapter and signed webhook endpoint.
 - Billing and platform-admin interfaces.
 - Production deployment.
 
@@ -114,6 +123,11 @@ Session authentication
 ```
 
 The trusted restaurant ID comes from the authenticated membership selected by the server. Resource bodies and URL IDs are never trusted to establish tenant ownership.
+
+Before a restaurant has been chosen, a request runs under an authenticated-user
+context that sets `app.user_id` and leaves `app.restaurant_id` empty. Row-level
+security then hides every tenant table, so that boundary can only read the
+caller's own active memberships and nothing else.
 
 At the beginning of every tenant transaction, the backend sets:
 
@@ -193,11 +207,14 @@ Customer names and phone numbers currently exist only as order snapshots. A sepa
 │       ├── 003_order_idempotency.sql
 │       ├── 004_menu_offers.sql
 │       ├── 005_legacy_operational_keys.sql
-│       └── 006_order_cancellations.sql
+│       ├── 006_order_cancellations.sql
+│       └── 007_session_tenant_selection.sql
 ├── docs/
 │   └── IMPLEMENTATION_STATUS.md
 ├── src/
 │   ├── client/
+│   │   ├── cloud-session.mjs
+│   │   ├── legacy-catalog-snapshot.mjs
 │   │   ├── legacy-cloud-adapter.mjs
 │   │   ├── legacy-cloud-bootstrap.mjs
 │   │   └── order-outbox.mjs

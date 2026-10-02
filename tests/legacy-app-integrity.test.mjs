@@ -98,4 +98,23 @@ describe("legacy POS application integrity", () => {
       "Checkout must not await a network call.",
     );
   });
+
+  it("offers a cloud account panel without replacing any existing screen", async () => {
+    const html = await readLegacyApp();
+
+    assert.match(html, /id="cloud-account-modal-overlay"/);
+    assert.match(html, /onclick="openCloudAccountModal\(\)"/);
+    assert.match(html, /function submitCloudSignIn\(\)/);
+    assert.match(html, /function submitCloudRestaurant\(\)/);
+    assert.match(html, /function submitCloudImport\(\)/);
+    assert.match(html, /function submitCloudSignOut\(\)/);
+  });
+
+  it("keeps the cloud panel hidden until it is opened", async () => {
+    const html = await readLegacyApp();
+    const overlay = html.indexOf('id="cloud-account-modal-overlay"');
+    const tag = html.slice(overlay, html.indexOf(">", overlay));
+
+    assert.match(tag, /class="hidden"/);
+  });
 });

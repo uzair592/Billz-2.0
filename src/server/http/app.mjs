@@ -123,7 +123,7 @@ const legacyMenuItemSchema = z.object({
   softDrinkKey: z.string().trim().min(1).max(300).optional(),
   iceCreamKey: z.string().trim().min(1).max(300).optional(),
 }).passthrough();
-const legacyCatalogSchema = z.object({
+export const legacyCatalogSchema = z.object({
   pos_categories: z.array(z.string().trim().min(1).max(160)).max(1_000),
   pos_subcategories: z.record(
     z.string(),
@@ -280,7 +280,13 @@ export async function buildHttpApp({
         code: "UNAUTHENTICATED",
       });
     }
-    return { user: session.user, expiresAt: session.expiresAt };
+    // A POS device must learn which restaurants it may use before it can send
+    // the trusted restaurant header. The list is limited to this account's own
+    // active memberships.
+    const restaurants = typeof authService.restaurantsForUser === "function"
+      ? await authService.restaurantsForUser(session.user.id)
+      : [];
+    return { user: session.user, expiresAt: session.expiresAt, restaurants };
   });
 
   if (tenantContextService

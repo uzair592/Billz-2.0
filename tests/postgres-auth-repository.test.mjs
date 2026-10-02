@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createPostgresAuthRepository } from "../src/server/auth/postgres-auth-repository.mjs";
 
-function fakePool({ tokenRow = null, duplicate = false } = {}) {
+function fakePool({ tokenRow = null, duplicate = false, membershipRows = [] } = {}) {
   const calls = [];
   let released = false;
   const client = {
@@ -20,6 +20,9 @@ function fakePool({ tokenRow = null, duplicate = false } = {}) {
           platform_role: "user", status: "pending_verification",
           email_verified_at: null, password_hash: values[3],
         }] };
+      }
+      if (text.includes("FROM restaurant_memberships m")) {
+        return { rows: membershipRows };
       }
       if (text.includes("FROM email_verification_tokens")) {
         return { rows: tokenRow ? [tokenRow] : [] };
@@ -118,5 +121,44 @@ describe("PostgreSQL authentication repository", () => {
 
     assert.equal(user, null);
     assert.equal(pool.calls.at(-1).text, "ROLLBACK");
+  });
+
+  it("lists only the caller's own restaurants without a tenant context", async () => {
+    const restaurantId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const pool = fakePool({
+      membershipRows: [{
+        restaurant_id: restaurantId,
+        restaurant_name: "Example Cafe",
+        restaurant_status: "active",
+        currency_code: "PKR",
+        role: "owner",
+        default_branch_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      }],
+    });
+    const repository = createPostgresAuthRepository(pool);
+    const restaurants = await repository.listRestaurantsForUser(
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    );
+    const statements = pool.calls.map((call) => call.text);
+    const membershipQuery = pool.calls.find((call) => (
+      call.text.includes("FROM restaurant_memberships m")
+    ));
+
+    assert.deepEqual(restaurants, [{
+      restaurantId,
+      name: "Example Cafe",
+      status: "active",
+      currencyCode: "PKR",
+      role: "owner",
+      defaultBranchId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    }]);
+    assert.ok(membershipQuery.text.includes("m.user_id = $1 AND m.status = 'active'"));
+    assert.equal(
+      statements.some((sql) => sql.includes("app.restaurant_id")),
+      false,
+      "Selecting a restaurant must never happen inside the membership lookup.",
+    );
+    assert.equal(statements.at(-1), "COMMIT");
+    assert.equal(pool.released, true);
   });
 });

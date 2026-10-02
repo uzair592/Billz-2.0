@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { withTenantTransaction } from "../src/server/database/tenant-transaction.mjs";
+import {
+  withTenantTransaction,
+  withUserContextTransaction,
+} from "../src/server/database/tenant-transaction.mjs";
 
 const restaurantId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
@@ -95,5 +98,62 @@ describe("tenant transaction boundary", () => {
       AggregateError,
     );
     assert.equal(pool.released, true);
+  });
+});
+
+describe("authenticated user context boundary", () => {
+  it("identifies the caller without opening any tenant visibility", async () => {
+    const pool = fakePool();
+
+    const value = await withUserContextTransaction(
+      pool,
+      { userId },
+      async (client) => {
+        await client.query("SELECT * FROM restaurant_memberships");
+        return "done";
+      },
+    );
+
+    assert.equal(value, "done");
+    assert.deepEqual(
+      pool.calls.map((call) => call.text),
+      [
+        "BEGIN",
+        "SET LOCAL statement_timeout = '15s'",
+        "SELECT set_config('app.user_id', $1, true)",
+        "SELECT * FROM restaurant_memberships",
+        "COMMIT",
+      ],
+    );
+    assert.equal(
+      pool.calls.some((call) => call.text.includes("app.restaurant_id")),
+      false,
+      "No tenant may be selected before the caller is authenticated.",
+    );
+    assert.equal(pool.released, true);
+  });
+
+  it("rolls back and releases the connection when work fails", async () => {
+    const pool = fakePool();
+
+    await assert.rejects(
+      withUserContextTransaction(pool, { userId }, async () => {
+        throw new Error("membership lookup failed");
+      }),
+      /membership lookup failed/,
+    );
+
+    assert.equal(pool.calls.at(-1).text, "ROLLBACK");
+    assert.equal(pool.released, true);
+  });
+
+  it("rejects a malformed user identifier before connecting", async () => {
+    const pool = fakePool();
+
+    await assert.rejects(
+      withUserContextTransaction(pool, { userId: "not-a-uuid" }, async () => {}),
+      /userId must be a valid UUID/,
+    );
+    assert.equal(pool.calls.length, 0);
   });
 });

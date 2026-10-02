@@ -5588,6 +5588,10 @@
                 <span class="quick-action-icon">&#8599;</span>
                 <span><strong>View reports</strong><small>Profit and sales</small></span>
               </button>
+              <button type="button" class="quick-action" onclick="openCloudAccountModal()">
+                <span class="quick-action-icon">&#9729;</span>
+                <span><strong>Cloud sync</strong><small id="dashboard-cloud-summary">Sign in to back up this till</small></span>
+              </button>
             </div>
           </div>
 
@@ -13162,10 +13166,311 @@
       <div class="receipt-footer"><p style="font-size:10px;">Software by Uzair<br>03015929230</p></div>
     </div>
 
+    <div
+      id="cloud-account-modal-overlay"
+      class="hidden"
+      style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(15, 23, 42, 0.6);
+        backdrop-filter: blur(4px);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10005;
+        padding: 20px;
+        box-sizing: border-box;
+      "
+    >
+      <div
+        id="cloud-account-modal-content"
+        style="
+          background: white;
+          width: 100%;
+          max-width: 520px;
+          max-height: 88vh;
+          overflow-y: auto;
+          border-radius: 12px;
+          box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
+          padding: 25px;
+          position: relative;
+          animation: modalSlideUp 0.25s ease-out;
+        "
+      >
+        <button
+          type="button"
+          onclick="closeCloudAccountModal()"
+          style="
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            border: none;
+            background: transparent;
+            font-size: 20px;
+            cursor: pointer;
+            color: #64748b;
+          "
+        >
+          ✕
+        </button>
+        <h2 style="margin: 0 0 4px; font-size: 20px; color: #0f172a">☁️ Cloud sync</h2>
+        <p style="margin: 0 0 18px; font-size: 13px; color: #64748b; line-height: 1.5">
+          This till keeps working offline exactly as it does now. Signing in adds a
+          secure cloud copy of the same restaurant and keeps your menu, tables,
+          stock and sales in step across devices.
+        </p>
+
+        <div
+          id="cloud-account-status"
+          style="
+            font-size: 13px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            color: #475569;
+            margin-bottom: 16px;
+            white-space: pre-wrap;
+          "
+        >
+          Not connected to the cloud yet.
+        </div>
+
+        <div id="cloud-signin-panel">
+          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-email">
+            Email
+          </label>
+          <input
+            id="cloud-email"
+            type="email"
+            autocomplete="username"
+            style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px"
+          />
+          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin: 12px 0 5px" for="cloud-password">
+            Password
+          </label>
+          <input
+            id="cloud-password"
+            type="password"
+            autocomplete="current-password"
+            style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px"
+          />
+          <button
+            type="button"
+            id="cloud-signin-button"
+            onclick="submitCloudSignIn()"
+            style="margin-top: 14px; width: 100%; padding: 11px 14px; border: none; border-radius: 8px; background: #2563eb; color: white; font-size: 14px; font-weight: 700; cursor: pointer"
+          >
+            Sign in
+          </button>
+        </div>
+
+        <div id="cloud-restaurant-panel" class="hidden" style="margin-top: 18px">
+          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-restaurant-select">
+            Restaurant
+          </label>
+          <select
+            id="cloud-restaurant-select"
+            style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px"
+          ></select>
+          <button
+            type="button"
+            onclick="submitCloudRestaurant()"
+            style="margin-top: 10px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; color: #334155; font-size: 13px; font-weight: 700; cursor: pointer"
+          >
+            Use this restaurant
+          </button>
+        </div>
+
+        <div id="cloud-import-panel" class="hidden" style="margin-top: 18px">
+          <button
+            type="button"
+            id="cloud-import-button"
+            onclick="submitCloudImport()"
+            style="width: 100%; padding: 11px 14px; border: none; border-radius: 8px; background: #059669; color: white; font-size: 14px; font-weight: 700; cursor: pointer"
+          >
+            Copy this till's menu, tables &amp; stock to the cloud
+          </button>
+          <p style="margin: 8px 0 0; font-size: 11px; color: #94a3b8; line-height: 1.5">
+            This copies your current menu, tables, halls, bank accounts and kitchen
+            stock. Nothing on this device is deleted, and you can repeat it safely.
+          </p>
+        </div>
+
+        <div id="cloud-account-actions" class="hidden" style="margin-top: 18px; display: flex; gap: 10px">
+          <button
+            type="button"
+            onclick="submitCloudSignOut()"
+            style="flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; color: #334155; font-size: 13px; font-weight: 700; cursor: pointer"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./src/client/legacy-cloud-bootstrap.mjs"></script>
     <script>
 
+      // ☁️ Cloud account panel — signs the till in, picks the restaurant, and copies
+      // this device's catalog into the cloud. Every step is optional: until a catalog
+      // import is accepted, checkout never touches the network and behaves exactly
+      // as it did before.
+      let cloudRestaurants = [];
+      let cloudImportPending = false;
 
+      function cloudShowPanel(id, visible) {
+        const element = document.getElementById(id);
+        if (element) element.classList.toggle("hidden", !visible);
+      }
+
+      function cloudSetStatus(message, tone) {
+        const status = document.getElementById("cloud-account-status");
+        if (!status) return;
+        status.textContent = message;
+        status.style.background = tone === "error" ? "#fef2f2" : "#f1f5f9";
+        status.style.color = tone === "error" ? "#b91c1c" : "#475569";
+      }
+
+      function closeCloudAccountModal() {
+        document.getElementById("cloud-account-modal-overlay")?.classList.add("hidden");
+      }
+
+      function cloudRenderState(session) {
+        const signedIn = Boolean(session && session.user);
+        const activeRestaurant = cloudRestaurants.find(
+          (restaurant) => restaurant.restaurantId === session?.restaurantId,
+        );
+        cloudShowPanel("cloud-signin-panel", !signedIn);
+        cloudShowPanel("cloud-account-actions", signedIn);
+        cloudShowPanel("cloud-restaurant-panel", signedIn);
+        cloudShowPanel("cloud-import-panel", Boolean(activeRestaurant));
+
+        const summary = document.getElementById("dashboard-cloud-summary");
+        if (summary) {
+          summary.textContent = signedIn
+            ? activeRestaurant
+              ? `Cloud on · ${activeRestaurant.name}`
+              : "Choose a restaurant"
+            : "Sign in to back up this till";
+        }
+
+        const select = document.getElementById("cloud-restaurant-select");
+        if (select) {
+          select.innerHTML = cloudRestaurants
+            .map(
+              (restaurant) =>
+                `<option value="${escapeHtmlForExport(restaurant.restaurantId)}"${restaurant.restaurantId === session?.restaurantId ? " selected" : ""}>${escapeHtmlForExport(restaurant.name)}</option>`,
+            )
+            .join("");
+        }
+      }
+
+      async function openCloudAccountModal() {
+        const overlay = document.getElementById("cloud-account-modal-overlay");
+        if (!overlay) return;
+        overlay.classList.remove("hidden");
+        cloudSetStatus("Checking the cloud session…");
+        cloudRenderState(null);
+
+        const sessionClient = window.BiteTechCloudSession;
+        if (!sessionClient) {
+          cloudSetStatus(
+            "Cloud sync is unavailable on this file. Serve the POS from the cloud address to connect it.",
+            "error",
+          );
+          return;
+        }
+        try {
+          const account = await sessionClient.currentUser();
+          cloudRestaurants = account.restaurants ?? [];
+          cloudRenderState(account);
+          cloudSetStatus(
+            account.restaurantId
+              ? `Signed in as ${account.user.email}. This till is linked to ${
+                  cloudRestaurants.find((r) => r.restaurantId === account.restaurantId)?.name
+                  ?? "your restaurant"
+                }.`
+              : "Signed in. Choose the restaurant this till belongs to.",
+          );
+        } catch (error) {
+          cloudRestaurants = [];
+          cloudRenderState(null);
+          cloudSetStatus(error.message || "Could not reach the cloud service.", "error");
+        }
+      }
+
+      async function submitCloudSignIn() {
+        const sessionClient = window.BiteTechCloudSession;
+        if (!sessionClient) return;
+        const button = document.getElementById("cloud-signin-button");
+        const email = document.getElementById("cloud-email")?.value ?? "";
+        const password = document.getElementById("cloud-password")?.value ?? "";
+        if (!email || !password) {
+          cloudSetStatus("Enter your email address and password.", "error");
+          return;
+        }
+        if (button) button.disabled = true;
+        cloudSetStatus("Signing in…");
+        try {
+          await sessionClient.signIn({ email, password });
+          document.getElementById("cloud-password").value = "";
+          await openCloudAccountModal();
+        } catch (error) {
+          cloudSetStatus(error.message || "Sign-in failed.", "error");
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
+
+      async function submitCloudRestaurant() {
+        const sessionClient = window.BiteTechCloudSession;
+        if (!sessionClient) return;
+        const selected = document.getElementById("cloud-restaurant-select")?.value ?? "";
+        cloudSetStatus("Linking this till…");
+        try {
+          await sessionClient.selectRestaurant(selected);
+          await openCloudAccountModal();
+        } catch (error) {
+          cloudSetStatus(error.message || "That restaurant could not be selected.", "error");
+        }
+      }
+
+      async function submitCloudImport() {
+        const sync = window.BiteTechCloudSync;
+        if (!sync) return;
+        const button = document.getElementById("cloud-import-button");
+        if (button) button.disabled = true;
+        cloudSetStatus("Copying this till's menu, tables, stock and accounts…");
+        try {
+          const { result } = await sync.importCatalog();
+          const counts = result.counts ?? {};
+          cloudSetStatus(
+            `Copied ${counts.menuItems ?? 0} menu items, ${counts.tables ?? 0} tables and ${
+              counts.stockItems ?? 0
+            } stock items. Orders will now reach the cloud as well.`,
+          );
+          if (button) button.disabled = false;
+        } catch (error) {
+          cloudSetStatus(error.message || "The catalog could not be copied.", "error");
+          if (button) button.disabled = false;
+        }
+      }
+
+      async function submitCloudSignOut() {
+        const sessionClient = window.BiteTechCloudSession;
+        if (!sessionClient) return;
+        cloudSetStatus("Signing out…");
+        try {
+          await sessionClient.signOut({ forgetRestaurant: true });
+          cloudRestaurants = [];
+          await openCloudAccountModal();
+        } catch (error) {
+          cloudSetStatus(error.message || "Sign-out failed.", "error");
+        }
+      }
 
 
       let businessName = "Fast Food POS";

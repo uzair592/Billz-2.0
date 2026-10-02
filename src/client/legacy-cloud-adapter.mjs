@@ -1,4 +1,8 @@
 import { createHttpOrderTransport, createOrderOutbox, OrderSyncError } from "./order-outbox.mjs";
+import {
+  buildLegacyCatalogSnapshot,
+  readLegacyCollections,
+} from "./legacy-catalog-snapshot.mjs";
 
 export const CLOUD_CONTEXT_KEY = "pos_cloud_context_v1";
 export const CLOUD_OUTBOX_KEY = "pos_cloud_order_outbox_v1";
@@ -94,7 +98,12 @@ export function buildCloudOrderPayload(order, mappings) {
   return payload;
 }
 
-export function createLegacyCloudAdapter({ storage, outbox, fetchImpl = globalThis.fetch } = {}) {
+export function createLegacyCloudAdapter({
+  storage,
+  outbox,
+  session = null,
+  fetchImpl = globalThis.fetch,
+} = {}) {
   if (!storage || typeof storage.get !== "function" || typeof storage.set !== "function") {
     throw new TypeError("storage must provide get and set functions.");
   }
@@ -103,33 +112,51 @@ export function createLegacyCloudAdapter({ storage, outbox, fetchImpl = globalTh
   }
 
   return Object.freeze({
-    async importCatalog({ restaurantId, snapshot }) {
+    /**
+     * Reads this device's own browser data, builds the import snapshot, and
+     * only activates cloud ordering once the server has accepted it and
+     * returned authoritative UUID mappings.
+     */
+    async importCatalog({ restaurantId, snapshot } = {}) {
+      const targetRestaurant = restaurantId ?? (await session.activeRestaurant());
+      if (!targetRestaurant) {
+        throw new OrderSyncError("Sign in and choose a restaurant before importing.", {
+          code: "RESTAURANT_REQUIRED",
+          retriable: false,
+        });
+      }
+      const body = snapshot ?? buildLegacyCatalogSnapshot(
+        await readLegacyCollections(storage),
+      );
       const response = await fetchImpl("/api/pos/import/legacy-catalog", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "content-type": "application/json", "x-restaurant-id": restaurantId },
-        body: JSON.stringify(snapshot),
+        headers: {
+          "content-type": "application/json",
+          "x-restaurant-id": targetRestaurant,
+        },
+        body: JSON.stringify(body),
       });
-      const body = await response.json().catch(() => null);
+      const result = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new OrderSyncError(body?.error ?? `Catalog import returned HTTP ${response.status}.`, {
+        throw new OrderSyncError(result?.error ?? `Catalog import returned HTTP ${response.status}.`, {
           status: Number(response.status),
-          code: body?.code ?? "CATALOG_IMPORT_FAILED",
+          code: result?.code ?? "CATALOG_IMPORT_FAILED",
           retriable: Number(response.status) >= 500,
         });
       }
       const context = {
         version: 1,
-        restaurantId,
+        restaurantId: targetRestaurant,
         importedAt: new Date().toISOString(),
         mappings: {
-          menuItems: body.menuItems ?? {},
-          tables: body.tables ?? {},
-          financialAccounts: body.financialAccounts ?? {},
+          menuItems: result.menuItems ?? {},
+          tables: result.tables ?? {},
+          financialAccounts: result.financialAccounts ?? {},
         },
       };
       await storage.set(CLOUD_CONTEXT_KEY, context);
-      return { result: body, context };
+      return { result, context };
     },
 
     async enqueueLegacyOrder(order) {

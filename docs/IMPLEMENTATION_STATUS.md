@@ -2,13 +2,12 @@
 
 ## Current milestone
 
-Milestone 8: order history, cancellation, and refund compensation.
+Milestone 9: browser sign-in, restaurant selection, and catalog import.
 
-The authenticated menu, business-settings, transactional order, and legacy
-catalog import boundaries are implemented, together with tenant-scoped order
-history and a compensating order cancellation. The original standalone POS HTML
-queues every locally committed order into the durable cloud outbox without
-changing its local behavior.
+A POS device can now sign in, choose its restaurant, and copy this till's
+catalog into the cloud, after which queued orders synchronize. Tenant-scoped
+order history and compensating order cancellation are implemented. The
+standalone POS HTML keeps its offline behavior at every step.
 
 ## Completed
 
@@ -113,6 +112,25 @@ changing its local behavior.
   a retry reaches the database after the transaction boundary.
 - Added `ORDER_VIEW` history access for every operational role and
   `ORDER_CANCEL` restricted to owners and managers.
+- Added an authenticated-user transaction boundary that sets `app.user_id`
+  without any tenant context, so a device can discover its restaurants while
+  every tenant table stays invisible.
+- Added read-only row-level security policies that expose a caller its own
+  active memberships and nothing else; no write access was widened.
+- Extended `GET /api/auth/me` with the account's own restaurant memberships so a
+  device can send the trusted restaurant header the POS API requires.
+- Added a browser cloud session client that can neither read nor forge the
+  server-set HttpOnly session, auto-selects the only restaurant when there is
+  exactly one, never guesses between several, and forgets a restaurant the
+  account can no longer use.
+- Added a legacy catalog snapshot builder that reads this device's own IndexedDB
+  collections and emits the exact import contract, verified against the server
+  schema, and refuses rather than silently dropping an unusable record.
+- Wired the import to read the signed-in restaurant automatically, so cloud
+  ordering still cannot activate without an accepted import.
+- Added a cloud account panel to the POS dashboard for sign-in, restaurant
+  selection, catalog copy, and sign-out, hidden until it is opened and fully
+  optional for the offline till.
 
 ## Migration guardrails
 
@@ -124,11 +142,11 @@ changing its local behavior.
 
 ## Next milestone
 
-Add browser sign-in, restaurant selection, and the catalog-import trigger to the
-legacy interface, then drive the history and cancellation APIs from it. Report
-APIs, the payment adapter, and the platform admin area follow that work.
+Drive order history and cancellation from the POS interface, then add partial
+refunds and sales reports. The payment adapter, billing page, and platform
+admin area follow that work.
 
-All six migrations still need validation against a real PostgreSQL instance.
+All seven migrations still need validation against a real PostgreSQL instance.
 Docker Desktop is installed but its Linux engine could not start in the current
 non-interactive session, so the migrations are contract-tested but have not yet
 been executed by PostgreSQL.
@@ -146,4 +164,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 138 tests and runs without external services.
+The current suite has 169 tests and runs without external services.

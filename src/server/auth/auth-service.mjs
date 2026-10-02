@@ -118,5 +118,13 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       if (!token) return;
       await repository.revokeSession(hashOpaqueToken(token), clock());
     },
+
+    /**
+     * The restaurants this account may sign into. A device needs this before it
+     * can send the trusted restaurant header the POS API requires.
+     */
+    async restaurantsForUser(userId) {
+      return repository.listRestaurantsForUser(userId);
+    },
   });
 }

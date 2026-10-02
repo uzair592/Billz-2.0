@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { withUserContextTransaction } from "../database/tenant-transaction.mjs";
 
 function slugFor(name, restaurantId) {
   const base = String(name)
@@ -203,6 +204,34 @@ export function createPostgresAuthRepository(pool) {
           WHERE token_hash = $1`,
         [tokenHash, now],
       );
+    },
+
+    /**
+     * Lists only the restaurants this user is an active member of. The query
+     * runs without a tenant context, so row-level security restricts it to the
+     * caller's own membership rows.
+     */
+    async listRestaurantsForUser(userId) {
+      return withUserContextTransaction(pool, { userId }, async (client) => {
+        const result = await client.query(
+          `SELECT m.restaurant_id, r.name AS restaurant_name,
+                  r.status AS restaurant_status, r.currency_code,
+                  m.role, m.default_branch_id
+             FROM restaurant_memberships m
+             JOIN restaurants r ON r.id = m.restaurant_id
+            WHERE m.user_id = $1 AND m.status = 'active'
+            ORDER BY r.name`,
+          [userId],
+        );
+        return result.rows.map((row) => Object.freeze({
+          restaurantId: row.restaurant_id,
+          name: row.restaurant_name,
+          status: row.restaurant_status,
+          currencyCode: row.currency_code,
+          role: row.role,
+          defaultBranchId: row.default_branch_id,
+        }));
+      });
     },
   });
 }

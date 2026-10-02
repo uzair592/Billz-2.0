@@ -122,4 +122,80 @@ describe("legacy cloud adapter", () => {
     ]);
     assert.equal(sends, 1);
   });
+
+  it("imports this device's own catalog for the signed-in restaurant", async () => {
+    const storage = memoryStorage();
+    await storage.set("pos_stock_item_defs", { Dough: { label: "Dough", buyUnit: "kg", sellUnit: "kg" } });
+    await storage.set("pos_ingredient_stock", { Dough: { stockGrams: 5_000 } });
+    await storage.set("pos_menu", [{ id: 7, category: "Burgers", name: "Burger", price: 500 }]);
+    await storage.set("pos_categories", ["Burgers"]);
+
+    let request;
+    const adapter = createLegacyCloudAdapter({
+      storage,
+      outbox: { async enqueue() {}, async flush() { return []; } },
+      session: { async activeRestaurant() { return restaurantId; } },
+      async fetchImpl(url, options) {
+        request = { url, options };
+        return { ok: true, status: 200, async json() { return { ...mappings, counts: {} }; } };
+      },
+    });
+
+    const { context } = await adapter.importCatalog();
+    const payload = JSON.parse(request.options.body);
+
+    assert.equal(request.options.headers["x-restaurant-id"], restaurantId);
+    assert.equal(context.restaurantId, restaurantId);
+    assert.deepEqual(payload.pos_menu, [{
+      id: 7,
+      category: "Burgers",
+      subcategory: null,
+      name: "Burger",
+      desc: "",
+      price: 500,
+    }]);
+    assert.deepEqual(payload.pos_stock_item_defs, {
+      Dough: { label: "Dough", buyUnit: "kg", sellUnit: "kg" },
+    });
+  });
+
+  it("refuses to import before a restaurant has been chosen", async () => {
+    let requests = 0;
+    const adapter = createLegacyCloudAdapter({
+      storage: memoryStorage(),
+      outbox: { async enqueue() {}, async flush() { return []; } },
+      session: { async activeRestaurant() { return null; } },
+      async fetchImpl() { requests += 1; },
+    });
+
+    await assert.rejects(
+      adapter.importCatalog(),
+      (error) => error.code === "RESTAURANT_REQUIRED" && error.retriable === false,
+    );
+    assert.equal(requests, 0);
+  });
+
+  it("does not activate cloud ordering when the import is rejected", async () => {
+    const storage = memoryStorage();
+    const adapter = createLegacyCloudAdapter({
+      storage,
+      outbox: { async enqueue() {}, async flush() { return []; } },
+      session: { async activeRestaurant() { return restaurantId; } },
+      async fetchImpl() {
+        return {
+          ok: false,
+          status: 400,
+          async json() {
+            return { error: "Menu item 7 references an unknown category.", code: "INVALID_LEGACY_CATALOG" };
+          },
+        };
+      },
+    });
+
+    await assert.rejects(
+      adapter.importCatalog({ snapshot: { pos_menu: [] } }),
+      (error) => error.code === "INVALID_LEGACY_CATALOG" && error.retriable === false,
+    );
+    assert.equal(await storage.get(CLOUD_CONTEXT_KEY), undefined);
+  });
 });

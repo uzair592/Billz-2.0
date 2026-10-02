@@ -38,6 +38,17 @@ async function appWith(overrides = {}) {
         expiresAt: new Date("2026-10-03T00:00:00Z"),
       };
     },
+    async restaurantsForUser(userId) {
+      calls.push(["restaurants", userId]);
+      return [{
+        restaurantId: "11111111-1111-4111-8111-111111111111",
+        name: "Example Cafe",
+        status: "active",
+        currencyCode: "PKR",
+        role: "owner",
+        defaultBranchId: "22222222-2222-4222-8222-222222222222",
+      }];
+    },
     ...overrides,
   };
   const app = await buildHttpApp({
@@ -136,7 +147,7 @@ describe("authentication HTTP boundary", () => {
   });
 
   it("restores the account from a persistent session cookie", async () => {
-    const { app } = await appWith();
+    const { app, calls } = await appWith();
     const response = await app.inject({
       method: "GET",
       url: "/api/auth/me",
@@ -145,6 +156,26 @@ describe("authentication HTTP boundary", () => {
 
     assert.equal(response.statusCode, 200);
     assert.equal(response.json().user.email, "owner@example.com");
+    assert.deepEqual(response.json().restaurants, [{
+      restaurantId: "11111111-1111-4111-8111-111111111111",
+      name: "Example Cafe",
+      status: "active",
+      currencyCode: "PKR",
+      role: "owner",
+      defaultBranchId: "22222222-2222-4222-8222-222222222222",
+    }]);
+    assert.deepEqual(calls.at(-1), ["restaurants", "user-1"]);
+  });
+
+  it("never lists restaurants for an unauthenticated request", async () => {
+    const { app, calls } = await appWith();
+    const response = await app.inject({ method: "GET", url: "/api/auth/me" });
+
+    assert.equal(response.statusCode, 401);
+    assert.equal(
+      calls.some(([name]) => name === "restaurants"),
+      false,
+    );
   });
 
   it("rejects account restoration without a session", async () => {
