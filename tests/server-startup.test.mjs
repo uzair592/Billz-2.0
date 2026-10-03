@@ -1,6 +1,5 @@
-import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { describe, it, before, after } from "node:test";
+import { describe, it, after } from "node:test";
 
 /**
  * Tests that the server can start and listen on Linux.
@@ -8,11 +7,14 @@ import { describe, it, before, after } from "node:test";
  */
 describe("Linux server startup", () => {
   let serverProcess;
+  const databaseUrl = process.env.TEST_DATABASE_ADMIN_URL
+    ?? "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test";
 
   after(async () => {
-    if (serverProcess) {
+    if (serverProcess?.exitCode === null) {
+      const exited = new Promise((resolve) => serverProcess.once("exit", resolve));
       serverProcess.kill("SIGTERM");
-      await new Promise((resolve) => serverProcess.on("exit", resolve));
+      await exited;
     }
   });
 
@@ -21,7 +23,7 @@ describe("Linux server startup", () => {
     const env = {
       ...process.env,
       NODE_ENV: "test",
-      DATABASE_URL: "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test",
+      DATABASE_URL: databaseUrl,
       TRUSTED_ORIGIN: "https://pos.example.com",
       PASSWORD_PEPPER: "a-long-enough-pepper-value-for-testing-purposes-only",
       SESSION_SECRET: "a-different-session-secret-for-testing-purposes",
@@ -39,11 +41,18 @@ describe("Linux server startup", () => {
       let output = "";
       let errorOutput = "";
       let started = false;
+      const timeout = setTimeout(() => {
+        if (!started) {
+          serverProcess.kill("SIGTERM");
+          reject(new Error(`Server did not start within 10 seconds. stderr: ${errorOutput}`));
+        }
+      }, 10000);
 
       serverProcess.stdout.on("data", (data) => {
         output += data.toString();
         if (!started && output.includes("pos_server_started")) {
           started = true;
+          clearTimeout(timeout);
           // Give it a moment to fully bind
           setTimeout(() => resolve(), 500);
         }
@@ -54,22 +63,16 @@ describe("Linux server startup", () => {
       });
 
       serverProcess.on("error", (err) => {
+        clearTimeout(timeout);
         reject(new Error(`Failed to spawn server: ${err.message}`));
       });
 
       serverProcess.on("exit", (code, signal) => {
         if (!started) {
+          clearTimeout(timeout);
           reject(new Error(`Server exited prematurely (code: ${code}, signal: ${signal}). stderr: ${errorOutput}`));
         }
       });
-
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        if (!started) {
-          serverProcess.kill("SIGTERM");
-          reject(new Error(`Server did not start within 10 seconds. stderr: ${errorOutput}`));
-        }
-      }, 10000);
     });
   });
 });

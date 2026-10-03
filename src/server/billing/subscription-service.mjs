@@ -110,6 +110,61 @@ async function recordAudit(client, {
   );
 }
 
+export async function ensureCanonicalBillingCustomer(pool, {
+  provider, restaurantId, userId, email, restaurantName,
+}) {
+  const lookup = await withTenantTransaction(
+    pool,
+    { restaurantId, userId },
+    async (client) => {
+      const existing = await client.query(
+        `SELECT id, provider_customer_id
+           FROM billing_customers
+          WHERE restaurant_id = $1 AND provider = $2`,
+        [restaurantId, provider.name],
+      );
+      return existing.rows[0] ?? null;
+    },
+  );
+  if (lookup) return lookup;
+
+  const created = await provider.createCustomer({
+    restaurantId,
+    email,
+    name: restaurantName,
+    idempotencyKey: `cust_${restaurantId}_${provider.name}`,
+  });
+
+  return withTenantTransaction(
+    pool,
+    { restaurantId, userId },
+    async (client) => {
+      await client.query(
+        `INSERT INTO billing_customers (
+           id, restaurant_id, provider, provider_customer_id
+         ) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (restaurant_id, provider) DO NOTHING`,
+        [randomUUID(), restaurantId, provider.name, created.providerCustomerId],
+      );
+      const result = await client.query(
+        `SELECT id, provider_customer_id
+           FROM billing_customers
+          WHERE restaurant_id = $1 AND provider = $2`,
+        [restaurantId, provider.name],
+      );
+      const canonical = result.rows[0];
+      await client.query(
+        `INSERT INTO provider_tenant_routes (
+           provider, provider_reference, provider_reference_type, restaurant_id
+         ) VALUES ($1, $2, 'customer', $3)
+         ON CONFLICT (provider, provider_reference) DO NOTHING`,
+        [provider.name, canonical.provider_customer_id, restaurantId],
+      );
+      return canonical;
+    },
+  );
+}
+
 /**
  * Plan browsing, checkout, plan changes, cancellation, and payment history.
  *
@@ -217,68 +272,6 @@ export function createSubscriptionService(pool, {
     );
   }
 
-  /**
-   * Returns the provider customer for a restaurant, creating it on first use.
-   *
-   * Uses a stable provider idempotency key derived from restaurant and provider
-   * to ensure exactly one customer is created even under concurrent requests.
-   * A conflict preserves and returns the existing canonical customer.
-   */
-  async function ensureBillingCustomer({ restaurantId, userId, email, restaurantName }) {
-    const lookup = await withTenantTransaction(
-      pool,
-      { restaurantId, userId },
-      async (client) => {
-        const existing = await client.query(
-          `SELECT id, provider_customer_id
-             FROM billing_customers
-            WHERE restaurant_id = $1 AND provider = $2`,
-          [restaurantId, provider.name],
-        );
-        return existing.rows[0] ?? null;
-      },
-    );
-    if (lookup) return lookup;
-
-    // Stable idempotency key for customer creation: derived from restaurant + provider
-    const customerIdempotencyKey = `cust_${restaurantId}_${provider.name}`;
-
-    const created = await provider.createCustomer({
-      restaurantId,
-      email,
-      name: restaurantName,
-      idempotencyKey: customerIdempotencyKey,
-    });
-
-    return withTenantTransaction(
-      pool,
-      { restaurantId, userId },
-      async (client) => {
-        // Try to insert, but if conflict, do nothing and then select the existing row
-        // This preserves the canonical customer and never overwrites with a new one
-        await client.query(
-          `INSERT INTO billing_customers (
-             id, restaurant_id, provider, provider_customer_id
-           ) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (restaurant_id, provider) DO NOTHING`,
-          [randomUUID(), restaurantId, provider.name, created.providerCustomerId],
-        );
-        const result = await client.query(
-          `SELECT id, provider_customer_id
-             FROM billing_customers
-            WHERE restaurant_id = $1 AND provider = $2`,
-          [restaurantId, provider.name],
-        );
-        await recordRoute(client, {
-          reference: result.rows[0].provider_customer_id,
-          referenceType: "customer",
-          restaurantId,
-        });
-        return result.rows[0];
-      },
-    );
-  }
-
   return Object.freeze({
     async overview({ tenant, user }) {
       const restaurantId = tenant.restaurant.id;
@@ -313,13 +306,18 @@ export function createSubscriptionService(pool, {
   async startCheckout({ tenant, user, planCode, successUrl, cancelUrl, idempotencyKey }) {
     const restaurantId = tenant.restaurant.id;
     const currencyCode = tenant.restaurant.currencyCode ?? "PKR";
+    const normalizedPlanCode = String(planCode ?? "").trim().toUpperCase();
     const trustedSuccess = assertRedirectUrl(successUrl, "success URL", trustedOrigins);
     const trustedCancel = assertRedirectUrl(cancelUrl, "cancel URL", trustedOrigins);
     const key = String(idempotencyKey ?? "").trim();
     if (!key) {
       throw billingError("An idempotency key is required.", "IDEMPOTENCY_KEY_REQUIRED", 400);
     }
-    const planHash = computePlanHash({ planCode, successUrl, cancelUrl });
+    const planHash = computePlanHash({
+      planCode: normalizedPlanCode,
+      successUrl: trustedSuccess,
+      cancelUrl: trustedCancel,
+    });
 
     // Step 1: lock restaurant, check for existing attempt, create or reuse attempt
     const prepared = await withTenantTransaction(
@@ -342,43 +340,69 @@ export function createSubscriptionService(pool, {
           [restaurantId],
         );
 
-        // Check for any live (creating/created) attempt for this restaurant
-        const liveAttempt = await client.query(
-          `SELECT id, status, idempotency_key, provider_checkout_session_id, provider_checkout_url,
-                  provider_customer_id, plan_hash
-             FROM checkout_attempts
-            WHERE restaurant_id = $1
-              AND status IN ('creating', 'created')
-            LIMIT 1`,
-          [restaurantId],
+        // The same key is authoritative regardless of status. Lock it before
+        // deciding whether to replay, reject, or retry the same row.
+        const sameKeyResult = await client.query(
+          `SELECT ca.id, ca.status, ca.plan_code, ca.plan_hash,
+                  ca.subscription_id, ca.provider_customer_id,
+                  ca.provider_checkout_session_id, ca.provider_checkout_url,
+                  ca.provider_idempotency_key, ca.success_url, ca.cancel_url,
+                  ca.expires_at, pp.id AS stored_price_id,
+                  pp.plan_id AS stored_plan_id, pp.amount_minor,
+                  pp.currency_code, pp.provider_price_id,
+                  p.name AS plan_name
+             FROM checkout_attempts ca
+             LEFT JOIN subscriptions s
+               ON s.restaurant_id = ca.restaurant_id
+              AND s.id = ca.subscription_id
+             LEFT JOIN plan_prices pp
+               ON pp.id = s.plan_price_id AND pp.plan_id = s.plan_id
+             LEFT JOIN plans p ON p.id = s.plan_id
+            WHERE ca.restaurant_id = $1 AND ca.idempotency_key = $2
+            FOR UPDATE OF ca`,
+          [restaurantId, key],
         );
 
-        if (liveAttempt.rows[0]) {
-          const live = liveAttempt.rows[0];
-
-          // If there's a live attempt with a DIFFERENT key, reject
-          if (live.idempotency_key !== key) {
+        const sameKey = sameKeyResult.rows[0];
+        if (sameKey) {
+          if (sameKey.plan_hash !== planHash) {
             throw billingError(
-              "Another checkout is already in progress or completed for this restaurant.",
-              "CHECKOUT_ALREADY_IN_PROGRESS",
+              "This idempotency key was already used with different checkout details.",
+              "IDEMPOTENCY_KEY_CONFLICT",
               409,
             );
           }
 
-          // Same key - check status
-          const attempt = live;
-          if (attempt.status === "created" && attempt.provider_checkout_url) {
+          const price = sameKey.stored_price_id
+            ? {
+                id: sameKey.stored_price_id,
+                plan_id: sameKey.stored_plan_id,
+                amount_minor: sameKey.amount_minor,
+                currency_code: sameKey.currency_code,
+                provider_price_id: sameKey.provider_price_id,
+                plan_code: sameKey.plan_code,
+                plan_name: sameKey.plan_name,
+              }
+            : await resolvePrice(client, sameKey.plan_code, currencyCode);
+          if (sameKey.status === "created") {
+            if (!sameKey.provider_checkout_url) {
+              throw billingError(
+                "The stored checkout attempt is incomplete.",
+                "CHECKOUT_ATTEMPT_INVALID",
+                409,
+              );
+            }
             return {
               replayed: true,
               checkout: {
-                checkoutUrl: attempt.provider_checkout_url,
-                providerCheckoutSessionId: attempt.provider_checkout_session_id,
+                checkoutUrl: sameKey.provider_checkout_url,
+                providerCheckoutSessionId: sameKey.provider_checkout_session_id,
               },
-              price: null,
+              price,
             };
           }
 
-          if (attempt.status === "creating") {
+          if (sameKey.status === "creating") {
             throw billingError(
               "A checkout with this idempotency key is already in progress.",
               "CHECKOUT_IN_PROGRESS",
@@ -386,30 +410,50 @@ export function createSubscriptionService(pool, {
             );
           }
 
-          if (attempt.status === "failed" || attempt.status === "expired") {
+          if (["failed", "expired"].includes(sameKey.status)) {
+            if (!sameKey.subscription_id || !sameKey.provider_idempotency_key) {
+              throw billingError(
+                "The stored checkout attempt cannot be retried safely.",
+                "CHECKOUT_ATTEMPT_INVALID",
+                409,
+              );
+            }
             await client.query(
               `UPDATE checkout_attempts
-                  SET status = 'creating', plan_hash = $3, success_url = $4,
-                      cancel_url = $5, error_message = NULL, expires_at = now() + interval '1 hour',
+                  SET status = 'creating', error_message = NULL,
+                      expires_at = now() + interval '1 hour',
                       updated_at = now()
-                WHERE id = $1`,
-              [attempt.id, key, planHash, trustedSuccess, trustedCancel],
+                WHERE id = $1 AND restaurant_id = $2`,
+              [sameKey.id, restaurantId],
             );
-            return { replayed: false, attemptId: attempt.id, providerIdempotencyKey: attempt.provider_idempotency_key };
+            return {
+              replayed: false,
+              attemptId: sameKey.id,
+              subscriptionId: sameKey.subscription_id,
+              providerIdempotencyKey: sameKey.provider_idempotency_key,
+              price,
+            };
           }
         }
 
-        // Check for existing attempt with this idempotency key (non-live statuses)
-        const existingAttempt = await client.query(
-          `SELECT id, status, provider_checkout_session_id, provider_checkout_url,
-                  provider_customer_id, plan_hash
+        const liveAttempt = await client.query(
+          `SELECT id, idempotency_key
              FROM checkout_attempts
-            WHERE restaurant_id = $1 AND idempotency_key = $2
-              AND status NOT IN ('creating', 'created')`,
-          [restaurantId, key],
+            WHERE restaurant_id = $1
+              AND status IN ('creating', 'created')
+            LIMIT 1
+            FOR UPDATE`,
+          [restaurantId],
         );
+        if (liveAttempt.rows[0]) {
+          throw billingError(
+            "Another checkout is already in progress or completed for this restaurant.",
+            "CHECKOUT_ALREADY_IN_PROGRESS",
+            409,
+          );
+        }
 
-        const price = await resolvePrice(client, planCode, currencyCode);
+        const price = await resolvePrice(client, normalizedPlanCode, currencyCode);
         const existing = await loadSubscription(client, restaurantId, { forUpdate: true });
 
         if (existing
@@ -423,33 +467,8 @@ export function createSubscriptionService(pool, {
           );
         }
 
-        // Create new checkout attempt
+        const attemptId = randomUUID();
         const providerIdempotencyKey = `ca_${randomUUID()}`;
-        const attemptResult = await client.query(
-          `INSERT INTO checkout_attempts (
-             id, restaurant_id, idempotency_key, plan_code, plan_hash,
-             success_url, cancel_url, status, provider_idempotency_key, expires_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'creating', $8, now() + interval '1 hour')
-           RETURNING id`,
-          [
-            randomUUID(), restaurantId, key, price.plan_code, planHash,
-            trustedSuccess, trustedCancel, providerIdempotencyKey,
-          ],
-        );
-        const attemptId = attemptResult.rows[0].id;
-
-        const existingSub = await loadSubscription(client, restaurantId, { forUpdate: true });
-
-        if (existingSub
-          && ["active", "trialing", "past_due", "cancel_at_period_end"].includes(
-            existingSub.view.status,
-          )) {
-          throw billingError(
-            "This restaurant already has a subscription. Change the plan instead.",
-            "SUBSCRIPTION_ALREADY_ACTIVE",
-            409,
-          );
-        }
 
         let subscriptionId;
         if (!existing) {
@@ -504,6 +523,21 @@ export function createSubscriptionService(pool, {
           });
         }
 
+        await client.query(
+          `INSERT INTO checkout_attempts (
+             id, restaurant_id, subscription_id, idempotency_key, plan_code,
+             plan_hash, success_url, cancel_url, status,
+             provider_idempotency_key, expires_at
+           ) VALUES (
+             $1, $2, $3, $4, $5, $6, $7, $8, 'creating', $9,
+             now() + interval '1 hour'
+           )`,
+          [
+            attemptId, restaurantId, subscriptionId, key, price.plan_code,
+            planHash, trustedSuccess, trustedCancel, providerIdempotencyKey,
+          ],
+        );
+
         await recordAudit(client, {
           restaurantId, userId: user.id, action: "subscription.checkout_attempt_created",
           subscriptionId, after: { status: "creating", checkoutAttemptId: attemptId },
@@ -515,18 +549,12 @@ export function createSubscriptionService(pool, {
     );
 
     if (prepared.replayed) {
-      // Need to resolve price for response
-      const price = await withTenantTransaction(
-        pool,
-        { restaurantId, userId: user.id },
-        async (client) => resolvePrice(client, planCode, currencyCode),
-      );
       return {
         replayed: true,
         checkoutUrl: prepared.checkout.checkoutUrl,
-        plan: { code: price.plan_code, name: price.plan_name },
-        amountMinor: Number(price.amount_minor),
-        currencyCode: price.currency_code,
+        plan: { code: prepared.price.plan_code, name: prepared.price.plan_name },
+        amountMinor: Number(prepared.price.amount_minor),
+        currencyCode: prepared.price.currency_code,
         status: "awaiting_payment",
       };
     }
@@ -535,10 +563,8 @@ export function createSubscriptionService(pool, {
     let checkout;
     let customer;
     try {
-      customer = await ensureBillingCustomer({
-        restaurantId,
-        userId: user.id,
-        email: user.email,
+      customer = await ensureCanonicalBillingCustomer(pool, {
+        provider, restaurantId, userId: user.id, email: user.email,
         restaurantName: tenant.restaurant.name,
       });
 
@@ -559,10 +585,13 @@ export function createSubscriptionService(pool, {
           await client.query(
             `UPDATE checkout_attempts
                 SET status = 'failed',
-                    error_message = $2,
+                    error_message = $3,
                     updated_at = now()
-              WHERE id = $1`,
-            [prepared.attemptId, providerError.message],
+              WHERE id = $1 AND restaurant_id = $2`,
+            [
+              prepared.attemptId, restaurantId,
+              String(providerError.message ?? providerError).slice(0, 500),
+            ],
           );
         });
       throw providerError;
@@ -581,12 +610,15 @@ export function createSubscriptionService(pool, {
         await client.query(
           `UPDATE checkout_attempts
               SET status = 'created',
-                  provider_customer_id = $2,
-                  provider_checkout_session_id = $3,
-                  provider_checkout_url = $4,
+                  provider_customer_id = $3,
+                  provider_checkout_session_id = $4,
+                  provider_checkout_url = $5,
                   updated_at = now()
-            WHERE id = $1`,
-          [prepared.attemptId, customer.provider_customer_id, checkout.providerCheckoutSessionId, checkout.checkoutUrl],
+            WHERE id = $1 AND restaurant_id = $2`,
+          [
+            prepared.attemptId, restaurantId, customer.provider_customer_id,
+            checkout.providerCheckoutSessionId, checkout.checkoutUrl,
+          ],
         );
         await client.query(
           `UPDATE subscriptions

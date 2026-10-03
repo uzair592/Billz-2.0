@@ -178,9 +178,9 @@ behavior at every step.
 Drive order history and cancellation from the POS interface, then add partial
 refunds and sales reports. The platform admin area follows that work.
 
-All eight migrations have been applied successfully against a throwaway
-PostgreSQL 17 instance with `compose.validation.yaml`. Re-run them after any
-schema change:
+The repository contains ten forward-only migrations. Apply all of them to a
+clean PostgreSQL 17 instance with `compose.validation.yaml` after any schema
+change:
 
 ```powershell
 npm run validate:database
@@ -193,4 +193,5 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 210 tests and runs without external services.
+The current external-service-free run has 278 passing tests. PostgreSQL
+integration tests run separately with `npm run test:integration`.

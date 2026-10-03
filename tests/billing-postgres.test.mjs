@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, before, describe, it } from "node:test";
 import { createBillingWebhookService } from "../src/server/billing/billing-webhook-service.mjs";
-import { createSubscriptionService } from "../src/server/billing/subscription-service.mjs";
+import {
+  createSubscriptionService,
+  ensureCanonicalBillingCustomer,
+} from "../src/server/billing/subscription-service.mjs";
 import {
   connectAdmin,
   createAppPool,
@@ -86,6 +90,13 @@ function webhookEvent(overrides = {}) {
     occurredAt: "2026-10-01T12:00:00.000Z",
     ...overrides,
   };
+}
+
+function checkoutPayloadHash({ planCode, successUrl, cancelUrl }) {
+  return createHash("sha256")
+    .update(`${planCode.trim().toUpperCase()}|${successUrl.trim()}|${cancelUrl.trim()}`)
+    .digest("hex")
+    .slice(0, 32);
 }
 
 describeDatabase("billing against real PostgreSQL", () => {
@@ -611,6 +622,153 @@ describeDatabase("billing against real PostgreSQL", () => {
     assert.equal(paymentsAfter.rows[0].total, paymentsBefore.rows[0].total);
   });
 
+  it("atomically rolls back a crash before commit and applies one replay", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const customer = await admin.query(
+      `INSERT INTO billing_customers (restaurant_id, provider, provider_customer_id)
+       VALUES ($1, 'stripe', 'cus_crash') RETURNING id`,
+      [a.restaurantId],
+    );
+    const subscription = await admin.query(
+      `INSERT INTO subscriptions (
+         restaurant_id, plan_id, plan_price_id, provider, status,
+         provider_subscription_id, billing_customer_id
+       ) VALUES ($1, $2, $3, 'stripe', 'pending_checkout', 'sub_crash', $4)
+       RETURNING id`,
+      [a.restaurantId, plan.planId, plan.priceId, customer.rows[0].id],
+    );
+    await admin.query(
+      `INSERT INTO provider_tenant_routes
+         (provider, provider_reference, provider_reference_type, restaurant_id)
+       VALUES ('stripe', 'cus_crash', 'customer', $1)`,
+      [a.restaurantId],
+    );
+    await admin.query(`
+      CREATE FUNCTION fail_crash_event_before_commit() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.provider_event_id = 'evt_crash'
+           AND NEW.processing_status = 'processed' THEN
+          RAISE EXCEPTION 'injected crash before commit';
+        END IF;
+        RETURN NEW;
+      END
+      $$;
+      CREATE TRIGGER webhook_crash_before_commit
+      BEFORE UPDATE ON webhook_events
+      FOR EACH ROW EXECUTE FUNCTION fail_crash_event_before_commit();
+    `);
+
+    const webhooks = createBillingWebhookService({
+      pool: app,
+      provider: {
+        name: "stripe",
+        verifyWebhook: () => ({
+          verified: true,
+          event: webhookEvent({
+            providerEventId: "evt_crash",
+            providerSubscriptionId: "sub_crash",
+            providerCustomerId: "cus_crash",
+            providerPaymentId: "pi_crash",
+          }),
+        }),
+      },
+      clock: () => now,
+    });
+
+    try {
+      await assert.rejects(
+        webhooks.handle({ rawBody: "{}", signatureHeader: "t=1,v1=x" }),
+        (error) => error.code === "BILLING_EVENT_FAILED" && error.statusCode === 500,
+      );
+    } finally {
+      await admin.query("DROP TRIGGER webhook_crash_before_commit ON webhook_events");
+      await admin.query("DROP FUNCTION fail_crash_event_before_commit()" );
+    }
+
+    const afterCrash = await admin.query(
+      `SELECT
+         (SELECT status FROM subscriptions WHERE id = $1) AS subscription_status,
+         (SELECT count(*)::int FROM billing_payments WHERE provider_payment_id = 'pi_crash') AS payments,
+         (SELECT count(*)::int FROM audit_logs WHERE metadata->>'providerEventId' = 'evt_crash') AS audits,
+         (SELECT processing_status FROM webhook_events WHERE provider_event_id = 'evt_crash') AS event_status`,
+      [subscription.rows[0].id],
+    );
+    assert.deepEqual(afterCrash.rows[0], {
+      subscription_status: "pending_checkout",
+      payments: 0,
+      audits: 0,
+      event_status: "failed",
+    });
+
+    const retry = await webhooks.handle({ rawBody: "{}", signatureHeader: "t=1,v1=x" });
+    assert.equal(retry.applied, true);
+    const afterRetry = await admin.query(
+      `SELECT
+         (SELECT status FROM subscriptions WHERE id = $1) AS subscription_status,
+         (SELECT count(*)::int FROM billing_payments WHERE provider_payment_id = 'pi_crash') AS payments,
+         (SELECT count(*)::int FROM audit_logs WHERE metadata->>'providerEventId' = 'evt_crash') AS audits,
+         (SELECT processing_status FROM webhook_events WHERE provider_event_id = 'evt_crash') AS event_status`,
+      [subscription.rows[0].id],
+    );
+    assert.deepEqual(afterRetry.rows[0], {
+      subscription_status: "active",
+      payments: 1,
+      audits: 1,
+      event_status: "processed",
+    });
+
+    const duplicate = await webhooks.handle({ rawBody: "{}", signatureHeader: "t=1,v1=x" });
+    assert.equal(duplicate.duplicate, true);
+    const finalCounts = await admin.query(
+      `SELECT
+         (SELECT count(*)::int FROM billing_payments WHERE provider_payment_id = 'pi_crash') AS payments,
+         (SELECT count(*)::int FROM audit_logs WHERE metadata->>'providerEventId' = 'evt_crash') AS audits`,
+    );
+    assert.deepEqual(finalCounts.rows[0], { payments: 1, audits: 1 });
+  });
+
+  it("stops retrying a webhook at the configured maximum attempts", async () => {
+    await resetBillingState(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    await admin.query(
+      `INSERT INTO provider_tenant_routes
+         (provider, provider_reference, provider_reference_type, restaurant_id)
+       VALUES ('stripe', 'cus_exhausted', 'customer', $1)`,
+      [a.restaurantId],
+    );
+    const webhooks = createBillingWebhookService({
+      pool: app,
+      maxAttempts: 2,
+      provider: {
+        name: "stripe",
+        verifyWebhook: () => ({
+          verified: true,
+          event: webhookEvent({
+            providerEventId: "evt_exhausted",
+            providerSubscriptionId: null,
+            providerCustomerId: "cus_exhausted",
+          }),
+        }),
+      },
+      clock: () => now,
+    });
+
+    const first = await webhooks.handle({ rawBody: "{}", signatureHeader: "x" });
+    const second = await webhooks.handle({ rawBody: "{}", signatureHeader: "x" });
+    const exhausted = await webhooks.handle({ rawBody: "{}", signatureHeader: "x" });
+    assert.equal(first.reason, "subscription_not_found");
+    assert.equal(second.reason, "subscription_not_found");
+    assert.equal(exhausted.exhausted, true);
+    assert.equal(exhausted.retryable, false);
+    const stored = await admin.query(
+      "SELECT processing_status, attempts FROM webhook_events WHERE provider_event_id = 'evt_exhausted'",
+    );
+    assert.deepEqual(stored.rows[0], { processing_status: "failed", attempts: 2 });
+  });
+
   it("survives a verified event whose period is unusable without consuming it", async () => {
     await resetBillingState(admin);
     const plan = await seedPlan(admin);
@@ -727,7 +885,7 @@ describeDatabase("billing against real PostgreSQL", () => {
       [a.restaurantId],
     );
 
-    // Try to read A's attempt from B's context - should see nothing
+    // Restaurant B cannot select, update, or delete restaurant A's attempt.
     const client = await app.connect();
     try {
       await client.query("BEGIN");
@@ -736,11 +894,48 @@ describeDatabase("billing against real PostgreSQL", () => {
         "SELECT * FROM checkout_attempts WHERE restaurant_id = $1",
         [a.restaurantId],
       );
+      const updated = await client.query(
+        "UPDATE checkout_attempts SET status = 'failed' WHERE restaurant_id = $1",
+        [a.restaurantId],
+      );
+      const deleted = await client.query(
+        "DELETE FROM checkout_attempts WHERE restaurant_id = $1",
+        [a.restaurantId],
+      );
       await client.query("ROLLBACK");
       assert.equal(visible.rowCount, 0, "Restaurant B cannot see Restaurant A's checkout attempts");
+      assert.equal(updated.rowCount, 0, "Restaurant B cannot update Restaurant A's checkout attempts");
+      assert.equal(deleted.rowCount, 0, "Restaurant B cannot delete Restaurant A's checkout attempts");
     } finally {
       client.release();
     }
+
+    const insertClient = await app.connect();
+    try {
+      await insertClient.query("BEGIN");
+      await insertClient.query("SELECT set_config('app.restaurant_id', $1, true)", [b.restaurantId]);
+      await assert.rejects(
+        insertClient.query(
+          `INSERT INTO checkout_attempts (
+             id, restaurant_id, idempotency_key, plan_code, plan_hash,
+             success_url, cancel_url, status
+           ) VALUES (gen_random_uuid(), $1, 'foreign_insert', 'STANDARD', 'hash',
+             'https://pos.example.com/ok', 'https://pos.example.com/cancel', 'failed')`,
+          [a.restaurantId],
+        ),
+        (error) => error.code === "42501",
+      );
+      await insertClient.query("ROLLBACK");
+    } finally {
+      insertClient.release();
+    }
+
+    const remaining = await admin.query(
+      "SELECT status FROM checkout_attempts WHERE restaurant_id = $1",
+      [a.restaurantId],
+    );
+    assert.equal(remaining.rowCount, 1);
+    assert.equal(remaining.rows[0].status, "creating");
   });
 
   it("one-live-attempt unique index prevents multiple creating/created attempts", async () => {
@@ -793,13 +988,29 @@ describeDatabase("billing against real PostgreSQL", () => {
 
     // Verify attempt was created and marked created
     const attempt = await admin.query(
-      `SELECT status, provider_checkout_session_id, provider_checkout_url
+      `SELECT status, plan_hash, provider_checkout_session_id, provider_checkout_url
          FROM checkout_attempts
         WHERE idempotency_key = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
     );
     assert.equal(attempt.rows[0].status, "created");
+    assert.equal(attempt.rows[0].plan_hash, checkoutPayloadHash({
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+    }));
     assert.ok(attempt.rows[0].provider_checkout_session_id);
     assert.ok(attempt.rows[0].provider_checkout_url);
+
+    const providerCallsBeforeReplay = provider.calls.length;
+    const replay = await service.startCheckout({
+      tenant, user, planCode: "standard",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.checkoutUrl, result.checkoutUrl);
+    assert.equal(provider.calls.length, providerCallsBeforeReplay);
   });
 
   it("failed checkout retry uses same provider idempotency key", async () => {
@@ -811,11 +1022,13 @@ describeDatabase("billing against real PostgreSQL", () => {
 
     // First attempt fails at provider
     let failFirst = true;
+    const checkoutKeys = [];
     const provider = {
       name: "stripe",
       webhookSignatureHeader: "stripe-signature",
       async createCustomer() { return { providerCustomerId: "cus_1" }; },
-      async createCheckoutSession() {
+      async createCheckoutSession(input) {
+        checkoutKeys.push(input.idempotencyKey);
         if (failFirst) {
           failFirst = false;
           throw new Error("provider temporarily unavailable");
@@ -845,11 +1058,14 @@ describeDatabase("billing against real PostgreSQL", () => {
 
     // Verify attempt marked failed
     const failedAttempt = await admin.query(
-      `SELECT status, error_message FROM checkout_attempts WHERE idempotency_key = $1`,
+      `SELECT id, subscription_id, status, error_message, provider_idempotency_key
+         FROM checkout_attempts WHERE idempotency_key = $1`,
       ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
     );
     assert.equal(failedAttempt.rows[0].status, "failed");
     assert.ok(failedAttempt.rows[0].error_message);
+    assert.ok(failedAttempt.rows[0].subscription_id);
+    assert.ok(failedAttempt.rows[0].provider_idempotency_key);
 
     // Retry succeeds
     const result = await service2.startCheckout({
@@ -866,50 +1082,77 @@ describeDatabase("billing against real PostgreSQL", () => {
 
     // Verify attempt was updated to created with same provider idempotency key
     const retried = await admin.query(
-      `SELECT status, provider_idempotency_key FROM checkout_attempts WHERE idempotency_key = $1`,
+      `SELECT id, subscription_id, status, provider_idempotency_key
+         FROM checkout_attempts WHERE idempotency_key = $1`,
       ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
     );
     assert.equal(retried.rows[0].status, "created");
-    // The same provider idempotency key should be used
-    assert.ok(retried.rows[0].provider_idempotency_key);
+    assert.equal(retried.rowCount, 1);
+    assert.equal(retried.rows[0].id, failedAttempt.rows[0].id);
+    assert.equal(retried.rows[0].subscription_id, failedAttempt.rows[0].subscription_id);
+    assert.equal(
+      retried.rows[0].provider_idempotency_key,
+      failedAttempt.rows[0].provider_idempotency_key,
+    );
+    assert.deepEqual(checkoutKeys, [
+      failedAttempt.rows[0].provider_idempotency_key,
+      failedAttempt.rows[0].provider_idempotency_key,
+    ]);
+    const counts = await admin.query(
+      `SELECT
+         (SELECT count(*)::int FROM checkout_attempts WHERE restaurant_id = $1) AS attempts,
+         (SELECT count(*)::int FROM subscriptions WHERE restaurant_id = $1) AS subscriptions`,
+      [a.restaurantId],
+    );
+    assert.deepEqual(counts.rows[0], { attempts: 1, subscriptions: 1 });
   });
 
   it("expired checkout retry reactivates the attempt", async () => {
     await resetBillingState(admin);
-    const plan = await seedPlan(admin);
+    await seedPlan(admin);
     const a = await seedRestaurant(admin, { name: "Cafe A" });
     const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
     const user = { id: a.userId, email: "a@example.com" };
-
-    // Create an expired attempt
-    const attemptId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-    await admin.query(
-      `INSERT INTO checkout_attempts (
-         id, restaurant_id, idempotency_key, plan_code, plan_hash,
-         success_url, cancel_url, status, expires_at
-       ) VALUES ($1, $2, 'key_expired', 'STANDARD', 'hash_expired',
-         'https://a.com/success', 'https://a.com/cancel', 'expired', now() - interval '1 day')`,
-      [attemptId, a.restaurantId],
-    );
-
-    const result = await service.startCheckout({
-      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
-      user: { id: a.userId, email: "a@example.com" },
-      planCode: "STANDARD",
+    const key = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const input = {
+      tenant, user, planCode: "STANDARD",
       successUrl: "https://pos.example.com/ok",
       cancelUrl: "https://pos.example.com/cancel",
-      idempotencyKey: "key_expired",
-    });
+      idempotencyKey: key,
+    };
+
+    await service.startCheckout(input);
+    const original = await admin.query(
+      `UPDATE checkout_attempts
+          SET status = 'expired', expires_at = now() - interval '1 day'
+        WHERE restaurant_id = $1 AND idempotency_key = $2
+        RETURNING id, subscription_id, provider_idempotency_key`,
+      [a.restaurantId, key],
+    );
+
+    const result = await service.startCheckout(input);
 
     assert.equal(result.replayed, false);
     assert.equal(result.status, "awaiting_payment");
 
     const reactivated = await admin.query(
-      `SELECT status FROM checkout_attempts WHERE id = $1`,
-      [attemptId],
+      `SELECT id, status, subscription_id, provider_idempotency_key
+         FROM checkout_attempts WHERE restaurant_id = $1 AND idempotency_key = $2`,
+      [a.restaurantId, key],
     );
-    // After successful provider checkout creation, the attempt status should be 'created'
+    assert.equal(reactivated.rowCount, 1);
+    assert.equal(reactivated.rows[0].id, original.rows[0].id);
     assert.equal(reactivated.rows[0].status, "created");
+    assert.equal(reactivated.rows[0].subscription_id, original.rows[0].subscription_id);
+    assert.equal(
+      reactivated.rows[0].provider_idempotency_key,
+      original.rows[0].provider_idempotency_key,
+    );
+    const subscriptions = await admin.query(
+      "SELECT count(*)::int AS total FROM subscriptions WHERE restaurant_id = $1",
+      [a.restaurantId],
+    );
+    assert.equal(subscriptions.rows[0].total, 1);
   });
 
   it("same-key payload conflict rejected with IDEMPOTENCY_KEY_CONFLICT", async () => {
@@ -941,6 +1184,27 @@ describeDatabase("billing against real PostgreSQL", () => {
       }),
       (error) => error.code === "IDEMPOTENCY_KEY_CONFLICT" && error.statusCode === 409,
     );
+
+    for (const changed of [
+      { successUrl: "https://pos.example.com/other-success" },
+      { cancelUrl: "https://pos.example.com/other-cancel" },
+    ]) {
+      await assert.rejects(
+        () => service.startCheckout({
+          tenant, user, planCode: "STANDARD",
+          successUrl: "https://pos.example.com/ok",
+          cancelUrl: "https://pos.example.com/cancel",
+          idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          ...changed,
+        }),
+        (error) => error.code === "IDEMPOTENCY_KEY_CONFLICT" && error.statusCode === 409,
+      );
+    }
+    const attempts = await admin.query(
+      "SELECT count(*)::int AS total FROM checkout_attempts WHERE restaurant_id = $1",
+      [a.restaurantId],
+    );
+    assert.equal(attempts.rows[0].total, 1);
   });
 
   it("concurrent same-key calls resolve to same session", async () => {
@@ -950,38 +1214,57 @@ describeDatabase("billing against real PostgreSQL", () => {
     const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
     const user = { id: a.userId, email: "a@example.com" };
     const key = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let releaseProvider;
+    let providerStarted;
+    const providerGate = new Promise((resolve) => { releaseProvider = resolve; });
+    const started = new Promise((resolve) => { providerStarted = resolve; });
+    let checkoutCalls = 0;
+    const concurrentProvider = billingProvider({
+      async createCustomer() { return { providerCustomerId: "cus_concurrent" }; },
+      async createCheckoutSession() {
+        checkoutCalls += 1;
+        providerStarted();
+        await providerGate;
+        return {
+          providerCheckoutSessionId: "cs_concurrent",
+          checkoutUrl: "https://checkout.stripe.com/concurrent",
+        };
+      },
+    });
+    const concurrentService = createSubscriptionService(app, {
+      provider: concurrentProvider,
+      trustedOrigins: ["https://pos.example.com"],
+    });
+    const input = {
+      tenant, user, planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: key,
+    };
 
-    const results = await Promise.allSettled([
-      service.startCheckout({
-        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
-        user: { id: a.userId, email: "a@example.com" },
-        planCode: "STANDARD",
-        successUrl: "https://pos.example.com/ok",
-        cancelUrl: "https://pos.example.com/cancel",
-        idempotencyKey: key,
-      }),
-      service.startCheckout({
-        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
-        user: { id: a.userId, email: "a@example.com" },
-        planCode: "STANDARD",
-        successUrl: "https://pos.example.com/ok",
-        cancelUrl: "https://pos.example.com/cancel",
-        idempotencyKey: key,
-      }),
-      service.startCheckout({
-        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
-        user: { id: a.userId, email: "a@example.com" },
-        planCode: "STANDARD",
-        successUrl: "https://pos.example.com/ok",
-        cancelUrl: "https://pos.example.com/cancel",
-        idempotencyKey: key,
-      }),
+    const winnerPromise = concurrentService.startCheckout(input);
+    await started;
+    const followersPromise = Promise.allSettled([
+      concurrentService.startCheckout(input),
+      concurrentService.startCheckout(input),
     ]);
+    const followers = await followersPromise;
+    releaseProvider();
+    const winner = await winnerPromise;
 
-    const fulfilled = results.filter((r) => r.status === "fulfilled");
-    assert.equal(fulfilled.length, 1, "exactly one checkout should succeed");
-    assert.equal(fulfilled[0].value.replayed, false); // First one creates
-    // The other two should either be rejected or return the same session
+    assert.equal(winner.replayed, false);
+    assert.equal(checkoutCalls, 1);
+    assert.deepEqual(
+      followers.map((result) => result.status === "rejected" ? result.reason.code : "fulfilled"),
+      ["CHECKOUT_IN_PROGRESS", "CHECKOUT_IN_PROGRESS"],
+    );
+    const counts = await admin.query(
+      `SELECT
+         (SELECT count(*)::int FROM checkout_attempts WHERE restaurant_id = $1) AS attempts,
+         (SELECT count(*)::int FROM subscriptions WHERE restaurant_id = $1) AS subscriptions`,
+      [a.restaurantId],
+    );
+    assert.deepEqual(counts.rows[0], { attempts: 1, subscriptions: 1 });
   });
 
   it("concurrent different-key calls are rejected", async () => {
@@ -1021,6 +1304,57 @@ describeDatabase("billing against real PostgreSQL", () => {
     assert.equal(rejected[0].reason.code, "CHECKOUT_ALREADY_IN_PROGRESS");
   });
 
+  it("preserves one canonical billing customer under concurrent creation", async () => {
+    await resetBillingState(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const calls = [];
+    let sequence = 0;
+    const concurrentProvider = {
+      name: "stripe",
+      async createCustomer(input) {
+        calls.push(input);
+        const candidate = ++sequence;
+        await new Promise((resolve) => setImmediate(resolve));
+        return { providerCustomerId: `cus_candidate_${candidate}` };
+      },
+    };
+    const input = {
+      provider: concurrentProvider,
+      restaurantId: a.restaurantId,
+      userId: a.userId,
+      email: "a@example.com",
+      restaurantName: "Cafe A",
+    };
+
+    const [first, second] = await Promise.all([
+      ensureCanonicalBillingCustomer(app, input),
+      ensureCanonicalBillingCustomer(app, input),
+    ]);
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(
+      calls.map((call) => call.idempotencyKey),
+      [`cust_${a.restaurantId}_stripe`, `cust_${a.restaurantId}_stripe`],
+    );
+    assert.equal(first.id, second.id);
+    assert.equal(first.provider_customer_id, second.provider_customer_id);
+    const stored = await admin.query(
+      `SELECT id, provider_customer_id
+         FROM billing_customers
+        WHERE restaurant_id = $1 AND provider = 'stripe'`,
+      [a.restaurantId],
+    );
+    assert.equal(stored.rowCount, 1);
+    assert.equal(stored.rows[0].id, first.id);
+    assert.equal(stored.rows[0].provider_customer_id, first.provider_customer_id);
+    const routes = await admin.query(
+      `SELECT provider_reference FROM provider_tenant_routes
+        WHERE restaurant_id = $1 AND provider = 'stripe'`,
+      [a.restaurantId],
+    );
+    assert.deepEqual(routes.rows.map((row) => row.provider_reference), [first.provider_customer_id]);
+  });
+
   it("correct parameter execution against PostgreSQL", async () => {
     // Verify the UPDATE statement uses correct placeholder order
     await resetBillingState(admin);
@@ -1047,13 +1381,13 @@ describeDatabase("billing against real PostgreSQL", () => {
       const result = await client.query(
         `UPDATE checkout_attempts
             SET status = 'created',
-                provider_customer_id = $2,
-                provider_checkout_session_id = $3,
-                provider_checkout_url = $4,
+                provider_customer_id = $3,
+                provider_checkout_session_id = $4,
+                provider_checkout_url = $5,
                 updated_at = now()
-          WHERE id = $1
+          WHERE id = $1 AND restaurant_id = $2
           RETURNING provider_customer_id, provider_checkout_session_id`,
-        [attemptId, "cus_test", "cs_test", "https://checkout.stripe.com/test"],
+        [attemptId, a.restaurantId, "cus_test", "cs_test", "https://checkout.stripe.com/test"],
       );
 
       assert.equal(result.rowCount, 1);

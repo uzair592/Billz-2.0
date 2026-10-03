@@ -40,7 +40,12 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npm test
+        shell: bash
+        run: |
+          mapfile -t unit_tests < <(find tests -maxdepth 1 -name '*.test.mjs' \
+            ! -name 'billing-postgres.test.mjs' \
+            ! -name 'server-startup.test.mjs' | sort)
+          node --test "${unit_tests[@]}"
 
       - name: Wait for PostgreSQL
         run: |
@@ -57,6 +62,7 @@ jobs:
 
       - name: Apply migrations
         run: |
+          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 10
           export PGPASSWORD=validation-only
           for migration in database/migrations/*.sql; do
             echo "Applying $migration"
@@ -67,19 +73,33 @@ jobs:
         env:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
           TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
-        run: npm run test:integration
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:integration | tee /tmp/postgres-tests.tap
+          if grep -Eq '# SKIP|^# skipped [1-9]' /tmp/postgres-tests.tap; then
+            echo "Required PostgreSQL tests were skipped"
+            exit 1
+          fi
+
+      - name: Validate migrations in clean PostgreSQL 17
+        run: npm run validate:database
+
+      - name: Run Linux startup test
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/server-startup.test.mjs
+
+      - name: Validate workflow YAML
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest
 
       - name: Check git diff
         run: git diff --check
 
-      - name: Verify no secrets committed
-        run: |
-          # Check for actual credential patterns, not generic words
-          if git diff --name-only HEAD~1 | xargs grep -l -E "(STRIPE_SECRET_KEY|STRIPE_WEBHOOK_SECRET|SESSION_SECRET|PASSWORD_PEPPER|DATABASE_URL).*=.*[a-zA-Z0-9]" 2>/dev/null | grep -v ".env.example" | grep -v ".gitignore"; then
-            echo "WARNING: Potential secrets in committed files"
-            exit 1
-          fi
-          echo "No secrets detected in committed files"
+      - name: Scan repository for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify working tree clean
         run: |

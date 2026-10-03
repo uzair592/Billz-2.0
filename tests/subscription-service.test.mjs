@@ -78,6 +78,17 @@ function fakePool({
       return { rows: [{ id: values[0] }] };
     }
 
+    if (sql.startsWith("UPDATE checkout_attempts SET status = 'expired'")) {
+      for (const attempt of new Set(checkoutAttempts.values())) {
+        if (["creating", "created"].includes(attempt.status)
+          && attempt.expires_at
+          && new Date(attempt.expires_at).getTime() <= now.getTime()) {
+          attempt.status = "expired";
+        }
+      }
+      return { rows: [] };
+    }
+
     if (sql.startsWith("SELECT p.id, p.code, p.name")) {
       return {
         rows: state.plans.map((price) => ({
@@ -113,20 +124,22 @@ function fakePool({
     }
 
     if (sql.startsWith("INSERT INTO billing_customers")) {
-      state.billingCustomer = {
-        id: `cc-${nextId++}`,
-        provider_customer_id: values[3],
-        restaurantId: values[1],
-      };
-      return { rows: [state.billingCustomer] };
+      if (!state.billingCustomer) {
+        state.billingCustomer = {
+          id: `cc-${nextId++}`,
+          provider_customer_id: values[3],
+          restaurantId: values[1],
+        };
+      }
+      return { rows: [], rowCount: state.billingCustomer.provider_customer_id === values[3] ? 1 : 0 };
     }
 
-    if (sql.startsWith("SELECT id, status, provider_checkout_session_id, provider_checkout_url, provider_customer_id, plan_hash FROM checkout_attempts")) {
+    if (sql.startsWith("SELECT ca.id, ca.status, ca.plan_code, ca.plan_hash")) {
       const attempt = checkoutAttempts.get(`${values[0]}::${values[1]}`);
       return { rows: attempt ? [attempt] : [] };
     }
 
-    if (sql.startsWith("SELECT id, status, idempotency_key, provider_checkout_session_id, provider_checkout_url, provider_customer_id, plan_hash FROM checkout_attempts")) {
+    if (sql.startsWith("SELECT id, idempotency_key FROM checkout_attempts")) {
       // Find any live attempt for this restaurant
       for (const [key, attempt] of checkoutAttempts.entries()) {
         if (key.startsWith(`${values[0]}::`) && ['creating', 'created'].includes(attempt.status)) {
@@ -137,13 +150,9 @@ function fakePool({
     }
 
     if (sql.startsWith("UPDATE checkout_attempts SET status = 'creating'")) {
-      const attempt = checkoutAttempts.get(`${values[1]}::${values[2]}`) ||
-                      checkoutAttempts.get(`${values[1]}::${values[3]}`); // check by id or key
+      const attempt = [...checkoutAttempts.values()].find((row) => row.id === values[0]);
       if (attempt) {
         attempt.status = "creating";
-        attempt.plan_hash = values[3];
-        attempt.success_url = values[4];
-        attempt.cancel_url = values[5];
         attempt.error_message = null;
         attempt.expires_at = new Date(Date.now() + 3600000);
       }
@@ -152,44 +161,41 @@ function fakePool({
 
     if (sql.startsWith("INSERT INTO checkout_attempts")) {
       const attemptId = values[0];
-      const key = values[2];
+      const key = values[3];
       const attempt = {
         id: attemptId,
+        idempotency_key: key,
         status: "creating",
+        plan_code: values[4],
+        subscription_id: values[2],
         provider_checkout_session_id: null,
         provider_checkout_url: null,
         provider_customer_id: null,
-        plan_hash: values[4],
+        provider_idempotency_key: values[8],
+        plan_hash: values[5],
+        success_url: values[6],
+        cancel_url: values[7],
       };
-      checkoutAttempts.set(`${values[1]}::${key}`, { ...attempt, id: attemptId });
-      checkoutAttempts.set(`${values[1]}::${attemptId}`, { ...attempt, id: attemptId });
-      return { rows: [{ id: attemptId }] };
-    }
-
-    if (sql.startsWith("INSERT INTO checkout_attempts")) {
-      const attemptId = values[0];
-      const key = values[2];
-      const attempt = {
-        id: attemptId,
-        status: "creating",
-        provider_checkout_session_id: null,
-        provider_checkout_url: null,
-        provider_customer_id: null,
-        plan_hash: values[4],
-      };
-      checkoutAttempts.set(`${values[1]}::${key}`, { ...attempt, id: attemptId });
-      checkoutAttempts.set(`${values[1]}::${attemptId}`, { ...attempt, id: attemptId });
-      return { rows: [{ id: attemptId }] };
+      checkoutAttempts.set(`${values[1]}::${key}`, attempt);
+      return { rows: [], rowCount: 1 };
     }
 
     if (sql.startsWith("UPDATE checkout_attempts SET status = 'created'")) {
-      const attempt = checkoutAttempts.get(`${values[1]}::${values[2]}`) ||
-                      checkoutAttempts.get(`${values[1]}::${values[4]}`); // check by id or customer
+      const attempt = [...checkoutAttempts.values()].find((row) => row.id === values[0]);
       if (attempt) {
         attempt.status = "created";
         attempt.provider_customer_id = values[2];
         attempt.provider_checkout_session_id = values[3];
         attempt.provider_checkout_url = values[4];
+      }
+      return { rows: [] };
+    }
+
+    if (sql.startsWith("UPDATE checkout_attempts SET status = 'failed'")) {
+      const attempt = [...checkoutAttempts.values()].find((row) => row.id === values[0]);
+      if (attempt) {
+        attempt.status = "failed";
+        attempt.error_message = values[2];
       }
       return { rows: [] };
     }
@@ -248,7 +254,9 @@ function fakePool({
     }
 
     if (sql.startsWith("INSERT INTO provider_tenant_routes")) {
-      routes.push({ reference: values[1], type: values[2], restaurantId: values[3] });
+      routes.push(sql.includes("'customer'")
+        ? { reference: values[1], type: "customer", restaurantId: values[2] }
+        : { reference: values[1], type: values[2], restaurantId: values[3] });
       return { rows: [] };
     }
 
@@ -275,6 +283,7 @@ function fakePool({
     calls,
     audit,
     routes,
+    checkoutAttempts,
     state,
     find(predicate) {
       return calls.filter(predicate);
@@ -456,6 +465,7 @@ describe("subscription service checkout", () => {
           id: "attempt-1",
           status: "created",
           idempotency_key: checkoutInput.idempotencyKey,
+          plan_code: "STANDARD",
           provider_checkout_session_id: "cs_existing",
           provider_checkout_url: "https://checkout.stripe.com/existing",
           provider_customer_id: "cus_1",
@@ -474,6 +484,117 @@ describe("subscription service checkout", () => {
     assert.equal(result.replayed, true);
     assert.equal(result.checkoutUrl, "https://checkout.stripe.com/existing");
     assert.equal(provider.calls.length, 0, "a retry must not create a second session");
+  });
+
+  it("checks the stored payload before replaying a created checkout", async () => {
+    const attempt = {
+      id: "attempt-created",
+      status: "created",
+      idempotency_key: checkoutInput.idempotencyKey,
+      plan_code: "STANDARD",
+      provider_checkout_session_id: "cs_existing",
+      provider_checkout_url: "https://checkout.stripe.com/existing",
+      provider_customer_id: "cus_1",
+      plan_hash: computePlanHash({
+        planCode: checkoutInput.planCode,
+        successUrl: checkoutInput.successUrl,
+        cancelUrl: checkoutInput.cancelUrl,
+      }),
+    };
+    const pool = fakePool({
+      checkoutAttempts: new Map([[`${restaurantId}::${checkoutInput.idempotencyKey}`, attempt]]),
+    });
+    const provider = fakeProvider();
+
+    for (const changed of [
+      { planCode: "PREMIUM" },
+      { successUrl: "https://pos.example.com/billing/other" },
+      { cancelUrl: "https://pos.example.com/billing/other" },
+    ]) {
+      await assert.rejects(
+        () => service(pool, provider).startCheckout({ ...checkoutInput, ...changed }),
+        (error) => error.code === "IDEMPOTENCY_KEY_CONFLICT" && error.statusCode === 409,
+      );
+    }
+    assert.equal(provider.calls.length, 0);
+    assert.equal(attempt.status, "created");
+  });
+
+  it("replays the linked checkout price after the plan leaves the active catalogue", async () => {
+    const attempt = {
+      id: "attempt-created",
+      status: "created",
+      idempotency_key: checkoutInput.idempotencyKey,
+      plan_code: "STANDARD",
+      plan_hash: computePlanHash(checkoutInput),
+      subscription_id: "33333333-3333-4333-8333-333333333333",
+      provider_checkout_session_id: "cs_existing",
+      provider_checkout_url: "https://checkout.stripe.com/existing",
+      stored_price_id: "44444444-4444-4444-8444-444444444444",
+      stored_plan_id: "55555555-5555-4555-8555-555555555555",
+      amount_minor: 25_000,
+      currency_code: "PKR",
+      provider_price_id: "price_standard",
+      plan_name: "Standard",
+    };
+    const pool = fakePool({
+      plans: [],
+      checkoutAttempts: new Map([[`${restaurantId}::${checkoutInput.idempotencyKey}`, attempt]]),
+    });
+
+    const result = await service(pool).startCheckout(checkoutInput);
+
+    assert.equal(result.replayed, true);
+    assert.equal(result.amountMinor, 25_000);
+    assert.equal(result.checkoutUrl, attempt.provider_checkout_url);
+  });
+
+  it("returns CHECKOUT_IN_PROGRESS for a matching creating attempt", async () => {
+    const attempt = {
+      id: "attempt-creating",
+      status: "creating",
+      idempotency_key: checkoutInput.idempotencyKey,
+      plan_code: "STANDARD",
+      plan_hash: computePlanHash(checkoutInput),
+    };
+    const pool = fakePool({
+      checkoutAttempts: new Map([[`${restaurantId}::${checkoutInput.idempotencyKey}`, attempt]]),
+    });
+    const provider = fakeProvider();
+
+    await assert.rejects(
+      () => service(pool, provider).startCheckout(checkoutInput),
+      (error) => error.code === "CHECKOUT_IN_PROGRESS" && error.statusCode === 409,
+    );
+    assert.equal(provider.calls.length, 0);
+    assert.equal(pool.checkoutAttempts.size, 1);
+  });
+
+  it("retries the same failed row with its original provider key and subscription", async () => {
+    const attempt = {
+      id: "attempt-failed",
+      status: "failed",
+      idempotency_key: checkoutInput.idempotencyKey,
+      plan_code: "STANDARD",
+      plan_hash: computePlanHash(checkoutInput),
+      subscription_id: "33333333-3333-4333-8333-333333333333",
+      provider_idempotency_key: "ca_original",
+      error_message: "temporary failure",
+    };
+    const pool = fakePool({
+      subscriptions: [subscriptionRow({ restaurantId })],
+      checkoutAttempts: new Map([[`${restaurantId}::${checkoutInput.idempotencyKey}`, attempt]]),
+    });
+    const provider = fakeProvider();
+
+    const result = await service(pool, provider).startCheckout(checkoutInput);
+
+    assert.equal(result.replayed, false);
+    assert.equal(attempt.status, "created");
+    assert.equal(pool.checkoutAttempts.size, 1);
+    const checkoutCall = provider.calls.find(([name]) => name === "createCheckoutSession");
+    assert.equal(checkoutCall[1].idempotencyKey, "ca_original");
+    assert.equal(pool.state.subscriptions.length, 1);
   });
 
   it("starts a new subscription after cancellation instead of reviving the dead one", async () => {
