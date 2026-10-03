@@ -2,12 +2,15 @@
 
 ## Current milestone
 
-Milestone 9: browser sign-in, restaurant selection, and catalog import.
+Milestone 10: subscription checkout, verified billing webhooks, and the billing
+surface an owner uses to pay.
 
-A POS device can now sign in, choose its restaurant, and copy this till's
-catalog into the cloud, after which queued orders synchronize. Tenant-scoped
-order history and compensating order cancellation are implemented. The
-standalone POS HTML keeps its offline behavior at every step.
+A restaurant owner can now see plans, start a provider checkout, change plan,
+cancel, resume, and read payment history, and a verified provider webhook is the
+only thing that can ever move a subscription to paid. Tenant-scoped order
+history, compensating order cancellation, browser sign-in, restaurant selection,
+and catalog import are implemented. The standalone POS HTML keeps its offline
+behavior at every step.
 
 ## Completed
 
@@ -131,6 +134,36 @@ standalone POS HTML keeps its offline behavior at every step.
 - Added a cloud account panel to the POS dashboard for sign-in, restaurant
   selection, catalog copy, and sign-out, hidden until it is opened and fully
   optional for the offline till.
+- Added the single payment-provider seam: one adapter contract, a Stripe adapter,
+  and a development adapter that cannot start a checkout and refuses every
+  webhook, so a local environment can never accidentally grant paid access.
+- Added Stripe webhook verification over the exact received bytes: HMAC-SHA256
+  compared in constant time, with a timestamp tolerance so a captured request
+  cannot be replayed.
+- Added the billing webhook service with the security order fixed in code:
+  verify the signature, claim the event under a unique provider key so a retry
+  cannot apply twice, and only then resolve the restaurant and update the
+  subscription inside a normal tenant transaction. An unverified payload is
+  recorded as refused and never applied.
+- Made webhook application fail closed. Access is only extended by a verified
+  event that also carries a paid period, so a completed checkout on its own
+  leaves the subscription unpaid; a settled invoice is what activates it. An
+  already active subscription is never demoted because a later event happened
+  to carry less information, and an event with no period never revokes access.
+- Recorded the provider subscription identifier and routed later events by
+  subscription, customer, or checkout session, so an event is always
+  attributable to exactly one restaurant.
+- Added a `past_due` grace window rather than an immediate cut-off, and recorded
+  each provider payment exactly once, keyed by the provider payment identifier.
+- Added a `pending_checkout` subscription state so a restaurant record can exist
+  before any money moves, and included it in the one-current-subscription
+  partial index so a second checkout cannot be started by accident.
+- Added owner-only billing routes, deliberately reachable without paid
+  subscription access: a restaurant that has lost POS access can still see the
+  bill and pay to get the access back.
+- Registered the webhook in its own Fastify context with a raw body parser,
+  because a signature computed over a re-serialized payload is unverifiable.
+- Added webhook, Stripe adapter, migration contract, and billing HTTP tests.
 
 ## Migration guardrails
 
@@ -143,18 +176,14 @@ standalone POS HTML keeps its offline behavior at every step.
 ## Next milestone
 
 Drive order history and cancellation from the POS interface, then add partial
-refunds and sales reports. The payment adapter, billing page, and platform
-admin area follow that work.
+refunds and sales reports. The platform admin area follows that work.
 
-All seven migrations still need validation against a real PostgreSQL instance.
-Docker Desktop is installed but its Linux engine could not start in the current
-non-interactive session, so the migrations are contract-tested but have not yet
-been executed by PostgreSQL.
-
-When Docker is available, run:
+All eight migrations have been applied successfully against a throwaway
+PostgreSQL 17 instance with `compose.validation.yaml`. Re-run them after any
+schema change:
 
 ```powershell
-docker compose -f compose.validation.yaml up --abort-on-container-exit --exit-code-from migrations
+npm run validate:database
 docker compose -f compose.validation.yaml down
 ```
 
@@ -164,4 +193,4 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current suite has 169 tests and runs without external services.
+The current suite has 210 tests and runs without external services.

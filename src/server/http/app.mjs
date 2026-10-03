@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { z } from "zod";
 import { PERMISSION } from "../authorization/permissions.mjs";
+import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
 
@@ -90,6 +91,21 @@ const orderParamsSchema = z.object({ orderId: z.uuid() }).strict();
 const cancelOrderSchema = z.object({
   reason: z.string().trim().max(500).optional(),
   idempotencyKey: z.uuid(),
+}).strict();
+
+const checkoutSchema = z.object({
+  planCode: z.string().trim().min(1).max(64),
+  successUrl: z.string().trim().min(1).max(2_000),
+  cancelUrl: z.string().trim().min(1).max(2_000),
+  idempotencyKey: z.uuid(),
+}).strict();
+
+const changePlanSchema = z.object({
+  planCode: z.string().trim().min(1).max(64),
+}).strict();
+
+const cancelSubscriptionSchema = z.object({
+  cancelAtPeriodEnd: z.boolean().default(true),
 }).strict();
 
 const legacyDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
@@ -195,6 +211,8 @@ export async function buildHttpApp({
   orderHistoryService = null,
   orderCancellationService = null,
   catalogImportService = null,
+  subscriptionService = null,
+  billingWebhookService = null,
   trustedOrigin,
   secureCookies = true,
   logger = false,
@@ -216,7 +234,68 @@ export async function buildHttpApp({
     }
   });
 
+  // Subscription enforcement is attached to each route through its guards,
+  // which means a POS route added later without one would silently have no
+  // billing gate at all. This hook makes the omission fail closed instead: a
+  // `/api/pos` route that never resolved a tenant context is refused, and a
+  // route that did is still held to the same FULL-access decision.
+  app.addHook("onRoute", (routeOptions) => {
+    const path = routeOptions.url ?? "";
+    if (!path.startsWith("/api/pos/")) return;
+    if (routeOptions.config?.subscriptionExempt === true) return;
+    routeOptions.preHandler = [
+      ...(routeOptions.preHandler ?? []),
+      async (request, reply) => {
+        if (request.tenant?.subscriptionAccess?.level !== ACCESS_LEVEL.FULL) {
+          return reply.code(402).send({
+            error: "An active restaurant subscription is required.",
+            code: "SUBSCRIPTION_REQUIRED",
+          });
+        }
+      },
+    ];
+  });
+
   app.get("/health", async () => ({ status: "ok" }));
+
+  if (billingWebhookService) {
+    // Registered in its own context because a webhook signature is computed over
+    // the exact bytes the provider sent. Anything that parses and re-serializes
+    // the body first would make a genuine signature unverifiable.
+    await app.register(async (instance) => {
+      instance.removeContentTypeParser("application/json");
+      instance.addContentTypeParser(
+        "application/json",
+        { parseAs: "buffer" },
+        (_request, body, done) => done(null, body),
+      );
+
+      instance.post(
+        "/webhook",
+        { config: { rateLimit: { max: 600, timeWindow: "1 minute" } } },
+        async (request, reply) => {
+          const signatureHeaderName = billingWebhookService.webhookSignatureHeader
+            ?? "x-billing-signature";
+          const result = await billingWebhookService.handle({
+            rawBody: request.body,
+            signatureHeader: request.headers[signatureHeaderName] ?? null,
+          });
+          // Three outcomes, deliberately distinct:
+          //
+          //  * `retryable` — the event is a real billing event we could not
+          //    resolve. Answering 200 would take the payment and drop it, so a
+          //    non-success status is returned and the provider retries.
+          //  * refused — a bad signature or an unmodelled event. Permanent, so
+          //    no retry is invited.
+          //  * accepted — applied, already processed, or deliberately ignored.
+          if (result.retryable) {
+            return reply.code(503).send(result);
+          }
+          return reply.code(result.accepted ? 200 : 400).send(result);
+        },
+      );
+    });
+  }
 
   app.post(
     "/api/auth/register",
@@ -291,7 +370,8 @@ export async function buildHttpApp({
 
   if (tenantContextService
       && (menuService || businessSettingsService || orderService
-        || orderHistoryService || orderCancellationService || catalogImportService)) {
+        || orderHistoryService || orderCancellationService || catalogImportService
+        || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -435,6 +515,81 @@ export async function buildHttpApp({
           branchId: request.tenant.membership.defaultBranchId,
           userId: request.auth.user.id,
           snapshot: legacyCatalogSchema.parse(request.body),
+        }),
+      );
+    }
+
+    if (subscriptionService) {
+      // Billing deliberately does not require paid access: a restaurant that has
+      // lost POS access must still be able to see the bill and pay to get it
+      // back, otherwise it is stuck permanently.
+      const billingGuards = [
+        guards.authenticate,
+        guards.tenant(PERMISSION.BILLING_MANAGE, { subscriptionRequired: false }),
+      ];
+
+      app.get(
+        "/api/billing",
+        { preHandler: billingGuards },
+        async (request) =>
+          subscriptionService.overview({
+            tenant: request.tenant,
+            user: request.auth.user,
+          }),
+      );
+
+      app.post(
+        "/api/billing/checkout",
+        {
+          preHandler: billingGuards,
+          config: { rateLimit: { max: 10, timeWindow: "1 hour" } },
+        },
+        async (request) => {
+          const body = checkoutSchema.parse(request.body);
+          return subscriptionService.startCheckout({
+            tenant: request.tenant,
+            user: request.auth.user,
+            ...body,
+          });
+        },
+      );
+
+      app.post(
+        "/api/billing/change-plan",
+        { preHandler: billingGuards },
+        async (request) =>
+          subscriptionService.changePlan({
+            tenant: request.tenant,
+            user: request.auth.user,
+            planCode: changePlanSchema.parse(request.body).planCode,
+          }),
+      );
+
+      app.post(
+        "/api/billing/cancel",
+        { preHandler: billingGuards },
+        async (request) =>
+          subscriptionService.cancel({
+            tenant: request.tenant,
+            user: request.auth.user,
+            cancelAtPeriodEnd: cancelSubscriptionSchema.parse(request.body ?? {})
+              .cancelAtPeriodEnd,
+          }),
+      );
+
+      app.post(
+        "/api/billing/resume",
+        { preHandler: billingGuards },
+        async (request) =>
+          subscriptionService.resume({ tenant: request.tenant, user: request.auth.user }),
+      );
+
+      app.get(
+        "/api/billing/payments",
+        { preHandler: billingGuards },
+        async (request) => subscriptionService.paymentHistory({
+          tenant: request.tenant,
+          limit: request.query?.limit,
         }),
       );
     }

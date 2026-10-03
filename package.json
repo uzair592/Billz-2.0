@@ -6,8 +6,10 @@
   "scripts": {
     "test": "node --test",
     "test:legacy": "node --test tests/legacy-*.test.mjs tests/money-engine.test.mjs tests/order-status.test.mjs",
+    "test:integration": "node --test tests/billing-postgres.test.mjs",
     "validate:compose": "docker compose -f compose.validation.yaml config",
-    "validate:database": "docker compose -f compose.validation.yaml up --abort-on-container-exit --exit-code-from migrations"
+    "validate:database": "docker compose -f compose.validation.yaml up --abort-on-container-exit --exit-code-from migrations",
+    "start": "node src/server/main.mjs"
   },
   "engines": {
     "node": ">=22"
