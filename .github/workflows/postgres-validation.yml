@@ -1,0 +1,125 @@
+name: PostgreSQL Validation
+
+on:
+  push:
+    branches: [main, feat/milestone-10-billing]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: restaurant_pos_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: validation-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d restaurant_pos_test"
+          --health-interval=2s
+          --health-timeout=2s
+          --health-retries=20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          mapfile -t unit_tests < <(find tests -maxdepth 1 -name '*.test.mjs' \
+            ! -name 'billing-postgres.test.mjs' \
+            ! -name 'server-startup.test.mjs' | sort)
+          node --test "${unit_tests[@]}"
+
+      - name: Wait for PostgreSQL
+        run: |
+          for attempt in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres -d restaurant_pos_test; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL (attempt $attempt/30)..."
+            sleep 2
+          done
+          echo "PostgreSQL failed to start"
+          exit 1
+
+      - name: Apply migrations
+        run: |
+          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 10
+          export PGPASSWORD=validation-only
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+
+      - name: Run integration tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+          TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test:integration | tee /tmp/postgres-tests.tap
+          if grep -Eq '# SKIP|^# skipped [1-9]' /tmp/postgres-tests.tap; then
+            echo "Required PostgreSQL tests were skipped"
+            exit 1
+          fi
+
+      - name: Validate migrations in clean PostgreSQL 17
+        run: npm run validate:database
+
+      - name: Run Linux startup test
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/server-startup.test.mjs
+
+      - name: Validate workflow YAML
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest
+
+      - name: Check committed feature diff
+        shell: bash
+        run: |
+          git rev-parse --verify origin/main
+          merge_base="$(git merge-base HEAD origin/main)"
+          echo "Checking committed diff: $merge_base..HEAD"
+          git diff --check "$merge_base..HEAD"
+          git diff --check
+
+      - name: Scan full feature delta for secrets
+        shell: bash
+        run: |
+          merge_base="$(git merge-base HEAD origin/main)"
+          scan_range="$merge_base..HEAD"
+          echo "Scanning Gitleaks commit range: $scan_range"
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git --redact --verbose --log-opts="$scan_range" /repo
+
+      - name: Verify working tree clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Working tree is not clean"
+            git status
+            exit 1
+          fi
+          echo "Working tree is clean"

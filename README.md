@@ -66,6 +66,15 @@ Implemented foundations:
   into the exact import contract and refuses rather than dropping records.
 - A dashboard cloud panel for sign-in, restaurant selection, catalog copy, and
   sign-out that stays hidden and fully optional for an offline till.
+- A payment-provider seam with a Stripe adapter and a development adapter that
+  cannot start a checkout and refuses every webhook.
+- A signed billing webhook that verifies the raw bytes, claims each provider
+  event once, and is the only path that can ever move a subscription to paid.
+  Access is only granted by a verified event that also carries a paid period, so
+  a completed checkout alone leaves the subscription unpaid.
+- Owner-only billing routes for plans, checkout, plan changes, cancellation,
+  resume, and payment history. They stay reachable without paid subscription
+  access so a restaurant that has lost POS access can still pay.
 - Secure HttpOnly session cookies and cross-site request rejection.
 - In-memory Docker Compose environment for executing database migrations.
 
@@ -75,8 +84,8 @@ Not yet complete:
 - Legacy IndexedDB order/expense/stock history import.
 - Partial refunds and sales-report APIs.
 - Driving order history and cancellation from the POS interface.
-- Payment-provider adapter and signed webhook endpoint.
-- Billing and platform-admin interfaces.
+- A billing page in the POS interface.
+- Platform-admin interface.
 - Production deployment.
 
 The current implementation checklist is also maintained in [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
@@ -156,6 +165,7 @@ The subscription belongs to the restaurant. Employees do not purchase individual
 Supported states:
 
 ```text
+pending_checkout
 trialing
 active
 past_due
@@ -174,6 +184,14 @@ Rules currently encoded by the server policy:
 - Cancelled, expired, and suspended restaurants retain billing-level access but cannot perform protected POS mutations.
 - Platform suspension overrides an otherwise active subscription.
 - Expiration never automatically deletes restaurant data.
+
+`pending_checkout` exists because a subscription record has to be written when a
+checkout starts, before any money moves. It grants nothing: only a verified
+provider event that also carries a paid period can move a restaurant to `active`.
+
+Billing endpoints are intentionally reachable without paid subscription access.
+A restaurant that has lost POS access must still be able to read its bill and
+pay, or it would be permanently stuck.
 
 ## Existing POS behavior being preserved
 
@@ -296,6 +314,20 @@ and records an `order_edit_events` entry with the reason and the exact restocked
 quantities. Replaying the same request returns the stored cancellation instead
 of compensating twice. Partial refunds are not yet implemented.
 
+The billing boundaries are `GET /api/billing`, `POST /api/billing/checkout`,
+`POST /api/billing/change-plan`, `POST /api/billing/cancel`,
+`POST /api/billing/resume`, and `GET /api/billing/payments`. They require an
+owner session and the trusted restaurant header, and they do not require paid
+subscription access.
+
+`POST /webhook` is the payment-provider endpoint. It carries no session and no
+tenant header: the request body is kept as raw bytes so the signature can be
+verified exactly as sent, and a failed verification is recorded and refused with
+no database effect. Configure the provider to deliver
+`checkout.session.completed`, `customer.subscription.created`,
+`customer.subscription.updated`, `customer.subscription.deleted`,
+`invoice.paid`, and `invoice.payment_failed`.
+
 Validate the Docker Compose file:
 
 ```powershell
@@ -322,13 +354,14 @@ The current template defines:
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV` | Runtime environment |
-| `APP_ORIGIN` | Only trusted browser origin |
+| `TRUSTED_ORIGIN` | Only trusted browser origin |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `SESSION_SECRET` | Session-related server secret |
 | `PASSWORD_PEPPER` | Secret appended before Argon2id hashing |
 | `PAYMENT_PROVIDER` | Selected billing adapter |
-| `PAYMENT_API_KEY` | Server-only payment credential |
-| `PAYMENT_WEBHOOK_SECRET` | Webhook signature secret |
+| `STRIPE_SECRET_KEY` | Server-only Stripe credential |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |
+| `STRIPE_PUBLISHABLE_KEY` | Browser-safe Stripe key |
 | `OBJECT_STORAGE_*` | Tenant file-storage configuration |
 
 Payment keys and object-storage credentials must never be exposed to browser JavaScript.
