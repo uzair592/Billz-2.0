@@ -257,8 +257,7 @@ export function createBillingWebhookService({
     }
 
     // Exhausted: attempts >= maxAttempts, or processing with expired lease that cannot be reclaimed
-    const exhausted = freshRow.attempts >= maxAttempts
-      || (freshRow.processing_status === "processing" && freshLeaseExpired);
+const exhausted = freshRow.attempts >= maxAttempts;
     if (exhausted) {
       return {
         claimed: false,

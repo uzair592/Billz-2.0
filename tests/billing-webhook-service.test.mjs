@@ -110,6 +110,7 @@ function fakePool({
     }
 
     if (sql.startsWith("UPDATE webhook_events")) {
+      console.log("UPDATE SQL:", sql);
       if (sql.includes("lease expired")) {
         // The lease sweep is keyed by time, not by event, so it scans.
         const cutoff = values[1];
@@ -726,5 +727,54 @@ it("releases a claim left behind by a crashed process", async () => {
     const expired = await subject.expireElapsedSubscriptions({ restaurantId });
 
     assert.deepEqual(expired, [subscriptionId]);
+  });
+
+  it("another worker owning the reclaimed event returns retryable", async () => {
+    const pool = fakePool();
+    const subject = service(pool);
+    // Simulate another worker having claimed the event and still processing it
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "processing",
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 10_000), // Within lease window
+    });
+
+    const result = await subject.handle({ rawBody: "{}", signatureHeader: "t=1,v1=abc" });
+
+    // Should return retryable 503 because another worker is actively processing
+    assert.equal(result.accepted, false);
+    assert.equal(result.retryable, true);
+    assert.equal(result.reason, "event_in_progress");
+  });
+
+  it("crash after tenant commit but before markProcessed is replay-safe", async () => {
+    const pool = fakePool();
+    const subject = service(pool);
+    // Simulate an event that was processed but markProcessed wasn't called (crash after tenant commit)
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "processing", // Still marked as processing
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 10_000), // Within lease window
+    });
+
+    // The event was actually processed (subscription updated) but markProcessed wasn't called
+    // On retry, it should be treated as in-progress and return retryable
+    const firstRetry = await subject.handle({ rawBody: "{}", signatureHeader: "t=1,v1=abc" });
+    console.log("First retry result:", JSON.stringify(firstRetry, null, 2));
+    assert.equal(firstRetry.accepted, false);
+    assert.equal(firstRetry.retryable, true);
+    assert.equal(firstRetry.reason, "event_in_progress");
+
+    // After lease expires, it should be reclaimed and processed
+    pool.webhookEvents.get("stripe::evt_1").receivedAt = new Date(now.getTime() - 3_600_000);
+    console.log("Event after lease expiry:", JSON.stringify(pool.webhookEvents.get("stripe::evt_1"), null, 2));
+    const afterLease = await subject.handle({ rawBody: "{}", signatureHeader: "t=1,v1=abc" });
+    console.log("After lease result:", JSON.stringify(afterLease, null, 2));
+    assert.equal(afterLease.applied, true);
+    assert.equal(afterLease.status, "active");
   });
 });

@@ -908,7 +908,8 @@ describeDatabase("billing against real PostgreSQL", () => {
       `SELECT status FROM checkout_attempts WHERE id = $1`,
       [attemptId],
     );
-    assert.equal(reactivated.rows[0].status, "creating"); // Reactivated to creating, will become created after provider call
+    // After successful provider checkout creation, the attempt status should be 'created'
+    assert.equal(reactivated.rows[0].status, "created");
   });
 
   it("same-key payload conflict rejected with IDEMPOTENCY_KEY_CONFLICT", async () => {
@@ -1026,8 +1027,8 @@ describeDatabase("billing against real PostgreSQL", () => {
     const plan = await seedPlan(admin);
     const a = await seedRestaurant(admin, { name: "Cafe A" });
 
-    // Insert a created attempt
-    const attemptId = "hhhhhhhh-hhhh-4hhh-8hhh-hhhhhhhhhhhh";
+    // Insert a created attempt with a valid UUID
+    const attemptId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
     await admin.query(
       `INSERT INTO checkout_attempts (
          id, restaurant_id, idempotency_key, plan_code, plan_hash,
@@ -1052,7 +1053,7 @@ describeDatabase("billing against real PostgreSQL", () => {
                 updated_at = now()
           WHERE id = $1
           RETURNING provider_customer_id, provider_checkout_session_id`,
-        ["test-id", "cus_test", "cs_test", "https://checkout.stripe.com/test"],
+        [attemptId, "cus_test", "cs_test", "https://checkout.stripe.com/test"],
       );
 
       assert.equal(result.rowCount, 1);
