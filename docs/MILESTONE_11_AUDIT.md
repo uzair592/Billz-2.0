@@ -188,12 +188,16 @@
   responsive CSS for billing/history/cancel dialog
 
 **Tests (`tests/`):** `cloud-order-mapper`, `api-client`,
-`order-history-ui`, `order-detail-ui` (via cancellation/detail flows),
-`order-cancellation-ui`, `billing-ui`, `cloud-status` — 54 new tests,
-all passing. Full suite: 361 passing; the only failure is
-`server-startup.test.mjs`, which requires the Docker PostgreSQL on
-127.0.0.1:55432 (unavailable in this environment) and is unrelated to
-these changes.
+`order-history-ui`, `order-cancellation-ui`, `billing-ui`,
+`cloud-status` — 54 new unit tests, all passing. Full unit
+suite: 362 passing, 0 failing. PostgreSQL integration
+suite: 24 passing. Playwright browser suite
+(`tests/browser/pos-operations.spec.mjs`): 15 passing —
+history rendering, server-side filters, cursor pagination,
+offline fallback, detail modal, receipt reprint, mutation
+guards, cancellation flow, billing screen and the cloud
+status indicator, all against mocked API routes. CI gains a
+`browser` job and the milestone-11 branch trigger.
 
 ### Key invariants preserved
 - A local sale never fails because the server is unavailable (outbox +
