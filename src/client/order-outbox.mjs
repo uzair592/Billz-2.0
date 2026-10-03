@@ -1,4 +1,4 @@
-const DEFAULT_STORAGE_KEY = "pos_cloud_order_outbox_v1";
+export const DEFAULT_STORAGE_KEY = "pos_cloud_order_outbox_v1";
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
 
 function clone(value) {
