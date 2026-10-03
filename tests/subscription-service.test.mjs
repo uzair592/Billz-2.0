@@ -126,6 +126,16 @@ function fakePool({
       return { rows: attempt ? [attempt] : [] };
     }
 
+    if (sql.startsWith("SELECT id, status, idempotency_key, provider_checkout_session_id, provider_checkout_url, provider_customer_id, plan_hash FROM checkout_attempts")) {
+      // Find any live attempt for this restaurant
+      for (const [key, attempt] of checkoutAttempts.entries()) {
+        if (key.startsWith(`${values[0]}::`) && ['creating', 'created'].includes(attempt.status)) {
+          return { rows: [attempt] };
+        }
+      }
+      return { rows: [] };
+    }
+
     if (sql.startsWith("UPDATE checkout_attempts SET status = 'creating'")) {
       const attempt = checkoutAttempts.get(`${values[1]}::${values[2]}`) ||
                       checkoutAttempts.get(`${values[1]}::${values[3]}`); // check by id or key
@@ -445,6 +455,7 @@ describe("subscription service checkout", () => {
         [`${restaurantId}::${checkoutInput.idempotencyKey}`, {
           id: "attempt-1",
           status: "created",
+          idempotency_key: checkoutInput.idempotencyKey,
           provider_checkout_session_id: "cs_existing",
           provider_checkout_url: "https://checkout.stripe.com/existing",
           provider_customer_id: "cus_1",

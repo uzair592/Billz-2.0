@@ -6,7 +6,7 @@ CREATE TABLE checkout_attempts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id uuid NOT NULL REFERENCES restaurants(id) ON DELETE RESTRICT,
   idempotency_key text NOT NULL,
-  idempotency_key_hash text GENERATED ALWAYS AS (sha256(idempotency_key)) STORED,
+  idempotency_key_hash text GENERATED ALWAYS AS (encode(sha256(convert_to(idempotency_key, 'UTF8')), 'hex')) STORED,
   plan_code text NOT NULL,
   plan_hash text NOT NULL,
   success_url text NOT NULL,
@@ -24,6 +24,11 @@ CREATE TABLE checkout_attempts (
   UNIQUE (restaurant_id, idempotency_key)
 );
 
+-- Prevent multiple live checkout attempts per restaurant
+CREATE UNIQUE INDEX checkout_attempts_one_live_per_restaurant
+  ON checkout_attempts (restaurant_id)
+  WHERE status IN ('creating', 'created');
+
 CREATE INDEX checkout_attempts_restaurant_status_idx
   ON checkout_attempts (restaurant_id, status)
   WHERE status IN ('creating', 'created');
@@ -31,6 +36,14 @@ CREATE INDEX checkout_attempts_restaurant_status_idx
 CREATE INDEX checkout_attempts_expires_idx
   ON checkout_attempts (expires_at)
   WHERE status IN ('creating', 'created');
+
+-- Row-level security
+ALTER TABLE checkout_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE checkout_attempts FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY checkout_attempts_tenant_isolation ON checkout_attempts
+  USING (restaurant_id = current_setting('app.restaurant_id', true)::uuid)
+  WITH CHECK (restaurant_id = current_setting('app.restaurant_id', true)::uuid);
 
 COMMENT ON TABLE checkout_attempts IS
   'Durable idempotency records for provider checkout sessions. Prevents duplicate
@@ -63,5 +76,8 @@ COMMENT ON INDEX checkout_attempts_restaurant_status_idx IS
 
 COMMENT ON INDEX checkout_attempts_expires_idx IS
   'Finds expired attempts for cleanup or status transition.';
+
+COMMENT ON INDEX checkout_attempts_one_live_per_restaurant IS
+  'Enforces at most one live (creating/created) checkout attempt per restaurant.';
 
 COMMIT;

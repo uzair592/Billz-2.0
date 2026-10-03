@@ -161,6 +161,9 @@ export function createBillingWebhookService({
    * A `processing` row with an expired lease is reclaimed. A `processing` row
    * with an active lease is treated as in-progress and the caller should
    * return a retryable 503 so the provider retries.
+   *
+   * An exhausted event (attempts >= maxAttempts, or processing with expired
+   * lease that cannot be reclaimed) is terminal and will not be retried.
    */
   async function claimEvent({
     providerEventId, eventType, verified, payload, now, processingStatus = null,
@@ -194,15 +197,15 @@ export function createBillingWebhookService({
     );
     const row = existing.rows[0];
     if (!row) {
-      // Should not happen, but handle gracefully
       return { claimed: false, processingStatus: null, attempts: 0, exhausted: false, inProgress: false };
     }
 
     const leaseExpired = row.processing_status === "processing"
       && new Date(row.received_at).getTime() < now.getTime() - leaseSeconds * 1_000;
 
-    // If the event is being processed and the lease has expired, reclaim it
-    if (row.processing_status === "processing" && leaseExpired) {
+    // If the event is being processed and the lease has expired, try to reclaim it
+    // Only reclaim if attempts < maxAttempts (exhausted events are never reclaimed)
+    if (row.processing_status === "processing" && leaseExpired && row.attempts < maxAttempts) {
       const reclaimed = await pool.query(
         `UPDATE webhook_events
             SET processing_status = 'processing',
@@ -212,33 +215,62 @@ export function createBillingWebhookService({
             AND provider_event_id = $2
             AND processing_status = 'processing'
             AND received_at < $5
+            AND attempts < $6
           RETURNING id, processing_status, attempts`,
-        [provider.name, providerEventId, maxAttempts, now, new Date(now.getTime() - leaseSeconds * 1_000)],
+        [provider.name, providerEventId, maxAttempts, now, new Date(now.getTime() - leaseSeconds * 1_000), maxAttempts],
       );
       if (reclaimed.rows[0]) {
         return { claimed: true, attempts: reclaimed.rows[0].attempts, retry: true, processingStatus: "processing", reclaimed: true };
       }
-      // Another process reclaimed it first, fall through to re-check
+      // Another process reclaimed it first, or it was already exhausted - fall through to re-check
     }
 
+    // Re-read row after potential race
+    const fresh = await pool.query(
+      `SELECT processing_status, attempts, received_at
+         FROM webhook_events
+        WHERE provider = $1 AND provider_event_id = $2`,
+      [provider.name, providerEventId],
+    );
+    const freshRow = fresh.rows[0];
+    if (!freshRow) {
+      return { claimed: false, processingStatus: null, attempts: 0, exhausted: false, inProgress: false };
+    }
+
+    const freshLeaseExpired = freshRow.processing_status === "processing"
+      && new Date(freshRow.received_at).getTime() < now.getTime() - leaseSeconds * 1_000;
+
     // If currently being processed and lease not expired, it's actively in progress
-    if (row.processing_status === "processing" && !leaseExpired) {
-      return { claimed: false, processingStatus: "processing", attempts: row.attempts, exhausted: false, inProgress: true };
+    if (freshRow.processing_status === "processing" && !freshLeaseExpired) {
+      return { claimed: false, processingStatus: "processing", attempts: freshRow.attempts, exhausted: false, inProgress: true };
     }
 
     // Terminal states - no retry
-    if (row.processing_status === "processed" || row.processing_status === "ignored") {
+    if (freshRow.processing_status === "processed" || freshRow.processing_status === "ignored") {
       return {
         claimed: false,
-        processingStatus: row.processing_status,
-        attempts: row.attempts,
+        processingStatus: freshRow.processing_status,
+        attempts: freshRow.attempts,
         exhausted: false,
         inProgress: false,
       };
     }
 
+    // Exhausted: attempts >= maxAttempts, or processing with expired lease that cannot be reclaimed
+    const exhausted = freshRow.attempts >= maxAttempts
+      || (freshRow.processing_status === "processing" && freshLeaseExpired);
+    if (exhausted) {
+      return {
+        claimed: false,
+        processingStatus: freshRow.processing_status,
+        attempts: freshRow.attempts,
+        exhausted: true,
+        inProgress: false,
+      };
+    }
+
     // Retryable states: pending or failed, with attempts remaining
-    if (["pending", "failed"].includes(row.processing_status) && row.attempts < maxAttempts) {
+    if (["pending", "failed"].includes(freshRow.processing_status) && freshRow.attempts < maxAttempts) {
       const claimed = await pool.query(
         `UPDATE webhook_events
             SET processing_status = 'processing',
@@ -254,18 +286,32 @@ export function createBillingWebhookService({
       if (claimed.rows[0]) {
         return { claimed: true, attempts: claimed.rows[0].attempts, retry: true, processingStatus: "processing" };
       }
-      // Another process claimed it, fall through to re-check
+      // Another process claimed it, fall through to final re-read
     }
 
-    // Exhausted: failed/pending but attempts >= maxAttempts, or processing with expired lease but reclaimed by another
-    const exhausted = row.attempts >= maxAttempts
-      || (row.processing_status === "processing" && leaseExpired);
+    // Final re-read for any remaining race conditions
+    const final = await pool.query(
+      `SELECT processing_status, attempts, received_at
+         FROM webhook_events
+        WHERE provider = $1 AND provider_event_id = $2`,
+      [provider.name, providerEventId],
+    );
+    const finalRow = final.rows[0];
+    if (!finalRow) {
+      return { claimed: false, processingStatus: null, attempts: 0, exhausted: false, inProgress: false };
+    }
+
+const finalExhausted = finalRow.attempts >= maxAttempts
+      || (finalRow.processing_status === "processing" &&
+          new Date(finalRow.received_at).getTime() < now.getTime() - leaseSeconds * 1_000);
+
     return {
       claimed: false,
-      processingStatus: row.processing_status,
-      attempts: row.attempts,
-      exhausted,
-      inProgress: false,
+      processingStatus: finalRow.processing_status,
+      attempts: finalRow.attempts,
+      exhausted: finalExhausted,
+      inProgress: finalRow.processing_status === "processing" &&
+                  new Date(finalRow.received_at).getTime() >= now.getTime() - leaseSeconds * 1_000,
     };
   }
 
