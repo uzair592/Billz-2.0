@@ -193,5 +193,5 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current external-service-free run has 278 passing tests. PostgreSQL
+The current external-service-free run has 283 passing tests. PostgreSQL
 integration tests run separately with `npm run test:integration`.

@@ -28,10 +28,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -93,16 +95,25 @@ jobs:
       - name: Validate workflow YAML
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest
 
-      - name: Check git diff
-        run: git diff --check
+      - name: Check committed feature diff
+        shell: bash
+        run: |
+          git rev-parse --verify origin/main
+          merge_base="$(git merge-base HEAD origin/main)"
+          echo "Checking committed diff: $merge_base..HEAD"
+          git diff --check "$merge_base..HEAD"
+          git diff --check
 
-      - name: Scan repository for secrets
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove generated secret-scan report
-        run: rm -f results.sarif
+      - name: Scan full feature delta for secrets
+        shell: bash
+        run: |
+          merge_base="$(git merge-base HEAD origin/main)"
+          scan_range="$merge_base..HEAD"
+          echo "Scanning Gitleaks commit range: $scan_range"
+          docker run --rm \
+            -v "$PWD:/repo" \
+            ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git --redact --verbose --log-opts="$scan_range" /repo
 
       - name: Verify working tree clean
         run: |

@@ -809,6 +809,164 @@ it("releases a claim left behind by a crashed process", async () => {
     assert.equal(result.retryable, true);
     assert.equal(result.reason, "event_in_progress");
     assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
+    assert.equal(pool.updates().length, 0);
+  });
+
+  it("returns a retryable claim race when the winning worker releases to failed", async () => {
+    const pool = fakePool();
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "failed",
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 3_600_000),
+    });
+    const originalQuery = pool.query.bind(pool);
+    let loseClaim = true;
+    pool.query = async (text, values = []) => {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (loseClaim && sql.includes("processing_status IN ('pending', 'failed')")) {
+        loseClaim = false;
+        const row = pool.eventRow("evt_1");
+        row.processingStatus = "processing";
+        row.attempts += 1;
+        row.receivedAt = now;
+        row.processingStatus = "failed";
+        return { rows: [], rowCount: 0 };
+      }
+      return originalQuery(text, values);
+    };
+
+    const result = await handle(pool);
+
+    assert.deepEqual(result, {
+      accepted: false,
+      retryable: true,
+      reason: "event_claim_race",
+    });
+    assert.notEqual(result.duplicate, true);
+    assert.equal(pool.eventRow("evt_1").processingStatus, "failed");
+    assert.equal(pool.updates().length, 0);
+    assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
+  });
+
+  it("returns a retryable claim race when the final state is pending", async () => {
+    const pool = fakePool();
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "pending",
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 3_600_000),
+    });
+    const originalQuery = pool.query.bind(pool);
+    pool.query = async (text, values = []) => {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (sql.includes("processing_status IN ('pending', 'failed')")) {
+        return { rows: [], rowCount: 0 };
+      }
+      return originalQuery(text, values);
+    };
+
+    const result = await handle(pool);
+
+    assert.equal(result.accepted, false);
+    assert.equal(result.retryable, true);
+    assert.equal(result.reason, "event_claim_race");
+    assert.notEqual(result.duplicate, true);
+    assert.equal(pool.updates().length, 0);
+    assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
+  });
+
+  it("returns a retryable claim race when the final processing lease is expired", async () => {
+    const pool = fakePool();
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "processing",
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 3_600_000),
+    });
+    const originalQuery = pool.query.bind(pool);
+    pool.query = async (text, values = []) => {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (sql.includes("received_at < $5")) return { rows: [], rowCount: 0 };
+      return originalQuery(text, values);
+    };
+
+    const result = await handle(pool);
+
+    assert.equal(result.accepted, false);
+    assert.equal(result.retryable, true);
+    assert.equal(result.reason, "event_claim_race");
+    assert.notEqual(result.duplicate, true);
+    assert.equal(pool.updates().length, 0);
+    assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
+  });
+
+  it("keeps a processed final race state as a terminal duplicate", async () => {
+    const pool = fakePool();
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "failed",
+      attempts: 1,
+      receivedAt: new Date(now.getTime() - 3_600_000),
+    });
+    const originalQuery = pool.query.bind(pool);
+    pool.query = async (text, values = []) => {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (sql.includes("processing_status IN ('pending', 'failed')")) {
+        pool.eventRow("evt_1").processingStatus = "processed";
+        return { rows: [], rowCount: 0 };
+      }
+      return originalQuery(text, values);
+    };
+
+    const result = await handle(pool);
+
+    assert.equal(result.accepted, true);
+    assert.equal(result.duplicate, true);
+    assert.equal(result.retryable, false);
+    assert.equal(pool.updates().length, 0);
+    assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
+  });
+
+  it("keeps a final maximum-attempt race state exhausted", async () => {
+    const pool = fakePool({ maxAttempts: 3 });
+    pool.webhookEvents.set("stripe::evt_1", {
+      id: "wevt_1",
+      providerEventId: "evt_1",
+      processingStatus: "failed",
+      attempts: 2,
+      receivedAt: new Date(now.getTime() - 3_600_000),
+    });
+    const originalQuery = pool.query.bind(pool);
+    pool.query = async (text, values = []) => {
+      const sql = text.replace(/\s+/g, " ").trim();
+      if (sql.includes("processing_status IN ('pending', 'failed')")) {
+        const row = pool.eventRow("evt_1");
+        row.attempts = 3;
+        row.processingStatus = "failed";
+        return { rows: [], rowCount: 0 };
+      }
+      return originalQuery(text, values);
+    };
+
+    const result = await handle(pool);
+
+    assert.equal(result.accepted, true);
+    assert.equal(result.exhausted, true);
+    assert.equal(result.retryable, false);
+    assert.equal(result.reason, "event_exhausted");
+    assert.equal(pool.updates().length, 0);
+    assert.equal(pool.state.payments.length, 0);
+    assert.equal(pool.state.audit.length, 0);
   });
 
   it("keeps an active final-attempt lease in progress instead of exhausting it", async () => {

@@ -99,6 +99,14 @@ function checkoutPayloadHash({ planCode, successUrl, cancelUrl }) {
     .slice(0, 32);
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describeDatabase("billing against real PostgreSQL", () => {
   let admin;
   let app;
@@ -620,6 +628,134 @@ describeDatabase("billing against real PostgreSQL", () => {
     assert.equal(third.duplicate, true);
     assert.equal(third.applied, undefined);
     assert.equal(paymentsAfter.rows[0].total, paymentsBefore.rows[0].total);
+  });
+
+  it("does not report a claim loser as a duplicate after the winner releases", async () => {
+    await resetBillingState(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    await admin.query(
+      `INSERT INTO provider_tenant_routes
+         (provider, provider_reference, provider_reference_type, restaurant_id)
+       VALUES ('stripe', 'cus_claim_race', 'customer', $1)`,
+      [a.restaurantId],
+    );
+    await admin.query(
+      `INSERT INTO webhook_events (
+         provider, provider_event_id, event_type, signature_verified, payload,
+         processing_status, attempts, received_at, last_error
+       ) VALUES (
+         'stripe', 'evt_claim_race', 'subscription.renewed', true, '{}'::jsonb,
+         'failed', 1, $1, 'first delivery failed'
+       )`,
+      [new Date(now.getTime() - 3_600_000)],
+    );
+
+    const loserAtClaim = deferred();
+    const winnerClaimed = deferred();
+    const allowWinnerToApply = deferred();
+    const winnerReleased = deferred();
+    let loserLostClaim = false;
+
+    const loserPool = {
+      connect: app.connect.bind(app),
+      async query(text, values = []) {
+        const sql = text.replace(/\s+/g, " ").trim();
+        if (sql.includes("processing_status IN ('pending', 'failed')")) {
+          loserAtClaim.resolve();
+          await winnerClaimed.promise;
+          const result = await app.query(text, values);
+          assert.equal(result.rowCount, 0, "the competing worker must win the conditional claim");
+          loserLostClaim = true;
+          allowWinnerToApply.resolve();
+          return result;
+        }
+        if (loserLostClaim && sql.startsWith("SELECT processing_status, attempts")) {
+          await winnerReleased.promise;
+        }
+        return app.query(text, values);
+      },
+    };
+    const winnerPool = {
+      async connect() {
+        winnerClaimed.resolve();
+        await allowWinnerToApply.promise;
+        return app.connect();
+      },
+      async query(text, values = []) {
+        const sql = text.replace(/\s+/g, " ").trim();
+        const result = await app.query(text, values);
+        if (sql.includes("SET processing_status = 'failed'")) winnerReleased.resolve();
+        return result;
+      },
+    };
+    const provider = {
+      name: "stripe",
+      verifyWebhook: () => ({
+        verified: true,
+        event: webhookEvent({
+          providerEventId: "evt_claim_race",
+          providerSubscriptionId: null,
+          providerCustomerId: "cus_claim_race",
+          providerPaymentId: "pi_claim_race",
+        }),
+      }),
+    };
+    const losingDelivery = createBillingWebhookService({
+      pool: loserPool,
+      provider,
+      clock: () => now,
+    });
+    const winningDelivery = createBillingWebhookService({
+      pool: winnerPool,
+      provider,
+      clock: () => now,
+    });
+
+    const loserResultPromise = losingDelivery.handle({ rawBody: "{}", signatureHeader: "x" });
+    await loserAtClaim.promise;
+    const winnerResultPromise = winningDelivery.handle({ rawBody: "{}", signatureHeader: "x" });
+    const [loserResult, winnerResult] = await Promise.all([
+      loserResultPromise,
+      winnerResultPromise,
+    ]);
+
+    assert.deepEqual(loserResult, {
+      accepted: false,
+      retryable: true,
+      reason: "event_claim_race",
+    });
+    assert.equal(winnerResult.accepted, false);
+    assert.equal(winnerResult.retryable, true);
+    assert.equal(winnerResult.reason, "subscription_not_found");
+
+    const afterRace = await admin.query(
+      `SELECT
+         (SELECT processing_status FROM webhook_events
+           WHERE provider_event_id = 'evt_claim_race') AS event_status,
+         (SELECT attempts FROM webhook_events
+           WHERE provider_event_id = 'evt_claim_race') AS attempts,
+         (SELECT count(*)::int FROM billing_payments
+           WHERE provider_payment_id = 'pi_claim_race') AS payments,
+         (SELECT count(*)::int FROM audit_logs
+           WHERE metadata->>'providerEventId' = 'evt_claim_race') AS audits`,
+    );
+    assert.deepEqual(afterRace.rows[0], {
+      event_status: "failed",
+      attempts: 2,
+      payments: 0,
+      audits: 0,
+    });
+
+    await admin.query(
+      `UPDATE webhook_events
+          SET processing_status = 'processed', processed_at = $1
+        WHERE provider_event_id = 'evt_claim_race'`,
+      [now],
+    );
+    const terminal = await losingDelivery.handle({ rawBody: "{}", signatureHeader: "x" });
+    assert.equal(terminal.accepted, true);
+    assert.equal(terminal.duplicate, true);
+    assert.equal(terminal.retryable, false);
   });
 
   it("atomically rolls back a crash before commit and applies one replay", async () => {

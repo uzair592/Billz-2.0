@@ -162,8 +162,8 @@ export function createBillingWebhookService({
    * with an active lease is treated as in-progress and the caller should
    * return a retryable 503 so the provider retries.
    *
-   * An exhausted event (attempts >= maxAttempts, or processing with expired
-   * lease that cannot be reclaimed) is terminal and will not be retried.
+   * An event is exhausted only after it reaches `maxAttempts`. Losing a reclaim
+   * race while the final row is still nonterminal remains retryable.
    */
   async function claimEvent({
     providerEventId, eventType, verified, payload, now, processingStatus = null,
@@ -285,17 +285,56 @@ export function createBillingWebhookService({
     );
     const finalRow = final.rows[0];
     if (!finalRow) {
-      return { claimed: false, processingStatus: null, attempts: 0, exhausted: false, inProgress: false };
+      return {
+        claimed: false,
+        processingStatus: null,
+        attempts: 0,
+        exhausted: false,
+        inProgress: false,
+        retryable: true,
+        reason: "event_claim_race",
+      };
     }
 
     const finalLeaseActive = finalRow.processing_status === "processing"
       && new Date(finalRow.received_at).getTime() >= cutoff.getTime();
+    if (["processed", "ignored"].includes(finalRow.processing_status)) {
+      return {
+        claimed: false,
+        processingStatus: finalRow.processing_status,
+        attempts: finalRow.attempts,
+        exhausted: false,
+        inProgress: false,
+      };
+    }
+    if (finalLeaseActive) {
+      return {
+        claimed: false,
+        processingStatus: "processing",
+        attempts: finalRow.attempts,
+        exhausted: false,
+        inProgress: true,
+        retryable: true,
+        reason: "event_in_progress",
+      };
+    }
+    if (finalRow.attempts >= maxAttempts) {
+      return {
+        claimed: false,
+        processingStatus: finalRow.processing_status,
+        attempts: finalRow.attempts,
+        exhausted: true,
+        inProgress: false,
+      };
+    }
     return {
       claimed: false,
       processingStatus: finalRow.processing_status,
       attempts: finalRow.attempts,
-      exhausted: finalRow.attempts >= maxAttempts,
-      inProgress: finalLeaseActive,
+      exhausted: false,
+      inProgress: false,
+      retryable: true,
+      reason: "event_claim_race",
     };
   }
 
@@ -697,6 +736,14 @@ export function createBillingWebhookService({
           "billing_event_in_progress",
         );
         return { accepted: false, retryable: true, reason: "event_in_progress" };
+      }
+
+      if (!claim.claimed && claim.retryable) {
+        log.warn(
+          logContext(event, { attempts: claim.attempts, processingStatus: claim.processingStatus }),
+          "billing_event_claim_race",
+        );
+        return { accepted: false, retryable: true, reason: "event_claim_race" };
       }
 
       if (!claim.claimed) {
