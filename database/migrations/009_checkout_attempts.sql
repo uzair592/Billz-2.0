@@ -6,7 +6,7 @@ CREATE TABLE checkout_attempts (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   restaurant_id uuid NOT NULL REFERENCES restaurants(id) ON DELETE RESTRICT,
   idempotency_key text NOT NULL,
-  idempotency_key_hash text GENERATED ALWAYS AS (encode(sha256(convert_to(idempotency_key, 'UTF8')), 'hex')) STORED,
+  idempotency_key_hash text GENERATED ALWAYS AS (encode(digest(idempotency_key, 'sha256'), 'hex')) STORED,
   plan_code text NOT NULL,
   plan_hash text NOT NULL,
   success_url text NOT NULL,

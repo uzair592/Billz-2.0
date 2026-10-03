@@ -80,9 +80,12 @@ function fakePool({
 
     if (sql.startsWith("UPDATE checkout_attempts SET status = 'expired'")) {
       for (const attempt of new Set(checkoutAttempts.values())) {
+        const cancelledSubscription = sql.includes("subscription_id = $2")
+          && attempt.subscription_id === values[1];
+        const stale = attempt.expires_at
+          && new Date(attempt.expires_at).getTime() <= now.getTime();
         if (["creating", "created"].includes(attempt.status)
-          && attempt.expires_at
-          && new Date(attempt.expires_at).getTime() <= now.getTime()) {
+          && (cancelledSubscription || stale)) {
           attempt.status = "expired";
         }
       }
@@ -528,6 +531,7 @@ describe("subscription service checkout", () => {
       plan_code: "STANDARD",
       plan_hash: computePlanHash(checkoutInput),
       subscription_id: "33333333-3333-4333-8333-333333333333",
+      subscription_status: "pending_checkout",
       provider_checkout_session_id: "cs_existing",
       provider_checkout_url: "https://checkout.stripe.com/existing",
       stored_price_id: "44444444-4444-4444-8444-444444444444",
@@ -578,6 +582,7 @@ describe("subscription service checkout", () => {
       plan_code: "STANDARD",
       plan_hash: computePlanHash(checkoutInput),
       subscription_id: "33333333-3333-4333-8333-333333333333",
+      subscription_status: "pending_checkout",
       provider_idempotency_key: "ca_original",
       error_message: "temporary failure",
     };
@@ -768,6 +773,11 @@ describe("subscription service plan changes, cancellation, and resume", () => {
   });
 
   it("cancels immediately when the owner asks for no grace", async () => {
+    const checkoutAttempts = new Map([[`${restaurantId}::checkout`, {
+      id: "attempt-1",
+      subscription_id: "33333333-3333-4333-8333-333333333333",
+      status: "created",
+    }]]);
     const pool = fakePool({
       subscriptions: [subscriptionRow({
         restaurantId,
@@ -775,12 +785,14 @@ describe("subscription service plan changes, cancellation, and resume", () => {
         provider_subscription_id: "sub_1",
         createdAt: 1,
       })],
+      checkoutAttempts,
     });
 
     const result = await service(pool).cancel({ tenant, user: owner, cancelAtPeriodEnd: false });
 
     assert.equal(result.accessUntil, null);
     assert.equal(pool.state.subscriptions[0].status, "cancelled");
+    assert.equal(checkoutAttempts.get(`${restaurantId}::checkout`).status, "expired");
     assert.ok(pool.audit.some((row) => row.action === "subscription.cancelled"));
   });
 

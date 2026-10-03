@@ -350,7 +350,7 @@ export function createSubscriptionService(pool, {
                   ca.expires_at, pp.id AS stored_price_id,
                   pp.plan_id AS stored_plan_id, pp.amount_minor,
                   pp.currency_code, pp.provider_price_id,
-                  p.name AS plan_name
+                  p.name AS plan_name, s.status AS subscription_status
              FROM checkout_attempts ca
              LEFT JOIN subscriptions s
                ON s.restaurant_id = ca.restaurant_id
@@ -411,7 +411,9 @@ export function createSubscriptionService(pool, {
           }
 
           if (["failed", "expired"].includes(sameKey.status)) {
-            if (!sameKey.subscription_id || !sameKey.provider_idempotency_key) {
+            if (!sameKey.subscription_id
+              || !sameKey.provider_idempotency_key
+              || sameKey.subscription_status !== "pending_checkout") {
               throw billingError(
                 "The stored checkout attempt cannot be retried safely.",
                 "CHECKOUT_ATTEMPT_INVALID",
@@ -753,6 +755,16 @@ export function createSubscriptionService(pool, {
               JSON.stringify({ providerStatus: result.status ?? null }),
             ],
           );
+          if (!cancelAtPeriodEnd) {
+            await client.query(
+              `UPDATE checkout_attempts
+                  SET status = 'expired', updated_at = $3::timestamptz
+                WHERE restaurant_id = $1
+                  AND subscription_id = $2
+                  AND status IN ('creating', 'created')`,
+              [restaurantId, subscription.row.id, now],
+            );
+          }
           await recordAudit(client, {
             restaurantId,
             userId: user?.id ?? null,
