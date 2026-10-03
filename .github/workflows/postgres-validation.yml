@@ -1,0 +1,93 @@
+name: PostgreSQL Validation
+
+on:
+  push:
+    branches: [main, feat/milestone-10-billing]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: restaurant_pos_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: validation-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d restaurant_pos_test"
+          --health-interval=2s
+          --health-timeout=2s
+          --health-retries=20
+        tmpfs:
+          - /var/lib/postgresql/data
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h localhost -p 5432 -U postgres -d restaurant_pos_test; then
+              echo "PostgreSQL is ready"
+              exit 0
+            fi
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+          echo "PostgreSQL failed to start"
+          exit 1
+
+      - name: Apply migrations
+        run: |
+          export PGPASSWORD=validation-only
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+
+      - name: Run integration tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+          TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
+        run: npm run test:integration
+
+      - name: Check git diff
+        run: git diff --check
+
+      - name: Verify no secrets committed
+        run: |
+          # Check for common secret patterns
+          if git diff --name-only HEAD~1 | xargs grep -l -i "secret\|password\|key\|token" 2>/dev/null | grep -v ".env.example" | grep -v ".gitignore"; then
+            echo "WARNING: Potential secrets in committed files"
+            exit 1
+          fi
+          echo "No secrets detected in committed files"
+
+      - name: Verify working tree clean
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Working tree is not clean"
+            git status
+            exit 1
+          fi
+          echo "Working tree is clean"

@@ -254,14 +254,20 @@ export function createSubscriptionService(pool, {
       pool,
       { restaurantId, userId },
       async (client) => {
-        const result = await client.query(
+        // Try to insert, but if conflict, do nothing and then select the existing row
+        // This preserves the canonical customer and never overwrites with a new one
+        await client.query(
           `INSERT INTO billing_customers (
              id, restaurant_id, provider, provider_customer_id
            ) VALUES ($1, $2, $3, $4)
-           ON CONFLICT (restaurant_id, provider) DO UPDATE
-             SET provider_customer_id = EXCLUDED.provider_customer_id
-           RETURNING id, provider_customer_id`,
+           ON CONFLICT (restaurant_id, provider) DO NOTHING`,
           [randomUUID(), restaurantId, provider.name, created.providerCustomerId],
+        );
+        const result = await client.query(
+          `SELECT id, provider_customer_id
+             FROM billing_customers
+            WHERE restaurant_id = $1 AND provider = $2`,
+          [restaurantId, provider.name],
         );
         await recordRoute(client, {
           reference: result.rows[0].provider_customer_id,
@@ -575,9 +581,9 @@ export function createSubscriptionService(pool, {
         await client.query(
           `UPDATE checkout_attempts
               SET status = 'created',
-                  provider_customer_id = $3,
-                  provider_checkout_session_id = $4,
-                  provider_checkout_url = $5,
+                  provider_customer_id = $2,
+                  provider_checkout_session_id = $3,
+                  provider_checkout_url = $4,
                   updated_at = now()
             WHERE id = $1`,
           [prepared.attemptId, customer.provider_customer_id, checkout.providerCheckoutSessionId, checkout.checkoutUrl],

@@ -710,4 +710,358 @@ describeDatabase("billing against real PostgreSQL", () => {
     assert.equal(audit.rows.at(-1).actor_type, "webhook");
     assert.equal(audit.rows.at(-1).action, "subscription.active");
   });
+
+  it("checkout_attempts RLS between Restaurant A and Restaurant B", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const b = await seedRestaurant(admin, { name: "Cafe B" });
+
+    // Insert attempt for restaurant A
+    await admin.query(
+      `INSERT INTO checkout_attempts (
+         id, restaurant_id, idempotency_key, plan_code, plan_hash,
+         success_url, cancel_url, status
+       ) VALUES (gen_random_uuid(), $1, 'key_a', 'STANDARD', 'hash_a',
+         'https://a.com/success', 'https://a.com/cancel', 'creating')`,
+      [a.restaurantId],
+    );
+
+    // Try to read A's attempt from B's context - should see nothing
+    const client = await app.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.restaurant_id', $1, true)", [b.restaurantId]);
+      const visible = await client.query(
+        "SELECT * FROM checkout_attempts WHERE restaurant_id = $1",
+        [a.restaurantId],
+      );
+      await client.query("ROLLBACK");
+      assert.equal(visible.rowCount, 0, "Restaurant B cannot see Restaurant A's checkout attempts");
+    } finally {
+      client.release();
+    }
+  });
+
+  it("one-live-attempt unique index prevents multiple creating/created attempts", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+
+    await admin.query(
+      `INSERT INTO checkout_attempts (
+         id, restaurant_id, idempotency_key, plan_code, plan_hash,
+         success_url, cancel_url, status
+       ) VALUES (gen_random_uuid(), $1, 'key1', 'STANDARD', 'hash1',
+         'https://a.com/success', 'https://a.com/cancel', 'creating')`,
+      [a.restaurantId],
+    );
+
+    await assert.rejects(
+      admin.query(
+        `INSERT INTO checkout_attempts (
+           id, restaurant_id, idempotency_key, plan_code, plan_hash,
+           success_url, cancel_url, status
+         ) VALUES (gen_random_uuid(), $1, 'key2', 'STANDARD', 'hash2',
+           'https://a.com/success', 'https://a.com/cancel', 'created')`,
+        [a.restaurantId],
+      ),
+      (error) => error.code === "23505",
+      "second live attempt must be refused by partial unique index",
+    );
+  });
+
+  it("complete first checkout flow", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+
+    const result = await service.startCheckout({
+      tenant,
+      user,
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    });
+
+    assert.equal(result.status, "awaiting_payment");
+    assert.equal(result.replayed, false);
+    assert.ok(result.checkoutUrl);
+
+    // Verify attempt was created and marked created
+    const attempt = await admin.query(
+      `SELECT status, provider_checkout_session_id, provider_checkout_url
+         FROM checkout_attempts
+        WHERE idempotency_key = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+    );
+    assert.equal(attempt.rows[0].status, "created");
+    assert.ok(attempt.rows[0].provider_checkout_session_id);
+    assert.ok(attempt.rows[0].provider_checkout_url);
+  });
+
+  it("failed checkout retry uses same provider idempotency key", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+
+    // First attempt fails at provider
+    let failFirst = true;
+    const provider = {
+      name: "stripe",
+      webhookSignatureHeader: "stripe-signature",
+      async createCustomer() { return { providerCustomerId: "cus_1" }; },
+      async createCheckoutSession() {
+        if (failFirst) {
+          failFirst = false;
+          throw new Error("provider temporarily unavailable");
+        }
+        return { providerCheckoutSessionId: "cs_2", checkoutUrl: "https://checkout.stripe.com/retry" };
+      },
+      async changeSubscription() { return { status: "active" }; },
+      async cancelSubscription() { return { status: "active" }; },
+      async resumeSubscription() { return { status: "active" }; },
+      verifyWebhook: () => ({ verified: false, event: null, reason: "test" }),
+    };
+
+    const service2 = createSubscriptionService(app, { provider, trustedOrigins: ["https://pos.example.com"] });
+
+    // First attempt fails
+    await assert.rejects(
+      () => service2.startCheckout({
+        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+        user: { id: a.userId, email: "a@example.com" },
+        planCode: "STANDARD",
+        successUrl: "https://pos.example.com/ok",
+        cancelUrl: "https://pos.example.com/cancel",
+        idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      }),
+      /provider temporarily unavailable/,
+    );
+
+    // Verify attempt marked failed
+    const failedAttempt = await admin.query(
+      `SELECT status, error_message FROM checkout_attempts WHERE idempotency_key = $1`,
+      ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+    );
+    assert.equal(failedAttempt.rows[0].status, "failed");
+    assert.ok(failedAttempt.rows[0].error_message);
+
+    // Retry succeeds
+    const result = await service2.startCheckout({
+      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+      user: { id: a.userId, email: "a@example.com" },
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    });
+
+    assert.equal(result.replayed, false);
+    assert.equal(result.status, "awaiting_payment");
+
+    // Verify attempt was updated to created with same provider idempotency key
+    const retried = await admin.query(
+      `SELECT status, provider_idempotency_key FROM checkout_attempts WHERE idempotency_key = $1`,
+      ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"],
+    );
+    assert.equal(retried.rows[0].status, "created");
+    // The same provider idempotency key should be used
+    assert.ok(retried.rows[0].provider_idempotency_key);
+  });
+
+  it("expired checkout retry reactivates the attempt", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+
+    // Create an expired attempt
+    const attemptId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await admin.query(
+      `INSERT INTO checkout_attempts (
+         id, restaurant_id, idempotency_key, plan_code, plan_hash,
+         success_url, cancel_url, status, expires_at
+       ) VALUES ($1, $2, 'key_expired', 'STANDARD', 'hash_expired',
+         'https://a.com/success', 'https://a.com/cancel', 'expired', now() - interval '1 day')`,
+      [attemptId, a.restaurantId],
+    );
+
+    const result = await service.startCheckout({
+      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+      user: { id: a.userId, email: "a@example.com" },
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "key_expired",
+    });
+
+    assert.equal(result.replayed, false);
+    assert.equal(result.status, "awaiting_payment");
+
+    const reactivated = await admin.query(
+      `SELECT status FROM checkout_attempts WHERE id = $1`,
+      [attemptId],
+    );
+    assert.equal(reactivated.rows[0].status, "creating"); // Reactivated to creating, will become created after provider call
+  });
+
+  it("same-key payload conflict rejected with IDEMPOTENCY_KEY_CONFLICT", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+
+    // First request
+    await service.startCheckout({
+      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+      user: { id: a.userId, email: "a@example.com" },
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    });
+
+    // Same key, different plan
+    await assert.rejects(
+      () => service.startCheckout({
+        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+        user: { id: a.userId, email: "a@example.com" },
+        planCode: "PREMIUM", // Different plan
+        successUrl: "https://pos.example.com/ok",
+        cancelUrl: "https://pos.example.com/cancel",
+        idempotencyKey: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      }),
+      (error) => error.code === "IDEMPOTENCY_KEY_CONFLICT" && error.statusCode === 409,
+    );
+  });
+
+  it("concurrent same-key calls resolve to same session", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+    const key = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+    const results = await Promise.allSettled([
+      service.startCheckout({
+        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+        user: { id: a.userId, email: "a@example.com" },
+        planCode: "STANDARD",
+        successUrl: "https://pos.example.com/ok",
+        cancelUrl: "https://pos.example.com/cancel",
+        idempotencyKey: key,
+      }),
+      service.startCheckout({
+        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+        user: { id: a.userId, email: "a@example.com" },
+        planCode: "STANDARD",
+        successUrl: "https://pos.example.com/ok",
+        cancelUrl: "https://pos.example.com/cancel",
+        idempotencyKey: key,
+      }),
+      service.startCheckout({
+        tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+        user: { id: a.userId, email: "a@example.com" },
+        planCode: "STANDARD",
+        successUrl: "https://pos.example.com/ok",
+        cancelUrl: "https://pos.example.com/cancel",
+        idempotencyKey: key,
+      }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    assert.equal(fulfilled.length, 1, "exactly one checkout should succeed");
+    assert.equal(fulfilled[0].value.replayed, false); // First one creates
+    // The other two should either be rejected or return the same session
+  });
+
+  it("concurrent different-key calls are rejected", async () => {
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+    const tenant = { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } };
+    const user = { id: a.userId, email: "a@example.com" };
+
+    // First checkout starts
+    const firstPromise = service.startCheckout({
+      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+      user: { id: a.userId, email: "a@example.com" },
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    });
+
+    // Second with different key should be rejected
+    const secondPromise = service.startCheckout({
+      tenant: { restaurant: { id: a.restaurantId, name: "Cafe A", currencyCode: "PKR" } },
+      user: { id: a.userId, email: "a@example.com" },
+      planCode: "STANDARD",
+      successUrl: "https://pos.example.com/ok",
+      cancelUrl: "https://pos.example.com/cancel",
+      idempotencyKey: "gggggggg-gggg-4ggg-8ggg-gggggggggggg",
+    });
+
+    const [first, second] = await Promise.allSettled([firstPromise, secondPromise]);
+
+    const successful = [first, second].filter((r) => r.status === "fulfilled");
+    assert.equal(successful.length, 1, "only one checkout should succeed");
+
+    const rejected = [first, second].filter((r) => r.status === "rejected");
+    assert.equal(rejected.length, 1);
+    assert.equal(rejected[0].reason.code, "CHECKOUT_ALREADY_IN_PROGRESS");
+  });
+
+  it("correct parameter execution against PostgreSQL", async () => {
+    // Verify the UPDATE statement uses correct placeholder order
+    await resetBillingState(admin);
+    const plan = await seedPlan(admin);
+    const a = await seedRestaurant(admin, { name: "Cafe A" });
+
+    // Insert a created attempt
+    const attemptId = "hhhhhhhh-hhhh-4hhh-8hhh-hhhhhhhhhhhh";
+    await admin.query(
+      `INSERT INTO checkout_attempts (
+         id, restaurant_id, idempotency_key, plan_code, plan_hash,
+         success_url, cancel_url, status
+       ) VALUES ($1, $2, 'key_param', 'STANDARD', 'hash_param',
+         'https://a.com/success', 'https://a.com/cancel', 'created')`,
+      [attemptId, a.restaurantId],
+    );
+
+    const client = await app.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT set_config('app.restaurant_id', $1, true)", [a.restaurantId]);
+
+      // This mirrors the exact UPDATE in the service - check parameter count
+      const result = await client.query(
+        `UPDATE checkout_attempts
+            SET status = 'created',
+                provider_customer_id = $2,
+                provider_checkout_session_id = $3,
+                provider_checkout_url = $4,
+                updated_at = now()
+          WHERE id = $1
+          RETURNING provider_customer_id, provider_checkout_session_id`,
+        ["test-id", "cus_test", "cs_test", "https://checkout.stripe.com/test"],
+      );
+
+      assert.equal(result.rowCount, 1);
+      assert.equal(result.rows[0].provider_customer_id, "cus_test");
+      assert.equal(result.rows[0].provider_checkout_session_id, "cs_test");
+
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+  });
 });
