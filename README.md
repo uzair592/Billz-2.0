@@ -354,13 +354,14 @@ The current template defines:
 | Variable | Purpose |
 |---|---|
 | `NODE_ENV` | Runtime environment |
-| `APP_ORIGIN` | Only trusted browser origin |
+| `TRUSTED_ORIGIN` | Only trusted browser origin |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `SESSION_SECRET` | Session-related server secret |
 | `PASSWORD_PEPPER` | Secret appended before Argon2id hashing |
 | `PAYMENT_PROVIDER` | Selected billing adapter |
-| `PAYMENT_API_KEY` | Server-only payment credential |
-| `PAYMENT_WEBHOOK_SECRET` | Webhook signature secret |
+| `STRIPE_SECRET_KEY` | Server-only Stripe credential |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |
+| `STRIPE_PUBLISHABLE_KEY` | Browser-safe Stripe key |
 | `OBJECT_STORAGE_*` | Tenant file-storage configuration |
 
 Payment keys and object-storage credentials must never be exposed to browser JavaScript.

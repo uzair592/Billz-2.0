@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createSubscriptionService } from "../src/server/billing/subscription-service.mjs";
@@ -11,6 +12,11 @@ const tenant = {
   restaurant: { id: restaurantId, name: "Example Cafe", currencyCode: "PKR" },
 };
 const owner = { id: userId, email: "owner@example.com" };
+
+function computePlanHash({ planCode, successUrl, cancelUrl }) {
+  const canonical = `${planCode.toUpperCase()}|${successUrl}|${cancelUrl}`;
+  return createHash("sha256").update(canonical).digest("hex").slice(0, 32);
+}
 
 function subscriptionRow(overrides = {}) {
   return {
@@ -50,6 +56,7 @@ function fakePool({
     provider_price_id: "price_standard",
   }],
   billingCustomer = null,
+  checkoutAttempts = new Map(),
   failOn = null,
 } = {}) {
   const calls = [];
@@ -112,6 +119,69 @@ function fakePool({
         restaurantId: values[1],
       };
       return { rows: [state.billingCustomer] };
+    }
+
+    if (sql.startsWith("SELECT id, status, provider_checkout_session_id, provider_checkout_url, provider_customer_id, plan_hash FROM checkout_attempts")) {
+      const attempt = checkoutAttempts.get(`${values[0]}::${values[1]}`);
+      return { rows: attempt ? [attempt] : [] };
+    }
+
+    if (sql.startsWith("UPDATE checkout_attempts SET status = 'creating'")) {
+      const attempt = checkoutAttempts.get(`${values[1]}::${values[2]}`) ||
+                      checkoutAttempts.get(`${values[1]}::${values[3]}`); // check by id or key
+      if (attempt) {
+        attempt.status = "creating";
+        attempt.plan_hash = values[3];
+        attempt.success_url = values[4];
+        attempt.cancel_url = values[5];
+        attempt.error_message = null;
+        attempt.expires_at = new Date(Date.now() + 3600000);
+      }
+      return { rows: [] };
+    }
+
+    if (sql.startsWith("INSERT INTO checkout_attempts")) {
+      const attemptId = values[0];
+      const key = values[2];
+      const attempt = {
+        id: attemptId,
+        status: "creating",
+        provider_checkout_session_id: null,
+        provider_checkout_url: null,
+        provider_customer_id: null,
+        plan_hash: values[4],
+      };
+      checkoutAttempts.set(`${values[1]}::${key}`, { ...attempt, id: attemptId });
+      checkoutAttempts.set(`${values[1]}::${attemptId}`, { ...attempt, id: attemptId });
+      return { rows: [{ id: attemptId }] };
+    }
+
+    if (sql.startsWith("INSERT INTO checkout_attempts")) {
+      const attemptId = values[0];
+      const key = values[2];
+      const attempt = {
+        id: attemptId,
+        status: "creating",
+        provider_checkout_session_id: null,
+        provider_checkout_url: null,
+        provider_customer_id: null,
+        plan_hash: values[4],
+      };
+      checkoutAttempts.set(`${values[1]}::${key}`, { ...attempt, id: attemptId });
+      checkoutAttempts.set(`${values[1]}::${attemptId}`, { ...attempt, id: attemptId });
+      return { rows: [{ id: attemptId }] };
+    }
+
+    if (sql.startsWith("UPDATE checkout_attempts SET status = 'created'")) {
+      const attempt = checkoutAttempts.get(`${values[1]}::${values[2]}`) ||
+                      checkoutAttempts.get(`${values[1]}::${values[4]}`); // check by id or customer
+      if (attempt) {
+        attempt.status = "created";
+        attempt.provider_customer_id = values[2];
+        attempt.provider_checkout_session_id = values[3];
+        attempt.provider_checkout_url = values[4];
+      }
+      return { rows: [] };
     }
 
     if (sql.startsWith("INSERT INTO subscriptions")) {
@@ -371,6 +441,20 @@ describe("subscription service checkout", () => {
           },
         },
       })],
+      checkoutAttempts: new Map([
+        [`${restaurantId}::${checkoutInput.idempotencyKey}`, {
+          id: "attempt-1",
+          status: "created",
+          provider_checkout_session_id: "cs_existing",
+          provider_checkout_url: "https://checkout.stripe.com/existing",
+          provider_customer_id: "cus_1",
+          plan_hash: computePlanHash({
+            planCode: checkoutInput.planCode,
+            successUrl: checkoutInput.successUrl,
+            cancelUrl: checkoutInput.cancelUrl,
+          }),
+        }],
+      ]),
     });
     const provider = fakeProvider();
 

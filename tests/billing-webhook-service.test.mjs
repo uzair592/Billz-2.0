@@ -105,7 +105,7 @@ function fakePool({
     if (sql.startsWith("SELECT processing_status, attempts")) {
       const row = rowFor(values[1]);
       return {
-        rows: row ? [{ processing_status: row.processingStatus, attempts: row.attempts }] : [],
+        rows: row ? [{ processing_status: row.processingStatus, attempts: row.attempts, received_at: row.receivedAt }] : [],
       };
     }
 
@@ -125,6 +125,17 @@ function fakePool({
       }
       const row = rowFor(values[1]);
       if (!row) return { rows: [], rowCount: 0 };
+      // Reclaim expired processing lease for a specific event (in claimEvent)
+      if (sql.includes("WHERE provider = $1 AND provider_event_id = $2 AND processing_status = 'processing' AND received_at < $5")) {
+        if (row.processingStatus !== "processing") return { rows: [], rowCount: 0 };
+        const cutoff = new Date(values[4]);
+        if (!(new Date(row.receivedAt).getTime() < cutoff.getTime())) return { rows: [], rowCount: 0 };
+        row.processingStatus = "processing";
+        row.attempts += 1;
+        row.receivedAt = values[3];
+        return { rows: [{ id: row.id, processing_status: row.processingStatus, attempts: row.attempts }] };
+      }
+      // Release claim (set to failed)
       if (sql.includes("WHERE provider = $1 AND provider_event_id = $2 AND processing_status = 'processing'")) {
         if (row.processingStatus !== "processing") return { rows: [], rowCount: 0 };
         row.processingStatus = "failed";
@@ -143,6 +154,17 @@ function fakePool({
         row.processedAt = values[2];
         row.lastError = values[3];
         return { rows: [], rowCount: 1 };
+      }
+      // Claim retry for pending/failed
+      if (sql.includes("SET processing_status = 'processing'")) {
+        const row = rowFor(values[1]);
+        if (!row) return { rows: [] };
+        if (!["pending", "failed"].includes(row.processingStatus)) return { rows: [] };
+        if (row.attempts >= values[2]) return { rows: [] };
+        row.processingStatus = "processing";
+        row.attempts += 1;
+        row.receivedAt = values[3];
+        return { rows: [{ id: row.id, processing_status: row.processingStatus, attempts: row.attempts }] };
       }
       return { rows: [], rowCount: 0 };
     }
@@ -449,7 +471,7 @@ describe("billing webhook service", () => {
       && entry.message === "billing_event_exhausted"));
   });
 
-  it("releases a claim left behind by a crashed process", async () => {
+it("releases a claim left behind by a crashed process", async () => {
     const pool = fakePool();
     const subject = service(pool);
     pool.webhookEvents.set("stripe::evt_9", {

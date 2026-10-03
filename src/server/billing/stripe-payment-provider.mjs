@@ -53,13 +53,17 @@ export function createStripePaymentProvider({
   }
   if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function.");
 
-  async function callApi(path, parameters, { method = "POST" } = {}) {
+  async function callApi(path, parameters, { method = "POST", idempotencyKey = null } = {}) {
+    const headers = {
+      authorization: `Bearer ${secretKey}`,
+      "content-type": "application/x-www-form-urlencoded",
+    };
+    if (idempotencyKey) {
+      headers["idempotency-key"] = idempotencyKey;
+    }
     const response = await fetchImpl(`${apiBaseUrl}${path}`, {
       method,
-      headers: {
-        authorization: `Bearer ${secretKey}`,
-        "content-type": "application/x-www-form-urlencoded",
-      },
+      headers,
       body: method === "GET" ? undefined : encodeForm(parameters),
     });
     const body = await response.json().catch(() => null);
@@ -129,16 +133,16 @@ export function createStripePaymentProvider({
   return Object.freeze({
     name: "stripe",
 
-    async createCustomer({ restaurantId, email, name }) {
+    async createCustomer({ restaurantId, email, name, idempotencyKey = null }) {
       const customer = await callApi("/customers", {
         email,
         name,
         "metadata[restaurant_id]": restaurantId,
-      });
+      }, { idempotencyKey });
       return { providerCustomerId: customer.id };
     },
 
-    async createCheckoutSession({ providerCustomerId, providerPriceId, successUrl, cancelUrl, clientReferenceId }) {
+    async createCheckoutSession({ providerCustomerId, providerPriceId, successUrl, cancelUrl, clientReferenceId, idempotencyKey = null }) {
       const session = await callApi("/checkout/sessions", {
         mode: "subscription",
         customer: providerCustomerId,
@@ -147,7 +151,7 @@ export function createStripePaymentProvider({
         success_url: successUrl,
         cancel_url: cancelUrl,
         client_reference_id: clientReferenceId,
-      });
+      }, { idempotencyKey });
       return {
         providerCheckoutSessionId: session.id,
         checkoutUrl: session.url,
@@ -239,9 +243,10 @@ function stripeEventType(event, object) {
 function isSubscriptionInvoice(object) {
   if (!object || typeof object !== "object") return false;
   if (typeof object.subscription !== "string" && !object.subscription?.id) return false;
-  return object.billing_reason === undefined
-    || object.billing_reason === null
-    || SUBSCRIPTION_BILLING_REASONS.has(object.billing_reason);
+  // Require billing_reason to be explicitly in the approved allowlist.
+  // Missing, null, or unknown reasons must not renew access.
+  return typeof object.billing_reason === "string"
+    && SUBSCRIPTION_BILLING_REASONS.has(object.billing_reason);
 }
 
 export function normalizeStripeEvent(event) {

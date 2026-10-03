@@ -1,4 +1,5 @@
 import pg from "pg";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildHttpApp } from "./http/app.mjs";
 import { createBillingWebhookService } from "./billing/billing-webhook-service.mjs";
 import { createSubscriptionService } from "./billing/subscription-service.mjs";
@@ -95,7 +96,7 @@ export async function startServer(options = {}) {
 }
 
 const invokedDirectly = process.argv[1]
-  && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href;
+  && pathToFileURL(process.argv[1]).href === import.meta.url;
 
 if (invokedDirectly) {
   startServer({ logger: console }).catch((error) => {
