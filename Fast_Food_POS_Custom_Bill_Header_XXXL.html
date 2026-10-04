@@ -4844,6 +4844,40 @@
       #screen-new-order .cart-table tbody td { border-bottom: 2px solid #cbd5e1; }
       #screen-new-order .cart-table tbody tr:nth-child(even) { background: #f8fafc; }
 
+      /* Milestone 11 — billing screen, cloud status & responsive layouts. */
+      #screen-billing .billing-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+        gap: 20px;
+        align-items: start;
+      }
+      .billing-column {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 16px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      }
+      .billing-status-info { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+      .billing-status-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+      .billing-plans-grid { align-items: stretch; }
+      .history-table { display: block; overflow-x: auto; white-space: nowrap; }
+      #history-orders-rows tr { white-space: normal; }
+      #cloud-cancel-dialog-overlay .modal-content { max-height: 90vh; overflow-y: auto; }
+
+      @media screen and (max-width: 920px) {
+        #screen-billing .billing-layout { grid-template-columns: minmax(0, 1fr); }
+        .billing-plans-grid { grid-template-columns: repeat(auto-fill, minmax(100%, 1fr)) !important; }
+        #screen-billing .menu-form-box,
+        #screen-billing .menu-table-box { width: 100% !important; }
+      }
+
+      @media screen and (max-width: 640px) {
+        .billing-column { padding: 12px; }
+        #screen-billing h1 { font-size: 20px; }
+        #history-load-more-btn { width: 100%; }
+      }
+
 </style>
   </head>
   <body>
@@ -5447,6 +5481,15 @@
           >
             <span class="menu-btn-icon">⚙️</span
             ><span class="menu-btn-label">SETTINGS</span>
+          </button>
+          <button
+            type="button"
+            class="menu-btn"
+            onclick="switchScreen('billing')"
+            title="Billing"
+          >
+            <span class="menu-btn-icon">💳</span
+            ><span class="menu-btn-label">BILLING</span>
           </button>
         </nav>
         <div class="sidebar-footer">
@@ -6455,14 +6498,32 @@
             </div>
           </div>
 
-          
+          <div
+            id="history-cloud-notice"
+            class="hidden"
+            role="status"
+            style="margin-bottom:12px; padding:10px 14px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:13px; font-weight:600;"
+          ></div>
+          <div
+            id="history-error"
+            class="hidden"
+            role="alert"
+            style="margin-bottom:12px; padding:10px 14px; border-radius:8px; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; font-size:13px; font-weight:600;"
+          ></div>
+          <div
+            id="history-loader"
+            class="hidden"
+            style="margin-bottom:12px; text-align:center; color:#94a3b8; font-size:13px; padding:8px;"
+          >
+            Loading orders…
+          </div>
+
           <div style="margin-bottom: 6px">
             <input
               type="text"
               id="history-search"
               class="search-input-field"
               placeholder="🔍 Search via Customer Name, Food Item, Item Number, Deal, or Order Type (Dine-In, Takeaway, Delivery)..."
-              oninput="renderOrdersHistory()"
               style="
                 width: 100%;
                 padding: 12px 15px;
@@ -6565,8 +6626,7 @@
               <input
                 type="date"
                 id="history-date-from"
-                onchange="renderOrdersHistory()"
-                style="
+                 style="
                   padding: 6px 10px;
                   border: 1px solid #cbd5e1;
                   border-radius: 4px;
@@ -6576,8 +6636,7 @@
               <input
                 type="date"
                 id="history-date-to"
-                onchange="renderOrdersHistory()"
-                style="
+                 style="
                   padding: 6px 10px;
                   border: 1px solid #cbd5e1;
                   border-radius: 4px;
@@ -6596,8 +6655,7 @@
             >
               <select
                 id="history-payment-filter"
-                onchange="renderOrdersHistory()"
-                style="
+                 style="
                   padding: 7px 10px;
                   border: 1px solid #cbd5e1;
                   border-radius: 4px;
@@ -6610,8 +6668,7 @@
               </select>
               <select
                 id="history-status-filter"
-                onchange="renderOrdersHistory()"
-                style="
+                 style="
                   padding: 7px 10px;
                   border: 1px solid #cbd5e1;
                   border-radius: 4px;
@@ -6688,6 +6745,20 @@
               </thead>
               <tbody id="history-orders-rows"></tbody>
             </table>
+          </div>
+
+          <div
+            id="history-load-more"
+            class="hidden"
+            style="margin-top:14px; text-align:center;"
+          >
+            <button
+              type="button"
+              id="history-load-more-btn"
+              style="padding:9px 22px; background:#f1f5f9; color:#475569; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer;"
+            >
+              Load more orders
+            </button>
           </div>
         </section>
 
@@ -9234,7 +9305,66 @@
           </div>
         </section>
 
-        
+        <section id="screen-billing" class="screen-view hidden">
+          <h1>Billing</h1>
+          <p>
+            Manage the restaurant's subscription, view payment history
+            and start a secure checkout. This page stays available even
+            when the subscription has lapsed, so access can always be
+            restored.
+          </p>
+
+          <div
+            id="billing-status"
+            class="billing-status hidden"
+            role="status"
+            style="margin:14px 0; padding:11px 14px; border-radius:8px; font-size:13px; font-weight:600;"
+          ></div>
+
+          <div
+            id="billing-loader"
+            class="hidden"
+            style="margin:24px 0; text-align:center; color:#94a3b8; font-size:14px;"
+          >
+            Loading billing details…
+          </div>
+
+          <div id="billing-screen-body">
+            <div class="menu-management-layout billing-layout">
+              <div class="menu-form-box billing-column">
+                <h2 style="margin:0 0 12px; font-size:16px;">Current subscription</h2>
+                <div id="billing-current-subscription"></div>
+
+                <h2 style="margin:22px 0 12px; font-size:16px;">Actions</h2>
+                <div id="billing-actions" style="display:flex; gap:10px; flex-wrap:wrap;"></div>
+
+                <h2 style="margin:22px 0 12px; font-size:16px;">Payment history</h2>
+                <div id="billing-payments"></div>
+              </div>
+
+              <div class="menu-table-box billing-column">
+                <div
+                  style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;"
+                >
+                  <h2 style="margin:0; font-size:16px;">Plans</h2>
+                  <button
+                    type="button"
+                    id="billing-refresh"
+                    style="padding:7px 14px; background:#f1f5f9; color:#475569; border:1px solid #e2e8f0; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer;"
+                  >
+                    🔄 Refresh
+                  </button>
+                </div>
+                <div
+                  id="billing-plans"
+                  class="billing-plans-grid"
+                  style="display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:14px;"
+                ></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="screen-kitchen-stock" class="screen-view hidden">
           <h1>Kitchen Stock Ledger</h1>
           <p>
@@ -15086,6 +15216,11 @@
           subtitle: "Configure business, tables, security and data",
           keywords: "business backup restore pin halls tables configuration",
         },
+        billing: {
+          title: "Billing",
+          subtitle: "Subscription plan, payments and checkout",
+          keywords: "billing subscription plan payment checkout stripe invoice",
+        },
       };
 
       function updateProfessionalAppHeader(screenId) {
@@ -15253,6 +15388,10 @@
 
         if (screenId === "view-orders") {
           renderOrdersHistory();
+        }
+
+        if (screenId === "billing") {
+          globalThis.BiteTechBilling?.renderBilling();
         }
 
         // ⌨️ Auto-focus the search box on open — one less click before the staff can start typing
@@ -30296,6 +30435,10 @@
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
 
+        // Cloud orders use UUID string ids; quote them so inline handlers receive
+        // the id as a string instead of an arithmetic expression.
+        const orderIdLiteral = typeof order.id === "string" ? `'${order.id}'` : String(order.id);
+
         const modalOverlay = document.getElementById("invoice-modal-overlay");
         const modalContent = document.getElementById("invoice-modal-content");
 
@@ -30431,9 +30574,9 @@
                             <div style="display: flex; gap: 8px;">
                                 <input type="number" id="invoice-remaining-due-input" min="0" max="${order.totalBill}" step="1"
                                        value="${Math.max(0, order.totalBill - (parseFloat(order.amountReceived) || 0))}"
-                                       onkeydown="if(event.key==='Enter'){event.preventDefault(); updateOrderRemainingDue(${order.id});}"
+                                       onkeydown="if(event.key==='Enter'){event.preventDefault(); updateOrderRemainingDue(${orderIdLiteral});}"
                                        style="flex: 1; padding: 8px 10px; border: 1px solid #fca5a5; border-radius: 6px; font-size: 15px; font-weight: 700; color: #991b1b;">
-                                <button type="button" onclick="updateOrderRemainingDue(${order.id})" style="background: #dc2626; color: white; border: none; padding: 0 16px; border-radius: 6px; cursor: pointer; font-weight: 700;">💾 Update</button>
+                                <button type="button" onclick="updateOrderRemainingDue(${orderIdLiteral})" style="background: #dc2626; color: white; border: none; padding: 0 16px; border-radius: 6px; cursor: pointer; font-weight: 700;">💾 Update</button>
                             </div>
                             <div style="font-size: 11px; color: #94a3b8; margin-top: 5px;">Set this to 0 (or the full amount received) once the customer clears their balance — the order marks itself Paid automatically.</div>
                         </div>`
@@ -30447,8 +30590,8 @@
                   orderStatus === "Completed"
                     ? `
                 <div style="display: flex; gap: 10px; margin-top: 20px;">
-                    <button type="button" class="payment-btn ${(order.paymentStatus || "Paid") !== "Unpaid" ? "active-paid" : ""}" onclick="setInvoiceOrderPaymentStatus(${order.id}, 'Paid')">✅ Paid</button>
-                    <button type="button" class="payment-btn ${(order.paymentStatus || "Paid") === "Unpaid" ? "active-unpaid" : ""}" onclick="setInvoiceOrderPaymentStatus(${order.id}, 'Unpaid')">❌ Unpaid</button>
+                    <button type="button" class="payment-btn ${(order.paymentStatus || "Paid") !== "Unpaid" ? "active-paid" : ""}" onclick="setInvoiceOrderPaymentStatus(${orderIdLiteral}, 'Paid')">✅ Paid</button>
+                    <button type="button" class="payment-btn ${(order.paymentStatus || "Paid") === "Unpaid" ? "active-unpaid" : ""}" onclick="setInvoiceOrderPaymentStatus(${orderIdLiteral}, 'Unpaid')">❌ Unpaid</button>
                 </div>`
                     : ""
                 }
@@ -30457,12 +30600,12 @@
                     ${
                       orderStatus === "Completed"
                         ? `
-                    <button type="button" class="clear-dates-btn" onclick="openCancelOrderModal(${order.id})" style="margin: 0; padding: 8px 20px; background: #dc2626; color: white;">❌ Cancel Order</button>
-                    <button type="button" class="clear-dates-btn" onclick="enterEditOrderMode(${order.id})" style="margin: 0; padding: 8px 20px; background: #e67e22; color: white;">✏️ Edit Order</button>`
+                    <button type="button" class="clear-dates-btn" onclick="openCancelOrderModal(${orderIdLiteral})" style="margin: 0; padding: 8px 20px; background: #dc2626; color: white;">❌ Cancel Order</button>
+                    <button type="button" class="clear-dates-btn" onclick="enterEditOrderMode(${orderIdLiteral})" style="margin: 0; padding: 8px 20px; background: #e67e22; color: white;">✏️ Edit Order</button>`
                         : ""
                     }
-                    <button type="button" class="clear-dates-btn" onclick="reprintOrderReceipt(${order.id})" style="margin: 0; padding: 8px 20px; background: #0ea5e9; color: white;">🖨️ Print Bill</button>
-                    <button type="button" class="clear-dates-btn" onclick="deleteBill(${order.id})" style="margin: 0; padding: 8px 20px; background: #991b1b; color: white;">🗑️ Delete Bill</button>
+                    <button type="button" class="clear-dates-btn" onclick="reprintOrderReceipt(${orderIdLiteral})" style="margin: 0; padding: 8px 20px; background: #0ea5e9; color: white;">🖨️ Print Bill</button>
+                    <button type="button" class="clear-dates-btn" onclick="deleteBill(${orderIdLiteral})" style="margin: 0; padding: 8px 20px; background: #991b1b; color: white;">🗑️ Delete Bill</button>
                     <button type="button" class="clear-dates-btn" onclick="closeInvoiceModal()" style="margin: 0; padding: 8px 20px; background: #43a047; color: white;">✅ Complete</button>
                 </div>
             `;
