@@ -1,6 +1,11 @@
 /**
  * Sales Report UI — renders server-authoritative sales reporting dashboards,
  * date presets, trend tables, tender breakdowns, and CSV export triggers.
+ *
+ * Business dates are computed in the restaurant's configured timezone so a
+ * late-night local sale lands on the same calendar day the server reports
+ * it on. Dates are never derived through `toISOString()`, which converts
+ * to UTC and can move the date backward or forward near midnight.
  */
 
 import {
@@ -25,7 +30,30 @@ function formatCurrency(minor) {
   })}`;
 }
 
-export function createSalesReportUI({ containerEl } = {}) {
+/**
+ * Formats an instant as a YYYY-MM-DD calendar day in `timeZone` using
+ * the locale-aware formatter (en-CA yields ISO-like year-month-day).
+ * This is the browser-side counterpart of the server's
+ * businessDateInTimezone() and deliberately avoids toISOString(),
+ * which would convert the instant to UTC first.
+ */
+function formatDateInTimezone(instant, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instant);
+}
+
+/** Adds/subtracts whole calendar days in the restaurant's timezone by
+ *  shifting the instant by the day count and re-formatting in-zone. */
+function shiftDateInTimezone(instant, timeZone, dayDelta) {
+  const shifted = new Date(instant.getTime() + dayDelta * 24 * 60 * 60 * 1000);
+  return formatDateInTimezone(shifted, timeZone);
+}
+
+export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Karachi" } = {}) {
   let currentFilters = {
     preset: "today",
     startDate: "",
@@ -37,28 +65,40 @@ export function createSalesReportUI({ containerEl } = {}) {
     limit: 50,
   };
 
+  // The restaurant's configured timezone, taken from the report response
+  // when the server provides one so presets always match the server's
+  // business-date calendar.
+  let activeTimezone = restaurantTimezone;
+
+  // Monotonic request token: a response is only rendered when it belongs
+  // to the most recent request, so a slow older request can never
+  // overwrite the results of a newer filter request.
+  let requestToken = 0;
+
   function getPresetDates(preset) {
-    const today = new Date();
-    const formatDate = (d) => d.toISOString().substring(0, 10);
+    const now = new Date();
+    const zone = activeTimezone;
 
     switch (preset) {
       case "yesterday": {
-        const y = new Date(today);
-        y.setDate(y.getDate() - 1);
-        return { startDate: formatDate(y), endDate: formatDate(y) };
+        const y = shiftDateInTimezone(now, zone, -1);
+        return { startDate: y, endDate: y };
       }
       case "last7days": {
-        const d = new Date(today);
-        d.setDate(d.getDate() - 6);
-        return { startDate: formatDate(d), endDate: formatDate(today) };
+        const start = shiftDateInTimezone(now, zone, -6);
+        return { startDate: start, endDate: formatDateInTimezone(now, zone) };
       }
       case "month": {
-        const start = new Date(today.getFullYear(), today.getMonth(), 1);
-        return { startDate: formatDate(start), endDate: formatDate(today) };
+        // First day of the current calendar month in the restaurant's
+        // timezone, derived from the in-zone today string.
+        const todayStr = formatDateInTimezone(now, zone);
+        const monthStart = `${todayStr.substring(0, 8)}01`;
+        return { startDate: monthStart, endDate: todayStr };
       }
       case "today":
       default: {
-        return { startDate: formatDate(today), endDate: formatDate(today) };
+        const today = formatDateInTimezone(now, zone);
+        return { startDate: today, endDate: today };
       }
     }
   }
@@ -99,6 +139,12 @@ export function createSalesReportUI({ containerEl } = {}) {
               <option value="takeaway">Takeaway</option>
               <option value="delivery">Delivery</option>
             </select>
+            <select id="report-paymentmethod-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+              <option value="">All Payment Methods</option>
+              <option value="cash">Cash</option>
+              <option value="bank_account">Bank Account</option>
+              <option value="other">Other</option>
+            </select>
             <button type="button" id="report-apply-btn" style="padding:6px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;">Apply</button>
           </div>
         </div>
@@ -115,6 +161,8 @@ export function createSalesReportUI({ containerEl } = {}) {
     if (!contentArea) return;
 
     const m = data.metrics;
+    const pagination = data.detailedRows?.pagination || { page: 1, limit: 50, totalRows: 0, totalPages: 0 };
+    const rows = data.detailedRows?.rows || [];
 
     contentArea.innerHTML = `
       <!-- Summary Cards Grid -->
@@ -236,6 +284,11 @@ export function createSalesReportUI({ containerEl } = {}) {
       <!-- Detailed Sales Rows -->
       <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
         <h3 style="margin:0 0 12px; font-size:15px; font-weight:600; color:#1e293b;">📋 Detailed Sales Rows</h3>
+        ${rows.length === 0 ? `
+          <div style="padding:32px; text-align:center; color:#64748b; background:#f8fafc; border-radius:8px;">
+            No orders match the selected filters.
+          </div>
+        ` : `
         <div style="overflow-x:auto;">
           <table style="width:100%; border-collapse:collapse; font-size:13px;">
             <thead style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">
@@ -251,7 +304,7 @@ export function createSalesReportUI({ containerEl } = {}) {
               </tr>
             </thead>
             <tbody>
-              ${(data.detailedRows?.rows || [])
+              ${rows
                 .map(
                   (row) => `
                 <tr style="border-bottom:1px solid #f1f5f9;">
@@ -270,6 +323,29 @@ export function createSalesReportUI({ containerEl } = {}) {
             </tbody>
           </table>
         </div>
+        `}
+
+        <!-- Pagination Controls -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px solid #e2e8f0; flex-wrap:wrap; gap:8px;">
+          <div style="font-size:13px; color:#64748b;" id="report-pagination-info">
+            Page ${pagination.page} of ${pagination.totalPages || 1} · ${pagination.totalRows} rows
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button type="button" id="report-prev-page" ${pagination.page <= 1 ? "disabled" : ""} style="padding:6px 14px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:${pagination.page <= 1 ? "default" : "pointer"}; ${pagination.page <= 1 ? "opacity:0.5;" : ""}">Previous</button>
+            <button type="button" id="report-next-page" ${pagination.page >= (pagination.totalPages || 1) ? "disabled" : ""} style="padding:6px 14px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:${pagination.page >= (pagination.totalPages || 1) ? "default" : "pointer"}; ${pagination.page >= (pagination.totalPages || 1) ? "opacity:0.5;" : ""}">Next</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderErrorState(message) {
+    const contentArea = containerEl.querySelector("#report-content-area");
+    if (!contentArea) return;
+    contentArea.innerHTML = `
+      <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:20px; color:#991b1b; text-align:center;">
+        <h3>Unable to load sales report</h3>
+        <p style="font-size:14px;">${escapeHtml(message || "Cloud connection or authorization error.")}</p>
       </div>
     `;
   }
@@ -289,6 +365,9 @@ export function createSalesReportUI({ containerEl } = {}) {
     if (startDateInput) startDateInput.value = dates.startDate;
     if (endDateInput) endDateInput.value = dates.endDate;
 
+    // Capture this request's token; only the newest token may render.
+    const myToken = ++requestToken;
+
     try {
       const report = await salesReportApi.getSalesReport({
         startDate: currentFilters.startDate,
@@ -300,19 +379,22 @@ export function createSalesReportUI({ containerEl } = {}) {
         limit: currentFilters.limit,
       });
 
+      // Stale-response suppression: a slower older request must not
+      // overwrite the results of a newer filter request.
+      if (myToken !== requestToken) return;
+
+      // Adopt the restaurant's configured timezone from the response so
+      // subsequent preset calculations use the server's business calendar.
+      if (report.restaurant?.timezone) {
+        activeTimezone = report.restaurant.timezone;
+      }
+
       renderReportContent(report);
       attachEventListeners();
     } catch (error) {
+      if (myToken !== requestToken) return;
       console.warn("Failed to load sales report:", error);
-      const contentArea = containerEl.querySelector("#report-content-area");
-      if (contentArea) {
-        contentArea.innerHTML = `
-          <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:20px; color:#991b1b; text-align:center;">
-            <h3>Unable to load sales report</h3>
-            <p style="font-size:14px;">${escapeHtml(error.message || "Cloud connection or authorization error.")}</p>
-          </div>
-        `;
-      }
+      renderErrorState(error.message);
     }
   }
 
@@ -333,6 +415,8 @@ export function createSalesReportUI({ containerEl } = {}) {
       btn.addEventListener("click", () => {
         const preset = btn.getAttribute("data-preset");
         currentFilters.preset = preset;
+        // Any filter change resets to the first page.
+        currentFilters.page = 1;
         loadReport();
       });
     });
@@ -343,11 +427,34 @@ export function createSalesReportUI({ containerEl } = {}) {
         const startInput = containerEl.querySelector("#report-start-date");
         const endInput = containerEl.querySelector("#report-end-date");
         const typeSelect = containerEl.querySelector("#report-ordertype-filter");
+        const methodSelect = containerEl.querySelector("#report-paymentmethod-filter");
 
         currentFilters.preset = "custom";
         currentFilters.startDate = startInput?.value || currentFilters.startDate;
         currentFilters.endDate = endInput?.value || currentFilters.endDate;
         currentFilters.orderType = typeSelect?.value || "";
+        currentFilters.paymentMethod = methodSelect?.value || "";
+        // Date / order-type / payment-method changes reset to page 1.
+        currentFilters.page = 1;
+        loadReport();
+      });
+    }
+
+    const prevBtn = containerEl.querySelector("#report-prev-page");
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        if (currentFilters.page > 1) {
+          currentFilters.page -= 1;
+          loadReport();
+        }
+      });
+    }
+
+    const nextBtn = containerEl.querySelector("#report-next-page");
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        const totalPages = containerEl.querySelector("#report-pagination-info")?.dataset?.totalPages;
+        currentFilters.page += 1;
         loadReport();
       });
     }
@@ -359,6 +466,12 @@ export function createSalesReportUI({ containerEl } = {}) {
     },
     setFilters(newFilters) {
       currentFilters = { ...currentFilters, ...newFilters };
+      // Filter changes reset to the first page.
+      if (newFilters.preset !== undefined || newFilters.startDate !== undefined
+          || newFilters.endDate !== undefined || newFilters.orderType !== undefined
+          || newFilters.paymentMethod !== undefined || newFilters.groupBy !== undefined) {
+        currentFilters.page = 1;
+      }
       return loadReport();
     },
   });

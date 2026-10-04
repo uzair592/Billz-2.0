@@ -123,6 +123,19 @@ function createMockPool({ order, orderItems = [], payments = [], existingRefunds
             return { rows };
           }
 
+          if (lowerSql.includes("from order_refund_tenders") && lowerSql.includes("refund_id =")) {
+            const rows = state.refundTenders
+              .filter((t) => t.refund_id === params[1])
+              .map((t) => ({
+                id: t.id,
+                order_payment_id: t.order_payment_id,
+                financial_account_id: t.financial_account_id,
+                payment_method: t.payment_method,
+                amount_minor: t.amount_minor,
+              }));
+            return { rows };
+          }
+
           if (lowerSql.includes("select count(*)::int as count from order_refunds")) {
             const count = state.refunds.filter((r) => r.order_id === params[1]).length;
             return { rows: [{ count }] };
@@ -507,7 +520,7 @@ describe("Order Refund Service (Unit Tests)", () => {
     );
   });
 
-  it("allocates a refund across split tenders in capture order", async () => {
+  it("allocates a refund proportionally across split tenders", async () => {
     const splitPayments = [
       {
         id: PAYMENT_ID,
@@ -548,12 +561,22 @@ describe("Order Refund Service (Unit Tests)", () => {
     });
 
     assert.equal(res.refund.totalRefundedMinor, 60000);
-    // 50000 from the first tender, 10000 from the second.
+    // Proportional allocation across the 50000/40000 split: the cash
+    // tender holds 5/9 of the captured balance and the bank tender 4/9.
+    // Exact shares are 33333.33 and 26666.67; the floors sum to 59999,
+    // and the largest-remainder rule gives the leftover unit to the bank
+    // tender (the larger fractional part), yielding 33333 and 26667.
+    // Both are integers, neither exceeds its captured balance, and they
+    // sum exactly to the refund amount.
     assert.equal(state.refundTenders.length, 2);
-    assert.equal(Number(state.refundTenders[0].amount_minor), 50000);
-    assert.equal(state.refundTenders[0].order_payment_id, PAYMENT_ID);
-    assert.equal(Number(state.refundTenders[1].amount_minor), 10000);
-    assert.equal(state.refundTenders[1].order_payment_id, PAYMENT_ID_2);
+    const cashTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID);
+    const bankTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID_2);
+    assert.equal(Number(cashTender.amount_minor), 33333);
+    assert.equal(Number(bankTender.amount_minor), 26667);
+    assert.equal(
+      Number(cashTender.amount_minor) + Number(bankTender.amount_minor),
+      60000,
+    );
     // Both tenders produced compensating ledger entries.
     assert.equal(state.ledgerEntries.length, 2);
   });
@@ -914,5 +937,278 @@ describe("Order Refund Service (Unit Tests)", () => {
     // The refund row and the audit event both carry the actor.
     assert.equal(state.refunds[0].created_by_user_id, USER_ID);
     assert.equal(state.editEvents[0][2], USER_ID);
+  });
+
+  it("rejects ineligible order and payment states with ORDER_INELIGIBLE", async () => {
+    const ineligibleStates = [
+      { orderStatus: "new", paymentStatus: "unpaid" },
+      { orderStatus: "preparing", paymentStatus: "unpaid" },
+      { orderStatus: "ready", paymentStatus: "unpaid" },
+      { orderStatus: "served", paymentStatus: "unpaid" },
+      { orderStatus: "completed", paymentStatus: "unpaid" },
+      { orderStatus: "completed", paymentStatus: "partially_paid" },
+      { orderStatus: "cancelled", paymentStatus: "paid" },
+    ];
+
+    for (const state of ineligibleStates) {
+      const { pool } = createMockPool({
+        order: { ...sampleOrder, order_status: state.orderStatus, payment_status: state.paymentStatus },
+        orderItems: sampleItems,
+        payments: samplePayments,
+      });
+
+      const service = createOrderRefundService(pool);
+      await assert.rejects(
+        async () => {
+          await service.createRefund({
+            tenant,
+            userId: tenant.membership.userId,
+            orderId: sampleOrder.id,
+            input: {
+              idempotencyKey: "aaaaaaaa-0000-4000-8000-000000000000",
+              reason: "Ineligible state",
+              amountMinor: 1000,
+            },
+          });
+        },
+        (err) => err.code === "ORDER_INELIGIBLE" && err.statusCode === 409,
+        `order_status=${state.orderStatus} payment_status=${state.paymentStatus} must be rejected`,
+      );
+    }
+  });
+
+  it("accepts eligible paid and partially_refunded payment states", async () => {
+    for (const paymentStatus of ["paid", "partially_refunded"]) {
+      const { pool } = createMockPool({
+        order: { ...sampleOrder, payment_status: paymentStatus },
+        orderItems: sampleItems,
+        payments: samplePayments,
+      });
+
+      const service = createOrderRefundService(pool);
+      const res = await service.createRefund({
+        tenant,
+        userId: tenant.membership.userId,
+        orderId: sampleOrder.id,
+        input: {
+          idempotencyKey: "bbbbbbbb-0000-4000-8000-000000000000",
+          reason: "Eligible state",
+          amountMinor: 1000,
+        },
+      });
+      assert.equal(res.refund.totalRefundedMinor, 1000);
+    }
+  });
+
+  it("rejects a refund that exceeds the captured payment balance", async () => {
+    // Order total 90000 but only 40000 captured: a refund must
+    // never exceed money actually captured.
+    const { pool } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: [
+        {
+          id: PAYMENT_ID,
+          restaurant_id: RESTAURANT_ID,
+          order_id: ORDER_ID,
+          financial_account_id: ACCOUNT_ID,
+          payment_method: "cash",
+          status: "captured",
+          amount_minor: 40000,
+        },
+      ],
+    });
+
+    const service = createOrderRefundService(pool);
+    await assert.rejects(
+      async () => {
+        await service.createRefund({
+          tenant,
+          userId: tenant.membership.userId,
+          orderId: sampleOrder.id,
+          input: {
+            idempotencyKey: "cccccccc-0000-4000-8000-000000000000",
+            reason: "Over-captured refund",
+            amountMinor: 50000,
+          },
+        });
+      },
+      (err) => err.code === "AMOUNT_EXCEEDS_REFUNDABLE" && err.statusCode === 409,
+      "a refund larger than the captured balance must be rejected",
+    );
+  });
+
+  it("allocates a partial refund proportionally across split tenders", async () => {
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 40000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const res = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "dddddddd-0000-4000-8000-000000000000",
+        reason: "Proportional split tender",
+        amountMinor: 60000,
+      },
+    });
+
+    assert.equal(res.refund.totalRefundedMinor, 60000);
+    assert.equal(state.refundTenders.length, 2);
+    const cashTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID);
+    const bankTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID_2);
+    // Exact shares: 60000 * 50000/90000 = 33333.33 (cash) and
+    // 60000 * 40000/90000 = 26666.67 (bank). Floors sum to 59999;
+    // the largest-remainder rule gives the leftover unit to the bank
+    // tender (the larger fractional part).
+    assert.equal(Number(cashTender.amount_minor), 33333);
+    assert.equal(Number(bankTender.amount_minor), 26667);
+    // Integer allocations that sum exactly to the refund amount.
+    assert.equal(
+      Number(cashTender.amount_minor) + Number(bankTender.amount_minor),
+      60000,
+    );
+    // No payment is over-refunded beyond its captured balance.
+    assert.ok(Number(cashTender.amount_minor) <= 50000);
+    assert.ok(Number(bankTender.amount_minor) <= 40000);
+  });
+
+  it("replays a proportional allocation identically", async () => {
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 40000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const input = {
+      idempotencyKey: "eeeeeeee-0000-4000-8000-000000000000",
+      reason: "Replay proportional",
+      amountMinor: 60000,
+    };
+    const first = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input,
+    });
+    const replay = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input,
+    });
+
+    assert.equal(replay.replayed, true);
+    // The replayed allocation is identical to the original.
+    const firstCash = first.refund.tenders.find((t) => t.orderPaymentId === PAYMENT_ID);
+    const replayCash = replay.refund.tenders.find((t) => t.orderPaymentId === PAYMENT_ID);
+    const firstBank = first.refund.tenders.find((t) => t.orderPaymentId === PAYMENT_ID_2);
+    const replayBank = replay.refund.tenders.find((t) => t.orderPaymentId === PAYMENT_ID_2);
+    assert.equal(Number(replayCash.amountMinor), Number(firstCash.amountMinor));
+    assert.equal(Number(replayBank.amountMinor), Number(firstBank.amountMinor));
+    assert.equal(Number(replayCash.amountMinor), 33333);
+    assert.equal(Number(replayBank.amountMinor), 26667);
+    // Only one refund was persisted (the replay returned the stored one).
+    assert.equal(state.refunds.length, 1);
+  });
+
+  it("allocates a full refund exactly across split tenders", async () => {
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 40000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const res = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "ffffffff-0000-4000-8000-000000000000",
+        reason: "Full split tender refund",
+        amountMinor: 90000,
+      },
+    });
+
+    assert.equal(res.refund.totalRefundedMinor, 90000);
+    assert.equal(res.order.paymentStatus, "refunded");
+    // A full refund returns each tender its entire captured balance.
+    const cashTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID);
+    const bankTender = state.refundTenders.find((t) => t.order_payment_id === PAYMENT_ID_2);
+    assert.equal(Number(cashTender.amount_minor), 50000);
+    assert.equal(Number(bankTender.amount_minor), 40000);
+    assert.equal(
+      Number(cashTender.amount_minor) + Number(bankTender.amount_minor),
+      90000,
+    );
   });
 });

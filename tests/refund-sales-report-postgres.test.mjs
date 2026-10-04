@@ -829,7 +829,9 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
       membership: { userId: tenantA.userId, role: "owner" },
     };
 
-    const todayStr = new Date().toISOString().substring(0, 10);
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
     const csv = await reportService.exportSalesReportCsv({
       tenant: tenantAContext,
       filters: { startDate: todayStr, endDate: todayStr },
@@ -846,5 +848,549 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
         );
       }
     }
+  });
+
+  it("applies orderType and paymentMethod filters authoritatively across every output", async () => {
+    const reportService = createSalesReportService(pool);
+
+    // A delivery order paid by bank_account, so the paymentMethod and
+    // orderType filters can be exercised together on a distinct population.
+    const deliveryOrderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 1003, 'delivery', 'completed',
+         'paid', 40000, 0, 0, 0, 40000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [tenantA.restaurantId, tenantA.branchId, tenantA.userId],
+    );
+    const deliveryOrderId = deliveryOrderRes.rows[0].id;
+    await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'bank_account', 'captured', 40000,
+         gen_random_uuid(), $4
+       )`,
+      [tenantA.restaurantId, deliveryOrderId, cashAccountIdA, tenantA.userId],
+    );
+
+    const tenantAContext = {
+      restaurant: {
+        id: tenantA.restaurantId,
+        name: "Restaurant Alpha",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: tenantA.userId, role: "owner" },
+    };
+    // Use the database's own current date so the seeded orders and the
+    // report's date range always agree regardless of timezone.
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+
+    // Filter by orderType=delivery: every output must describe only the
+    // delivery order.
+    const byType = await reportService.getSalesReport({
+      tenant: tenantAContext,
+      filters: { startDate: todayStr, endDate: todayStr, orderType: "delivery" },
+    });
+    assert.equal(byType.metrics.completedOrderCount, 1);
+    assert.equal(byType.metrics.completedSalesMinor, 40000);
+    assert.equal(byType.orderTypeBreakdown.length, 1);
+    assert.equal(byType.orderTypeBreakdown[0].orderType, "delivery");
+    assert.equal(byType.detailedRows.rows.length, 1);
+    assert.equal(byType.detailedRows.rows[0].orderType, "delivery");
+    assert.equal(byType.detailedRows.pagination.totalRows, 1);
+    assert.equal(byType.trends.reduce((s, t) => s + t.orderCount, 0), 1);
+
+    // Filter by paymentMethod=bank_account: the EXISTS strategy must
+    // include the delivery order exactly once even though it has a
+    // single payment, and exclude the cash orders.
+    const byMethod = await reportService.getSalesReport({
+      tenant: tenantAContext,
+      filters: { startDate: todayStr, endDate: todayStr, paymentMethod: "bank_account" },
+    });
+    assert.equal(byMethod.metrics.completedOrderCount, 1);
+    assert.equal(byMethod.metrics.completedSalesMinor, 40000);
+    assert.equal(byMethod.detailedRows.pagination.totalRows, 1);
+    assert.equal(byMethod.paymentBreakdown.length, 1);
+    assert.equal(byMethod.paymentBreakdown[0].paymentMethod, "bank_account");
+    assert.equal(Number(byMethod.paymentBreakdown[0].capturedMinor), 40000);
+
+    // Both filters together.
+    const byBoth = await reportService.getSalesReport({
+      tenant: tenantAContext,
+      filters: {
+        startDate: todayStr,
+        endDate: todayStr,
+        orderType: "delivery",
+        paymentMethod: "bank_account",
+      },
+    });
+    assert.equal(byBoth.metrics.completedOrderCount, 1);
+    assert.equal(byBoth.metrics.completedSalesMinor, 40000);
+    assert.equal(byBoth.detailedRows.pagination.totalRows, 1);
+
+    // A split-tender order in a dedicated restaurant: two cash payments
+    // on one order. The paymentMethod filter must count the order exactly
+    // once (EXISTS, not a JOIN), so the completed order count and sales
+    // total are not doubled.
+    const splitTenant = await seedRestaurant(admin, { name: "Split Tender Check" });
+    const splitAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [splitTenant.restaurantId, splitTenant.branchId],
+    );
+    const splitAccountId = splitAccountRes.rows[0].id;
+
+    const splitOrderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 1004, 'dine_in', 'completed',
+         'paid', 60000, 0, 0, 0, 60000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [splitTenant.restaurantId, splitTenant.branchId, splitTenant.userId],
+    );
+    const splitOrderId = splitOrderRes.rows[0].id;
+    for (const amount of [35000, 25000]) {
+      await admin.query(
+        `INSERT INTO order_payments (
+           id, restaurant_id, order_id, financial_account_id, payment_method,
+           status, amount_minor, idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'cash', 'captured', $4,
+           gen_random_uuid(), $5
+         )`,
+        [splitTenant.restaurantId, splitOrderId, splitAccountId, amount, splitTenant.userId],
+      );
+    }
+
+    const splitContext = {
+      restaurant: {
+        id: splitTenant.restaurantId,
+        name: "Split Tender Check",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: splitTenant.userId, role: "owner" },
+    };
+    const splitReport = await reportService.getSalesReport({
+      tenant: splitContext,
+      filters: { startDate: todayStr, endDate: todayStr, paymentMethod: "cash" },
+    });
+    // The split-tender order is counted once, not twice: its 60000 total
+    // appears exactly once in completed sales, and the order count is 1
+    // (one matching order), not 2 (the number of payments).
+    assert.equal(splitReport.metrics.completedOrderCount, 1);
+    assert.equal(splitReport.metrics.completedSalesMinor, 60000);
+    assert.equal(splitReport.detailedRows.pagination.totalRows, 1);
+    // The cash captured total is the sum of both cash payments on the
+    // single order: 35000 + 25000 = 60000.
+    const cashRow = splitReport.paymentBreakdown.find((p) => p.paymentMethod === "cash");
+    assert.equal(Number(cashRow.capturedMinor), 35000 + 25000);
+  });
+
+  it("does not fan out captured amounts when one payment has two partial refunds", async () => {
+    const refundService = createOrderRefundService(pool);
+    const reportService = createSalesReportService(pool);
+
+    // A dedicated restaurant so the cash breakdown isolates the fan-out
+    // payment from every other seeded order.
+    const fanTenant = await seedRestaurant(admin, { name: "Fanout Check" });
+    const fanAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [fanTenant.restaurantId, fanTenant.branchId],
+    );
+    const fanAccountId = fanAccountRes.rows[0].id;
+
+    // A single captured payment of 100000.
+    const fanOrderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 1005, 'dine_in', 'completed',
+         'paid', 100000, 0, 0, 0, 100000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [fanTenant.restaurantId, fanTenant.branchId, fanTenant.userId],
+    );
+    const fanOrderId = fanOrderRes.rows[0].id;
+    const fanPaymentRes = await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 100000,
+         gen_random_uuid(), $4
+       ) RETURNING id`,
+      [fanTenant.restaurantId, fanOrderId, fanAccountId, fanTenant.userId],
+    );
+    const fanPaymentId = fanPaymentRes.rows[0].id;
+
+    const fanContext = {
+      restaurant: {
+        id: fanTenant.restaurantId,
+        name: "Fanout Check",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: fanTenant.userId, role: "owner" },
+    };
+
+    // Two partial refunds against the same payment: 30000 then 20000.
+    await refundService.createRefund({
+      tenant: fanContext,
+      userId: fanTenant.userId,
+      orderId: fanOrderId,
+      input: {
+        idempotencyKey: "aaaaaaaa-0001-4000-8000-000000000001",
+        reason: "First partial refund",
+        amountMinor: 30000,
+      },
+    });
+    await refundService.createRefund({
+      tenant: fanContext,
+      userId: fanTenant.userId,
+      orderId: fanOrderId,
+      input: {
+        idempotencyKey: "aaaaaaaa-0002-4000-8000-000000000002",
+        reason: "Second partial refund",
+        amountMinor: 20000,
+      },
+    });
+
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+    const report = await reportService.getSalesReport({
+      tenant: fanContext,
+      filters: { startDate: todayStr, endDate: todayStr },
+    });
+
+    const cashRow = report.paymentBreakdown.find((p) => p.paymentMethod === "cash");
+    // Captured amount is counted exactly once (100000), not duplicated
+    // by the two refund tenders.
+    assert.equal(Number(cashRow.capturedMinor), 100000);
+    // Refunded amount is the exact sum of the two refund tenders.
+    assert.equal(Number(cashRow.refundedMinor), 50000);
+    // Net equals captured minus refunded.
+    assert.equal(Number(cashRow.netMinor), 50000);
+
+    // The refund tender rows confirm two distinct tenders on one payment.
+    const tenderRes = await admin.query(
+      `SELECT order_payment_id, SUM(amount_minor) AS refunded, COUNT(*)::int AS tender_count
+         FROM order_refund_tenders
+        WHERE restaurant_id = $1 AND order_payment_id = $2
+        GROUP BY order_payment_id`,
+      [fanTenant.restaurantId, fanPaymentId],
+    );
+    assert.equal(tenderRes.rows.length, 1);
+    assert.equal(Number(tenderRes.rows[0].refunded), 50000);
+    assert.equal(Number(tenderRes.rows[0].tender_count), 2);
+  });
+
+  it("exports every eligible row exactly once when there are more than 200 orders", async () => {
+    const reportService = createSalesReportService(pool);
+
+    // A dedicated restaurant so the 250 seeded orders do not interfere
+    // with the other scenarios' counts.
+    const exportTenant = await seedRestaurant(admin, { name: "Export Volume" });
+    const exportAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [exportTenant.restaurantId, exportTenant.branchId],
+    );
+    const exportAccountId = exportAccountRes.rows[0].id;
+
+    const totalOrders = 250;
+    for (let i = 1; i <= totalOrders; i += 1) {
+      const orderRes = await admin.query(
+        `INSERT INTO orders (
+           id, restaurant_id, branch_id, order_number, order_type, order_status,
+           payment_status, subtotal_minor, discount_minor, delivery_minor,
+           additional_charges_minor, total_minor, business_date, ordered_at,
+           idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'dine_in', 'completed',
+           'paid', 1000, 0, 0, 0, 1000, CURRENT_DATE, now(),
+           gen_random_uuid(), $4
+         ) RETURNING id`,
+        [exportTenant.restaurantId, exportTenant.branchId, 5000 + i, exportTenant.userId],
+      );
+      await admin.query(
+        `INSERT INTO order_payments (
+           id, restaurant_id, order_id, financial_account_id, payment_method,
+           status, amount_minor, idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 1000,
+           gen_random_uuid(), $4
+         )`,
+        [exportTenant.restaurantId, orderRes.rows[0].id, exportAccountId, exportTenant.userId],
+      );
+    }
+
+    const exportContext = {
+      restaurant: {
+        id: exportTenant.restaurantId,
+        name: "Export Volume",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: exportTenant.userId, role: "owner" },
+    };
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+
+    const csv = await reportService.exportSalesReportCsv({
+      tenant: exportContext,
+      filters: { startDate: todayStr, endDate: todayStr },
+    });
+
+    // Count the detailed-row lines: each carries the order number in
+    // the 5000+ range, wrapped in CSV quotes. Every eligible order
+    // must appear exactly once.
+    const parseOrderNumber = (cell) => Number(cell.replace(/^"|"$/g, ""));
+    const rowLines = csv.split("\n").filter((line) => {
+      const cells = line.split(",");
+      if (cells.length < 8) return false;
+      const orderNumber = parseOrderNumber(cells[0]);
+      return Number.isInteger(orderNumber) && orderNumber > 5000 && orderNumber <= 5000 + totalOrders;
+    });
+    assert.equal(rowLines.length, totalOrders, "every eligible order must appear exactly once in the CSV");
+
+    // No order number is duplicated.
+    const seen = new Set();
+    for (const line of rowLines) {
+      const orderNumber = parseOrderNumber(line.split(",")[0]);
+      assert.ok(!seen.has(orderNumber), `order ${orderNumber} must appear exactly once`);
+      seen.add(orderNumber);
+    }
+    assert.equal(seen.size, totalOrders);
+  });
+
+  it("rejects ineligible order and payment states with ORDER_INELIGIBLE", async () => {
+    const refundService = createOrderRefundService(pool);
+    const tenantAContext = {
+      restaurant: { id: tenantA.restaurantId },
+      membership: { userId: tenantA.userId, role: "owner" },
+    };
+
+    const ineligibleStates = [
+      { orderStatus: "new", paymentStatus: "unpaid", label: "new" },
+      { orderStatus: "preparing", paymentStatus: "unpaid", label: "preparing" },
+      { orderStatus: "ready", paymentStatus: "unpaid", label: "ready" },
+      { orderStatus: "served", paymentStatus: "unpaid", label: "served" },
+      { orderStatus: "completed", paymentStatus: "unpaid", label: "unpaid" },
+      { orderStatus: "completed", paymentStatus: "partially_paid", label: "partially_paid" },
+      { orderStatus: "cancelled", paymentStatus: "paid", label: "cancelled" },
+    ];
+
+    for (const [index, state] of ineligibleStates.entries()) {
+      const res = await admin.query(
+        `INSERT INTO orders (
+           id, restaurant_id, branch_id, order_number, order_type, order_status,
+           payment_status, subtotal_minor, discount_minor, delivery_minor,
+           additional_charges_minor, total_minor, business_date, ordered_at,
+           idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'dine_in', $4, $5,
+           10000, 0, 0, 0, 10000, CURRENT_DATE, now(),
+           gen_random_uuid(), $6
+         ) RETURNING id`,
+        [tenantA.restaurantId, tenantA.branchId, 9000 + index, state.orderStatus, state.paymentStatus, tenantA.userId],
+      );
+      const ineligibleOrderId = res.rows[0].id;
+      await admin.query(
+        `INSERT INTO order_payments (
+           id, restaurant_id, order_id, financial_account_id, payment_method,
+           status, amount_minor, idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 10000,
+           gen_random_uuid(), $4
+         )`,
+        [tenantA.restaurantId, ineligibleOrderId, cashAccountIdA, tenantA.userId],
+      );
+
+      await assert.rejects(
+        async () => {
+          await refundService.createRefund({
+            tenant: tenantAContext,
+            userId: tenantA.userId,
+            orderId: ineligibleOrderId,
+            input: {
+              idempotencyKey: `bbbbbbbb-${String(index).padStart(4, "0")}-4000-8000-00000000000${index}`,
+              reason: "Ineligible state attempt",
+              amountMinor: 1000,
+            },
+          });
+        },
+        (err) => err.code === "ORDER_INELIGIBLE" && err.statusCode === 409,
+        `${state.label} order must be rejected with ORDER_INELIGIBLE`,
+      );
+    }
+  });
+
+  it("rejects a refund that exceeds the captured payment amount", async () => {
+    const refundService = createOrderRefundService(pool);
+
+    // An order whose total (100000) exceeds its captured payment (40000),
+    // for example a partially-captured authorization. A refund must never
+    // exceed money actually captured.
+    const overOrderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 1006, 'dine_in', 'completed',
+         'paid', 100000, 0, 0, 0, 100000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [tenantA.restaurantId, tenantA.branchId, tenantA.userId],
+    );
+    const overOrderId = overOrderRes.rows[0].id;
+    await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 40000,
+         gen_random_uuid(), $4
+       )`,
+      [tenantA.restaurantId, overOrderId, cashAccountIdA, tenantA.userId],
+    );
+
+    const tenantAContext = {
+      restaurant: { id: tenantA.restaurantId },
+      membership: { userId: tenantA.userId, role: "owner" },
+    };
+
+    await assert.rejects(
+      async () => {
+        await refundService.createRefund({
+          tenant: tenantAContext,
+          userId: tenantA.userId,
+          orderId: overOrderId,
+          input: {
+            idempotencyKey: "cccccccc-0001-4000-8000-000000000001",
+            reason: "Over-captured refund attempt",
+            amountMinor: 50000,
+          },
+        });
+      },
+      (err) => err.code === "AMOUNT_EXCEEDS_REFUNDABLE" && err.statusCode === 409,
+      "a refund larger than the captured balance must be rejected",
+    );
+  });
+
+  it("allocates a partial refund proportionally across split tenders", async () => {
+    const refundService = createOrderRefundService(pool);
+
+    // A completed order with two captured tenders: 50000 cash and 40000
+    // bank_account (total captured 90000).
+    const splitOrderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 1007, 'dine_in', 'completed',
+         'paid', 90000, 0, 0, 0, 90000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [tenantA.restaurantId, tenantA.branchId, tenantA.userId],
+    );
+    const splitOrderId = splitOrderRes.rows[0].id;
+    const cashPaymentRes = await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 50000,
+         gen_random_uuid(), $4
+       ) RETURNING id`,
+      [tenantA.restaurantId, splitOrderId, cashAccountIdA, tenantA.userId],
+    );
+    const bankPaymentRes = await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'bank_account', 'captured', 40000,
+         gen_random_uuid(), $4
+       ) RETURNING id`,
+      [tenantA.restaurantId, splitOrderId, cashAccountIdA, tenantA.userId],
+    );
+
+    const tenantAContext = {
+      restaurant: { id: tenantA.restaurantId },
+      membership: { userId: tenantA.userId, role: "owner" },
+    };
+
+    // A 60000 refund across the 50000/40000 split: exact shares are
+    // 33333.33 (cash) and 26666.67 (bank). The floors sum to 59999 and
+    // the largest-remainder rule gives the leftover unit to the bank
+    // tender (the larger fractional part), yielding 33333 and 26667.
+    const result = await refundService.createRefund({
+      tenant: tenantAContext,
+      userId: tenantA.userId,
+      orderId: splitOrderId,
+      input: {
+        idempotencyKey: "dddddddd-0001-4000-8000-000000000001",
+        reason: "Proportional split-tender refund",
+        amountMinor: 60000,
+      },
+    });
+
+    assert.equal(result.refund.totalRefundedMinor, 60000);
+    assert.equal(result.refund.tenders.length, 2);
+    const cashTender = result.refund.tenders.find((t) => t.orderPaymentId === cashPaymentRes.rows[0].id);
+    const bankTender = result.refund.tenders.find((t) => t.orderPaymentId === bankPaymentRes.rows[0].id);
+    assert.equal(Number(cashTender.amountMinor), 33333);
+    assert.equal(Number(bankTender.amountMinor), 26667);
+    // Integer allocations that sum exactly to the refund amount.
+    assert.equal(
+      Number(cashTender.amountMinor) + Number(bankTender.amountMinor),
+      60000,
+    );
+    // No payment is over-refunded beyond its captured balance.
+    assert.ok(Number(cashTender.amountMinor) <= 50000);
+    assert.ok(Number(bankTender.amountMinor) <= 40000);
+
+    // A replay with the same idempotency key returns the same allocation.
+    const replay = await refundService.createRefund({
+      tenant: tenantAContext,
+      userId: tenantA.userId,
+      orderId: splitOrderId,
+      input: {
+        idempotencyKey: "dddddddd-0001-4000-8000-000000000001",
+        reason: "Proportional split-tender refund",
+        amountMinor: 60000,
+      },
+    });
+    assert.equal(replay.replayed, true);
+    const replayCash = replay.refund.tenders.find((t) => t.orderPaymentId === cashPaymentRes.rows[0].id);
+    const replayBank = replay.refund.tenders.find((t) => t.orderPaymentId === bankPaymentRes.rows[0].id);
+    assert.equal(Number(replayCash.amountMinor), 33333);
+    assert.equal(Number(replayBank.amountMinor), 26667);
   });
 });

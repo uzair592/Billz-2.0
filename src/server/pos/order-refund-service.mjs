@@ -23,6 +23,76 @@ function hashPayload(payload) {
     .digest("hex");
 }
 
+/**
+ * Deterministic proportional allocation of `totalMinor` across payment
+ * balances using the largest-remainder method.
+ *
+ * Each payment's ideal share is `totalMinor * remaining / totalRemaining`.
+ * The integer floor of each share is assigned first; the leftover minor
+ * units (at most one per payment) are distributed to the payments with
+ * the largest fractional remainders, tie-broken by the payment's
+ * position in the input array (which is already deterministically
+ * ordered by created_at, then id).
+ *
+ * Guarantees:
+ *   - every allocation is an integer,
+ *   - no payment is allocated more than its remaining balance,
+ *   - the allocations sum exactly to `totalMinor`,
+ *   - the same inputs always produce the same allocation.
+ *
+ * `balances` is an array of objects with `remainingMinor` (number) and
+ * is mutated only to attach `amountMinor`. Returns the same array with
+ * `amountMinor` set on each entry that receives an allocation.
+ */
+function allocateProportional(totalMinor, balances) {
+  const totalRemaining = balances.reduce((sum, b) => sum + b.remainingMinor, 0);
+  if (totalRemaining <= 0 || totalMinor <= 0) {
+    return balances.map((b) => ({ ...b, amountMinor: 0 }));
+  }
+
+  // Exact rational shares: floor + fractional remainder.
+  const floors = balances.map((b) => {
+    const exact = (totalMinor * b.remainingMinor) / totalRemaining;
+    const floor = Math.floor(exact);
+    // A payment can never receive more than its remaining balance.
+    return { floor: Math.min(floor, b.remainingMinor), exact };
+  });
+
+  let allocated = floors.reduce((sum, f) => sum + f.floor, 0);
+  let remainder = totalMinor - allocated;
+
+  // Distribute the leftover units to the largest fractional remainders.
+  // Sorting is stable and deterministic: index order breaks ties.
+  const byRemainder = floors
+    .map((f, index) => ({ index, fractional: f.exact - f.floor }))
+    .sort((a, b) => b.fractional - a.fractional || a.index - b.index);
+
+  const result = balances.map((b, index) => ({
+    ...b,
+    amountMinor: floors[index].floor,
+  }));
+
+  for (const { index } of byRemainder) {
+    if (remainder <= 0) break;
+    if (result[index].amountMinor < result[index].remainingMinor) {
+      result[index].amountMinor += 1;
+      remainder -= 1;
+    }
+  }
+
+  // If any remainder is left (only possible when every payment hit its
+  // balance cap), assign it to the first payment with remaining capacity.
+  for (const entry of result) {
+    if (remainder <= 0) break;
+    if (entry.amountMinor < entry.remainingMinor) {
+      entry.amountMinor += 1;
+      remainder -= 1;
+    }
+  }
+
+  return result;
+}
+
 function mapRefund(row, items = [], tenders = []) {
   return {
     id: row.id,
@@ -101,9 +171,19 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
           const order = orderResult.rows[0];
           if (!order) throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
 
-          if (order.order_status === "cancelled") {
+          // Server-side eligibility: a refund is only valid for a completed
+          // order whose payment state is paid, partially_refunded, or
+          // refunded. The client hides the refund button for other states,
+          // but the server must not rely on that — draft, held, open,
+          // cancelled, unpaid, and any other ineligible state is rejected
+          // here with ORDER_INELIGIBLE.
+          const eligibleOrderStatus = order.order_status === "completed";
+          const eligiblePaymentStatus = ["paid", "partially_refunded", "refunded"].includes(
+            order.payment_status,
+          );
+          if (!eligibleOrderStatus || !eligiblePaymentStatus) {
             throw apiError(
-              "Cannot refund an order that has already been cancelled.",
+              "Only completed orders with a paid or partially refunded payment state can be refunded.",
               "ORDER_INELIGIBLE",
               409,
             );
@@ -358,12 +438,26 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
 
           const isFullRefund = totalAlreadyRefunded + totalRefundedMinor >= orderTotalMinor;
 
-          // Deterministic tender allocation across captured payments
+          // Deterministic PROPORTIONAL tender allocation across captured
+          // payments, matching the documented contract. Each payment receives
+          // a share of the refund proportional to its remaining captured
+          // balance. Shares are computed in integer minor units with a
+          // deterministic largest-remainder distribution so:
+          //   - every allocation is an integer,
+          //   - no payment is over-refunded beyond its remaining balance,
+          //   - the allocations sum exactly to the refund amount,
+          //   - repeated/replayed requests produce the same allocation
+          //     (payments are ordered by created_at, then id).
+          //
+          // The maximum refund is bounded by BOTH the remaining order
+          // balance and the total remaining captured tender balance, so a
+          // refund can never exceed money actually captured.
           const paymentsRes = await client.query(
             `SELECT id, financial_account_id, payment_method, amount_minor
                FROM order_payments
-              WHERE restaurant_id = $1 AND order_id = $2 AND status IN ('captured', 'paid', 'partially_refunded')
-              ORDER BY created_at ASC`,
+              WHERE restaurant_id = $1 AND order_id = $2
+                AND status IN ('captured', 'partially_refunded', 'refunded')
+              ORDER BY created_at ASC, id ASC`,
             [restaurantId, orderId],
           );
 
@@ -380,31 +474,46 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
             tenderRefundsRes.rows.map((r) => [r.order_payment_id, minor(r.refunded_minor)]),
           );
 
-          let remainingToAllocate = totalRefundedMinor;
-          const allocatedTenders = [];
+          // Remaining captured balance per payment, in a deterministic order.
+          const paymentBalances = paymentsRes.rows
+            .map((payment) => {
+              const paymentAmount = minor(payment.amount_minor);
+              const prevRefundedOnPayment = tenderRefundsMap.get(payment.id) ?? 0;
+              return {
+                orderPaymentId: payment.id,
+                financialAccountId: payment.financial_account_id,
+                paymentMethod: payment.payment_method,
+                capturedMinor: paymentAmount,
+                refundedMinor: prevRefundedOnPayment,
+                remainingMinor: Math.max(0, paymentAmount - prevRefundedOnPayment),
+              };
+            })
+            .filter((p) => p.remainingMinor > 0);
 
-          for (const payment of paymentsRes.rows) {
-            if (remainingToAllocate <= 0) break;
+          const totalRemainingCapturedMinor = paymentBalances.reduce(
+            (sum, p) => sum + p.remainingMinor,
+            0,
+          );
 
-            const paymentAmount = minor(payment.amount_minor);
-            const prevRefundedOnPayment = tenderRefundsMap.get(payment.id) ?? 0;
-            const availableOnPayment = Math.max(0, paymentAmount - prevRefundedOnPayment);
-
-            if (availableOnPayment <= 0) continue;
-
-            const allocAmount = Math.min(remainingToAllocate, availableOnPayment);
-            remainingToAllocate -= allocAmount;
-
-            allocatedTenders.push({
-              orderPaymentId: payment.id,
-              financialAccountId: payment.financial_account_id,
-              paymentMethod: payment.payment_method,
-              amountMinor: allocAmount,
-              isFullyRefunded: prevRefundedOnPayment + allocAmount >= paymentAmount,
-            });
+          // The refund must never exceed money actually captured. The order
+          // balance check already capped totalRefundedMinor at the remaining
+          // order balance; the captured-tender balance is the harder bound
+          // when an order total exceeds its captured payments.
+          if (totalRefundedMinor > totalRemainingCapturedMinor) {
+            throw apiError(
+              "Refund amount exceeds the remaining captured payment balance.",
+              "AMOUNT_EXCEEDS_REFUNDABLE",
+              409,
+            );
           }
 
-          if (remainingToAllocate > 0) {
+          // Largest-remainder proportional allocation in integer minor units.
+          const allocatedTenders = allocateProportional(
+            totalRefundedMinor,
+            paymentBalances,
+          );
+
+          if (allocatedTenders.reduce((sum, t) => sum + t.amountMinor, 0) !== totalRefundedMinor) {
             throw apiError(
               "Unable to allocate refund across captured payments.",
               "PAYMENT_ALLOCATION_FAILED",
@@ -565,7 +674,10 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
               );
             }
 
-            if (tender.isFullyRefunded) {
+            // A payment is fully refunded when this allocation exhausts its
+            // remaining captured balance.
+            const fullyRefunded = tender.amountMinor >= tender.remainingMinor;
+            if (fullyRefunded) {
               await client.query(
                 `UPDATE order_payments
                     SET status = 'refunded'

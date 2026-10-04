@@ -17,12 +17,81 @@ function sanitizeCsvValue(value) {
   return `"${safeStr.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Accumulates positional query parameters and hands out correctly
+ * numbered placeholders ($1, $2, ...) so every dynamically built
+ * WHERE clause stays consistent with its parameter array.
+ */
+function queryParams() {
+  const values = [];
+  return {
+    add(value) {
+      values.push(value);
+      return `$${values.length}`;
+    },
+    get values() {
+      return values;
+    },
+  };
+}
+
+/**
+ * Applies the authoritative filtered-order scope to a parameter
+ * accumulator. The scope is the single source of truth shared by every
+ * report output (summary, cancelled/refunded metrics, payment breakdown,
+ * order-type breakdown, trends, detailed rows, detailed-row count, CSV).
+ *
+ * `orderType` filters on orders.order_type.
+ *
+ * `paymentMethod` uses an EXISTS subquery against order_payments rather
+ * than a JOIN. A JOIN would duplicate an order that has multiple
+ * payments (split tender), inflating every SUM/COUNT in the report.
+ * EXISTS evaluates once per order regardless of how many tenders the
+ * order was paid with, so a split-tender order is counted exactly once
+ * while still being included when any of its captured payments matches
+ * the requested method.
+ *
+ * `tableName` lets the same scope be applied to an aliased orders table
+ * (for example `o.restaurant_id` when orders is joined under alias `o`).
+ */
+function applyFilteredOrderScope(params, { restaurantId, startDate, endDate, orderType, paymentMethod, tableName = "orders" }) {
+  const restaurantParam = params.add(restaurantId);
+  const startParam = params.add(startDate);
+  const endParam = params.add(endDate);
+
+  let clause = `${tableName}.restaurant_id = ${restaurantParam} AND ${tableName}.business_date >= ${startParam} AND ${tableName}.business_date <= ${endParam}`;
+
+  if (orderType) {
+    const orderTypeParam = params.add(orderType);
+    clause += ` AND ${tableName}.order_type = ${orderTypeParam}`;
+  }
+
+  if (paymentMethod) {
+    const paymentMethodParam = params.add(paymentMethod);
+    clause += ` AND EXISTS (
+      SELECT 1
+        FROM order_payments op
+       WHERE op.restaurant_id = ${restaurantParam}
+         AND op.order_id = ${tableName}.id
+         AND op.payment_method = ${paymentMethodParam}
+         AND op.status IN ('captured', 'partially_refunded', 'refunded')
+    )`;
+  }
+
+  return clause;
+}
+
 export function createSalesReportService(pool, { clock = () => new Date() } = {}) {
   return Object.freeze({
     /**
      * Generates server-authoritative sales reports for the active tenant.
      * Enforces tenant isolation under PostgreSQL RLS, computes exact monetary metrics in integer minor units,
      * reconciles partial/full refunds against net sales, and provides trend breakdowns.
+     *
+     * Every output section applies the same filtered-order scope
+     * (date range + orderType + paymentMethod), so summary metrics,
+     * breakdowns, trends, detailed rows, and the detailed-row count
+     * always agree with one another.
      */
     async getSalesReport({ tenant, filters = {} }) {
       const restaurantId = tenant.restaurant.id;
@@ -43,15 +112,19 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
         pool,
         { restaurantId, userId: tenant.membership.userId },
         async (client) => {
-          // 1. Completed Orders Summary
-          const orderWhereParams = [restaurantId, startDate, endDate];
-          let orderWhereClause = `restaurant_id = $1 AND business_date >= $2 AND business_date <= $3 AND order_status = 'completed'`;
+          // The single authoritative filtered scope. Every section below
+          // derives its WHERE clause from this so no output can disagree.
+          const scopeParams = queryParams();
+          const scopeWhere = applyFilteredOrderScope(scopeParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod,
+          });
+          const scopeValues = scopeParams.values;
 
-          if (orderType) {
-            orderWhereParams.push(orderType);
-            orderWhereClause += ` AND order_type = $${orderWhereParams.length}`;
-          }
-
+          // 1. Completed Orders Summary (filtered scope)
           const completedSummaryRes = await client.query(
             `SELECT COUNT(*)::int AS order_count,
                     COALESCE(SUM(subtotal_minor), 0) AS gross_subtotal,
@@ -60,8 +133,8 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
                     COALESCE(SUM(additional_charges_minor), 0) AS total_charges,
                     COALESCE(SUM(total_minor), 0) AS total_completed
                FROM orders
-              WHERE ${orderWhereClause}`,
-            orderWhereParams,
+              WHERE ${scopeWhere} AND order_status = 'completed'`,
+            scopeValues,
           );
           const summaryRow = completedSummaryRes.rows[0];
           const completedOrderCount = Number(summaryRow.order_count);
@@ -72,25 +145,40 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const completedSalesMinor = minor(summaryRow.total_completed);
           const grossSalesMinor = grossSubtotalMinor + deliveryMinor + additionalChargesMinor;
 
-          // 2. Cancelled Orders Summary
+          // 2. Cancelled Orders Summary (filtered scope; cancelled metrics
+          //    follow the same orderType/paymentMethod selection so the
+          //    cancelled figures describe the same population as the rest).
           const cancelledSummaryRes = await client.query(
             `SELECT COUNT(*)::int AS count,
                     COALESCE(SUM(total_minor), 0) AS total_minor
                FROM orders
-              WHERE restaurant_id = $1 AND business_date >= $2 AND business_date <= $3 AND order_status = 'cancelled'`,
-            [restaurantId, startDate, endDate],
+              WHERE ${scopeWhere} AND order_status = 'cancelled'`,
+            scopeValues,
           );
           const cancelledSalesMinor = minor(cancelledSummaryRes.rows[0].total_minor);
           const cancelledOrderCount = Number(cancelledSummaryRes.rows[0].count);
 
-          // 3. Refund Summary within Date Range
+          // 3. Refund Summary within Date Range (filtered scope). Refunds are
+          //    attributed through the order's business date and inherit the
+          //    order's orderType/paymentMethod selection.
+          const refundScopeParams = queryParams();
+          const refundScopeWhere = applyFilteredOrderScope(refundScopeParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod,
+            tableName: "o",
+          });
           const refundsSummaryRes = await client.query(
             `SELECT COALESCE(SUM(r.total_refunded_minor), 0) AS refund_total,
                     COUNT(DISTINCT r.order_id)::int AS refunded_order_count
                FROM order_refunds r
                JOIN orders o ON o.id = r.order_id AND o.restaurant_id = r.restaurant_id
-              WHERE r.restaurant_id = $1 AND o.business_date >= $2 AND o.business_date <= $3 AND r.status = 'completed'`,
-            [restaurantId, startDate, endDate],
+              WHERE r.restaurant_id = $1
+                AND r.status = 'completed'
+                AND ${refundScopeWhere}`,
+            refundScopeParams.values,
           );
           const refundTotalMinor = minor(refundsSummaryRes.rows[0].refund_total);
           const refundedOrderCount = Number(refundsSummaryRes.rows[0].refunded_order_count);
@@ -100,18 +188,51 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
             ? Math.round(netSalesMinor / completedOrderCount)
             : 0;
 
-          // 4. Payment / Tender Breakdown
+          // 4. Payment / Tender Breakdown.
+          //
+          // Refund tenders are PRE-AGGREGATED per order_payment in a
+          // subquery before the join. Joining order_payments directly to
+          // order_refund_tenders fans out one payment row per refund tender,
+          // so a payment with two partial refunds would have its captured
+          // amount_minor counted twice and inflate captured totals. The
+          // pre-aggregated subquery guarantees each payment's captured
+          // amount is counted exactly once and the refunded amount is the
+          // exact sum of its refund tenders.
+          //
+          // The payment-method filter (when present) is applied directly on
+          // op.payment_method here: the breakdown groups by payment method,
+          // so filtering the rows to the requested method yields exactly one
+          // group for that method.
+          const paymentParams = queryParams();
+          const paymentScopeWhere = applyFilteredOrderScope(paymentParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod: null,
+            tableName: "o",
+          });
+          const paymentMethodFilterParam = paymentMethod
+            ? paymentParams.add(paymentMethod)
+            : null;
           const paymentBreakdownRes = await client.query(
             `SELECT op.payment_method,
                     COALESCE(SUM(op.amount_minor), 0) AS captured_minor,
-                    COALESCE(SUM(rt.amount_minor), 0) AS refunded_minor
+                    COALESCE(SUM(rt.refunded_minor), 0) AS refunded_minor
                FROM order_payments op
                JOIN orders o ON o.id = op.order_id AND o.restaurant_id = op.restaurant_id
-          LEFT JOIN order_refund_tenders rt ON rt.order_payment_id = op.id AND rt.restaurant_id = op.restaurant_id
-              WHERE op.restaurant_id = $1 AND o.business_date >= $2 AND o.business_date <= $3 AND op.status IN ('captured', 'paid', 'refunded', 'partially_refunded')
+          LEFT JOIN (
+                  SELECT order_payment_id, SUM(amount_minor) AS refunded_minor
+                    FROM order_refund_tenders
+                   WHERE restaurant_id = $1
+                   GROUP BY order_payment_id
+               ) rt ON rt.order_payment_id = op.id
+              WHERE ${paymentScopeWhere}
+                AND op.status IN ('captured', 'partially_refunded', 'refunded')
+                ${paymentMethodFilterParam ? `AND op.payment_method = ${paymentMethodFilterParam}` : ""}
               GROUP BY op.payment_method
               ORDER BY op.payment_method`,
-            [restaurantId, startDate, endDate],
+            paymentParams.values,
           );
           const paymentBreakdown = paymentBreakdownRes.rows.map((row) => {
             const captured = minor(row.captured_minor);
@@ -124,16 +245,16 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
             };
           });
 
-          // 5. Order Type Breakdown
+          // 5. Order Type Breakdown (filtered scope)
           const orderTypeBreakdownRes = await client.query(
             `SELECT order_type,
                     COUNT(*)::int AS count,
                     COALESCE(SUM(total_minor), 0) AS total_minor
                FROM orders
-              WHERE restaurant_id = $1 AND business_date >= $2 AND business_date <= $3 AND order_status = 'completed'
+              WHERE ${scopeWhere} AND order_status = 'completed'
               GROUP BY order_type
               ORDER BY order_type`,
-            [restaurantId, startDate, endDate],
+            scopeValues,
           );
           const orderTypeBreakdown = orderTypeBreakdownRes.rows.map((row) => ({
             orderType: row.order_type,
@@ -141,27 +262,51 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
             totalMinor: minor(row.total_minor),
           }));
 
-          // 6. Trend Grouping (Daily / Weekly / Monthly)
+          // 6. Trend Grouping (Daily / Weekly / Monthly) — filtered scope.
+          //    Both CTEs share one parameter list. The orders CTE numbers the
+          //    scope placeholders ($1..$N) and the date_trunc unit ($N+1); the
+          //    refunds CTE reuses those same placeholders because its filter
+          //    values are identical, so no second numbering pass is needed.
           let dateTruncUnit = "day";
           if (groupBy === "week") dateTruncUnit = "week";
           if (groupBy === "month") dateTruncUnit = "month";
 
+          const trendParams = queryParams();
+          const trendScopeWhere = applyFilteredOrderScope(trendParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod,
+          });
+          const trendValues = trendParams.values;
+          const dateTruncParam = `$${trendValues.length + 1}`;
+          // The refunds CTE filters the joined orders table under alias `o`
+          // with the same values, so it reuses the orders CTE placeholders
+          // by rewriting the table name in the already-numbered clause.
+          const trendRefundScopeWhere = trendScopeWhere.replace(
+            /\borders\./g,
+            "o.",
+          );
+
           const trendsRes = await client.query(
             `WITH daily_orders AS (
-               SELECT date_trunc($4, business_date::timestamp)::date AS period_date,
+               SELECT date_trunc(${dateTruncParam}, business_date::timestamp)::date AS period_date,
                       COUNT(*)::int AS order_count,
                       COALESCE(SUM(subtotal_minor + delivery_minor + additional_charges_minor), 0) AS gross_sales,
                       COALESCE(SUM(discount_minor), 0) AS discounts,
                       COALESCE(SUM(total_minor), 0) AS completed_sales
                  FROM orders
-                WHERE restaurant_id = $1 AND business_date >= $2 AND business_date <= $3 AND order_status = 'completed'
+                WHERE ${trendScopeWhere} AND order_status = 'completed'
                 GROUP BY 1
              ), daily_refunds AS (
-               SELECT date_trunc($4, o.business_date::timestamp)::date AS period_date,
+               SELECT date_trunc(${dateTruncParam}, o.business_date::timestamp)::date AS period_date,
                       COALESCE(SUM(r.total_refunded_minor), 0) AS refund_total
                  FROM order_refunds r
                  JOIN orders o ON o.id = r.order_id AND o.restaurant_id = r.restaurant_id
-                WHERE r.restaurant_id = $1 AND o.business_date >= $2 AND o.business_date <= $3 AND r.status = 'completed'
+                WHERE r.restaurant_id = $1
+                  AND r.status = 'completed'
+                  AND ${trendRefundScopeWhere}
                 GROUP BY 1
              )
              SELECT COALESCE(o.period_date, r.period_date) AS date,
@@ -172,8 +317,8 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
                     COALESCE(r.refund_total, 0) AS refund_total_minor
                FROM daily_orders o
           FULL OUTER JOIN daily_refunds r ON r.period_date = o.period_date
-              ORDER BY date ASC`,
-            [restaurantId, startDate, endDate, dateTruncUnit],
+               ORDER BY date ASC`,
+            [...trendValues, dateTruncUnit],
           );
 
           const trends = trendsRes.rows.map((row) => {
@@ -191,29 +336,49 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
             };
           });
 
-          // 7. Paginated Detailed Rows
+          // 7. Paginated Detailed Rows (filtered scope)
+          const detailParams = queryParams();
+          const detailScopeWhere = applyFilteredOrderScope(detailParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod,
+            tableName: "o",
+          });
+          const detailValues = detailParams.values;
           const detailedRowsRes = await client.query(
             `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
                     o.total_minor, o.business_date, o.ordered_at,
                     COALESCE(ref.refund_total, 0) AS refunded_minor
                FROM orders o
           LEFT JOIN (
-                 SELECT order_id, SUM(total_refunded_minor) AS refund_total
-                   FROM order_refunds
-                  WHERE restaurant_id = $1 AND status = 'completed'
-                  GROUP BY order_id
+                  SELECT order_id, SUM(total_refunded_minor) AS refund_total
+                    FROM order_refunds
+                   WHERE restaurant_id = $1 AND status = 'completed'
+                   GROUP BY order_id
                ) ref ON ref.order_id = o.id
-              WHERE o.restaurant_id = $1 AND o.business_date >= $2 AND o.business_date <= $3
+              WHERE ${detailScopeWhere}
               ORDER BY o.business_date DESC, o.order_number DESC
-              LIMIT $4 OFFSET $5`,
-            [restaurantId, startDate, endDate, limit, offset],
+              LIMIT $${detailValues.length + 1} OFFSET $${detailValues.length + 2}`,
+            [...detailValues, limit, offset],
           );
 
+          // Detailed-row count uses the identical filtered scope so the
+          // pagination totals always agree with the rows returned.
+          const countParams = queryParams();
+          const countScopeWhere = applyFilteredOrderScope(countParams, {
+            restaurantId,
+            startDate,
+            endDate,
+            orderType,
+            paymentMethod,
+          });
           const detailedRowsCountRes = await client.query(
             `SELECT COUNT(*)::int AS total_rows
                FROM orders
-              WHERE restaurant_id = $1 AND business_date >= $2 AND business_date <= $3`,
-            [restaurantId, startDate, endDate],
+              WHERE ${countScopeWhere}`,
+            countParams.values,
           );
 
           const totalDetailedRows = Number(detailedRowsCountRes.rows[0]?.total_rows ?? 0);
@@ -281,17 +446,79 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
     },
 
     /**
+     * Streams every detailed row in the filtered range in bounded pages so
+     * the CSV export is complete regardless of how many orders match. The
+     * interactive endpoint keeps its 200-row cap; the export paginates
+     * internally with its own page size and never weakens that cap.
+     */
+    async *iterSalesReportRows({ tenant, filters = {} }) {
+      const restaurantId = tenant.restaurant.id;
+      const startDate = filters.startDate;
+      const endDate = filters.endDate;
+      const orderType = filters.orderType || null;
+      const paymentMethod = filters.paymentMethod || null;
+      const pageSize = 500;
+      let page = 1;
+
+      for (;;) {
+        const offset = (page - 1) * pageSize;
+        const rows = await withTenantTransaction(
+          pool,
+          { restaurantId, userId: tenant.membership.userId },
+          async (client) => {
+            const params = queryParams();
+            const scopeWhere = applyFilteredOrderScope(params, {
+              restaurantId,
+              startDate,
+              endDate,
+              orderType,
+              paymentMethod,
+              tableName: "o",
+            });
+            const values = params.values;
+            const res = await client.query(
+              `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
+                      o.total_minor, o.business_date, o.ordered_at,
+                      COALESCE(ref.refund_total, 0) AS refunded_minor
+                 FROM orders o
+            LEFT JOIN (
+                    SELECT order_id, SUM(total_refunded_minor) AS refund_total
+                      FROM order_refunds
+                     WHERE restaurant_id = $1 AND status = 'completed'
+                     GROUP BY order_id
+                 ) ref ON ref.order_id = o.id
+                WHERE ${scopeWhere}
+                ORDER BY o.business_date ASC, o.order_number ASC
+                LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+              [...values, pageSize, offset],
+            );
+            return res.rows;
+          },
+        );
+
+        if (rows.length === 0) return;
+        yield rows;
+        if (rows.length < pageSize) return;
+        page += 1;
+      }
+    },
+
+    /**
      * Generates a safe UTF-8 CSV export string for sales reports with formula-injection defenses.
+     * The export paginates through the complete filtered range via
+     * iterSalesReportRows, so it never truncates at the interactive
+     * endpoint's 200-row limit.
      */
     async exportSalesReportCsv({ tenant, filters = {} }) {
+      // Metrics, breakdowns, and trends come from the same filtered scope.
       const report = await this.getSalesReport({
         tenant,
-        filters: { ...filters, limit: 10000, page: 1 },
+        filters: { ...filters, page: 1, limit: 50 },
       });
 
       const lines = [];
       // BOM for UTF-8 compatibility in MS Excel
-      lines.push("\uFEFFSales Report Export");
+      lines.push("﻿Sales Report Export");
       lines.push(`Restaurant,${sanitizeCsvValue(report.restaurant.name)}`);
       lines.push(`Date Range,${sanitizeCsvValue(report.filters.startDate)} to ${sanitizeCsvValue(report.filters.endDate)}`);
       lines.push(`Generated At,${sanitizeCsvValue(clock().toISOString())}`);
@@ -331,21 +558,28 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       }
       lines.push("");
 
+      // Detailed rows stream from the export-specific paginated iterator,
+      // which is not bounded by the interactive 200-row limit.
       lines.push("DETAILED SALES ROWS");
       lines.push("Order Number,Business Date,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
-      for (const row of report.detailedRows.rows) {
-        lines.push(
-          [
-            sanitizeCsvValue(row.orderNumber),
-            sanitizeCsvValue(row.businessDate),
-            sanitizeCsvValue(row.orderType),
-            sanitizeCsvValue(row.orderStatus),
-            sanitizeCsvValue(row.paymentStatus),
-            (row.totalMinor / 100).toFixed(2),
-            (row.refundedMinor / 100).toFixed(2),
-            (row.netMinor / 100).toFixed(2),
-          ].join(","),
-        );
+      for await (const rows of this.iterSalesReportRows({ tenant, filters })) {
+        for (const row of rows) {
+          const total = minor(row.total_minor);
+          const ref = minor(row.refund_total);
+          const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
+          lines.push(
+            [
+              sanitizeCsvValue(Number(row.order_number)),
+              sanitizeCsvValue(row.business_date),
+              sanitizeCsvValue(row.order_type),
+              sanitizeCsvValue(row.order_status),
+              sanitizeCsvValue(row.payment_status),
+              (total / 100).toFixed(2),
+              (ref / 100).toFixed(2),
+              (net / 100).toFixed(2),
+            ].join(","),
+          );
+        }
       }
 
       return lines.join("\n");

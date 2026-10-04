@@ -3,6 +3,26 @@ import { describe, it } from "node:test";
 import { createSalesReportUI } from "../src/client/sales-report-ui.mjs";
 
 const restaurantId = "11111111-1111-4111-8111-111111111111";
+const TEST_TIMEZONE = "Asia/Karachi";
+
+/** Formats an instant as YYYY-MM-DD in the test timezone, matching the
+ *  UI's timezone-aware business-date calculation. */
+function formatInTimezone(instant, timeZone = TEST_TIMEZONE) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instant);
+}
+
+function todayStr() {
+  return formatInTimezone(new Date());
+}
+
+function yesterdayStr() {
+  return formatInTimezone(new Date(Date.now() - 24 * 60 * 60 * 1000));
+}
 
 function jsonResponse(payload, { status = 200 } = {}) {
   return {
@@ -16,10 +36,6 @@ function jsonResponse(payload, { status = 200 } = {}) {
       return JSON.stringify(payload);
     },
   };
-}
-
-function todayStr() {
-  return new Date().toISOString().substring(0, 10);
 }
 
 function reportPayload(overrides = {}) {
@@ -137,6 +153,11 @@ function setup({ report = reportPayload(), status = 200 } = {}) {
   const endDateInput = makeElement();
   const exportBtn = makeElement();
   const applyBtn = makeElement();
+  const orderTypeSelect = makeElement();
+  const paymentMethodSelect = makeElement();
+  const prevPageBtn = makeElement();
+  const nextPageBtn = makeElement();
+  const paginationInfo = makeElement();
   const presetButtons = ["today", "yesterday", "last7days", "month"].map(
     (preset) => {
       const button = makeElement();
@@ -153,6 +174,11 @@ function setup({ report = reportPayload(), status = 200 } = {}) {
       "#report-end-date": endDateInput,
       "#sales-export-btn": exportBtn,
       "#report-apply-btn": applyBtn,
+      "#report-ordertype-filter": orderTypeSelect,
+      "#report-paymentmethod-filter": paymentMethodSelect,
+      "#report-prev-page": prevPageBtn,
+      "#report-next-page": nextPageBtn,
+      "#report-pagination-info": paginationInfo,
     };
     return byId[selector] ?? null;
   };
@@ -169,6 +195,11 @@ function setup({ report = reportPayload(), status = 200 } = {}) {
     endDateInput,
     exportBtn,
     applyBtn,
+    orderTypeSelect,
+    paymentMethodSelect,
+    prevPageBtn,
+    nextPageBtn,
+    paginationInfo,
     presetButtons,
     restore() {
       globalThis.fetch = previous.fetch;
@@ -297,9 +328,6 @@ describe("sales report UI", () => {
 
   it("reloads when a date preset is chosen", async () => {
     const { requests, containerEl, presetButtons, restore } = setup();
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().substring(0, 10);
     try {
       const ui = createSalesReportUI({ containerEl });
       await ui.mount();
@@ -311,7 +339,197 @@ describe("sales report UI", () => {
 
     const last = requests[requests.length - 1];
     const url = new URL(last.url, "http://localhost");
-    assert.equal(url.searchParams.get("startDate"), yesterdayStr);
-    assert.equal(url.searchParams.get("endDate"), yesterdayStr);
+    assert.equal(url.searchParams.get("startDate"), yesterdayStr());
+    assert.equal(url.searchParams.get("endDate"), yesterdayStr());
+  });
+
+  it("sends the orderType and paymentMethod filters to the server", async () => {
+    const { requests, containerEl, orderTypeSelect, paymentMethodSelect, applyBtn, restore } = setup();
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      orderTypeSelect.value = "dine_in";
+      paymentMethodSelect.value = "cash";
+      applyBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    const last = requests[requests.length - 1];
+    const url = new URL(last.url, "http://localhost");
+    assert.equal(url.searchParams.get("orderType"), "dine_in");
+    assert.equal(url.searchParams.get("paymentMethod"), "cash");
+  });
+
+  it("resets to page 1 when a filter changes", async () => {
+    const { requests, containerEl, paymentMethodSelect, applyBtn, restore } = setup({
+      report: reportPayload({
+        detailedRows: {
+          rows: [],
+          pagination: { page: 3, limit: 50, totalRows: 150, totalPages: 3 },
+        },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      // Move to a later page, then change a filter.
+      await ui.setFilters({ page: 3 });
+      paymentMethodSelect.value = "cash";
+      applyBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    const last = requests[requests.length - 1];
+    const url = new URL(last.url, "http://localhost");
+    assert.equal(url.searchParams.get("page"), "1", "filter change must reset to page 1");
+  });
+
+  it("navigates to the next page and requests it from the server", async () => {
+    const { requests, containerEl, nextPageBtn, restore } = setup({
+      report: reportPayload({
+        detailedRows: {
+          rows: [],
+          pagination: { page: 1, limit: 50, totalRows: 120, totalPages: 3 },
+        },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      nextPageBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    const last = requests[requests.length - 1];
+    const url = new URL(last.url, "http://localhost");
+    assert.equal(url.searchParams.get("page"), "2", "Next must request page 2");
+  });
+
+  it("renders pagination info and disables Previous on the first page", async () => {
+    const { containerEl, contentArea, prevPageBtn, restore } = setup({
+      report: reportPayload({
+        detailedRows: {
+          rows: [],
+          pagination: { page: 1, limit: 50, totalRows: 120, totalPages: 3 },
+        },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+    } finally {
+      restore();
+    }
+
+    assert.match(contentArea.innerHTML, /Page 1 of 3 · 120 rows/);
+    // The Previous button is rendered with the disabled attribute on page 1.
+    assert.match(
+      contentArea.innerHTML,
+      /id="report-prev-page"[^>]*disabled/,
+      "Previous must be disabled on page 1",
+    );
+  });
+
+  it("suppresses a stale response so it cannot overwrite a newer filter result", async () => {
+    // The first request is slow; the second (newer) resolves first.
+    // Only the newer response may be rendered.
+    let resolveFirst;
+    const firstPromise = new Promise((resolve) => {
+      resolveFirst = () => resolve(jsonResponse(reportPayload({
+        metrics: {
+          grossSalesMinor: 111_000,
+          discountsMinor: 0,
+          refundTotalMinor: 0,
+          refundedOrderCount: 0,
+          netSalesMinor: 111_000,
+          completedOrderCount: 1,
+          averageOrderValueMinor: 111_000,
+        },
+        detailedRows: { rows: [], pagination: { page: 1, limit: 50, totalRows: 1, totalPages: 1 } },
+      })));
+    });
+
+    const requests = [];
+    const previous = {
+      fetch: globalThis.fetch,
+      session: globalThis.BiteTechCloudSession,
+      window: globalThis.window,
+      location: globalThis.location,
+    };
+    globalThis.fetch = async (url, init) => {
+      requests.push({ url, init });
+      if (requests.length === 1) return firstPromise;
+      return jsonResponse(reportPayload({
+        metrics: {
+          grossSalesMinor: 222_000,
+          discountsMinor: 0,
+          refundTotalMinor: 0,
+          refundedOrderCount: 0,
+          netSalesMinor: 222_000,
+          completedOrderCount: 2,
+          averageOrderValueMinor: 222_000,
+        },
+        detailedRows: { rows: [], pagination: { page: 1, limit: 50, totalRows: 2, totalPages: 1 } },
+      }));
+    };
+    globalThis.BiteTechCloudSession = { activeRestaurant: async () => restaurantId };
+    globalThis.window = globalThis;
+    globalThis.location = { href: "" };
+
+    const containerEl = makeElement();
+    const contentArea = makeElement();
+    containerEl.querySelector = (selector) =>
+      selector === "#report-content-area" ? contentArea : null;
+    containerEl.querySelectorAll = () => [];
+
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      const firstLoad = ui.mount();
+      // Start a second (newer) request before the first resolves.
+      const secondLoad = ui.setFilters({ paymentMethod: "cash" });
+      // Let the newer response render first.
+      await secondLoad;
+      // Now resolve the stale first request.
+      resolveFirst();
+      await firstLoad;
+    } finally {
+      globalThis.fetch = previous.fetch;
+      globalThis.BiteTechCloudSession = previous.session;
+      globalThis.window = previous.window;
+      globalThis.location = previous.location;
+    }
+
+    // The rendered content must reflect the newer (222_000) response,
+    // not the stale (111_000) one.
+    assert.ok(
+      contentArea.innerHTML.includes("PKR 2,220.00"),
+      "newer response must be rendered",
+    );
+    assert.ok(
+      !contentArea.innerHTML.includes("PKR 1,110.00"),
+      "stale response must not overwrite the newer result",
+    );
+  });
+
+  it("renders an empty state when no orders match the filters", async () => {
+    const { containerEl, contentArea, restore } = setup({
+      report: reportPayload({
+        detailedRows: { rows: [], pagination: { page: 1, limit: 50, totalRows: 0, totalPages: 0 } },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+    } finally {
+      restore();
+    }
+
+    assert.match(contentArea.innerHTML, /No orders match the selected filters/);
   });
 });

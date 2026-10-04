@@ -902,3 +902,215 @@ test("CSV export downloads the current filter range", async ({ page }) => {
   expect(url.searchParams.get("startDate")).toBe("2026-09-01");
   expect(url.searchParams.get("endDate")).toBe("2026-09-30");
 });
+
+test("the payment-method filter is sent to the report API", async ({ page }) => {
+  const reportRequests = [];
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/reports/sales") {
+      reportRequests.push(new URL(route.request().url()).searchParams);
+      return route.fulfill({ json: salesReportPayload() });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+  await page.evaluate(() => switchScreen("reports"));
+  await page.click("#reports-tab-cloud");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+
+  await page.selectOption("#report-paymentmethod-filter", "cash");
+  await page.click("#report-apply-btn");
+
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+  const last = reportRequests[reportRequests.length - 1];
+  expect(last.get("paymentMethod")).toBe("cash");
+  // A filter change resets to the first page.
+  expect(last.get("page")).toBe("1");
+});
+
+test("the order-type filter is sent to the report API", async ({ page }) => {
+  const reportRequests = [];
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/reports/sales") {
+      reportRequests.push(new URL(route.request().url()).searchParams);
+      return route.fulfill({ json: salesReportPayload() });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+  await page.evaluate(() => switchScreen("reports"));
+  await page.click("#reports-tab-cloud");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+
+  await page.selectOption("#report-ordertype-filter", "dine_in");
+  await page.click("#report-apply-btn");
+
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+  const last = reportRequests[reportRequests.length - 1];
+  expect(last.get("orderType")).toBe("dine_in");
+});
+
+test("pagination controls request the next page", async ({ page }) => {
+  const reportRequests = [];
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/reports/sales") {
+      reportRequests.push(new URL(route.request().url()).searchParams);
+      return route.fulfill({
+        json: salesReportPayload({
+          detailedRows: {
+            rows: [],
+            pagination: { page: 1, limit: 50, totalRows: 120, totalPages: 3 },
+          },
+        }),
+      });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+  await page.evaluate(() => switchScreen("reports"));
+  await page.click("#reports-tab-cloud");
+
+  const container = page.locator("#cloud-sales-report-container");
+  await expect(container).toContainText("Page 1 of 3 · 120 rows");
+  // Previous is disabled on the first page.
+  await expect(page.locator("#report-prev-page")).toBeDisabled();
+  await expect(page.locator("#report-next-page")).toBeEnabled();
+
+  await page.click("#report-next-page");
+
+  await expect(container).toContainText("Net Sales");
+  const last = reportRequests[reportRequests.length - 1];
+  expect(last.get("page")).toBe("2");
+});
+
+test("an empty result set renders a clear empty state", async ({ page }) => {
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/reports/sales") {
+      return route.fulfill({
+        json: salesReportPayload({
+          detailedRows: {
+            rows: [],
+            pagination: { page: 1, limit: 50, totalRows: 0, totalPages: 0 },
+          },
+        }),
+      });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+  await page.evaluate(() => switchScreen("reports"));
+  await page.click("#reports-tab-cloud");
+
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "No orders match the selected filters",
+  );
+});
+
+test("the payment-method filter persists across pagination", async ({ page }) => {
+  const reportRequests = [];
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/reports/sales") {
+      reportRequests.push(new URL(route.request().url()).searchParams);
+      return route.fulfill({
+        json: salesReportPayload({
+          detailedRows: {
+            rows: [],
+            pagination: { page: 1, limit: 50, totalRows: 120, totalPages: 3 },
+          },
+        }),
+      });
+    }
+    return route.fulfill({ json: {} });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+  await page.evaluate(() => switchScreen("reports"));
+  await page.click("#reports-tab-cloud");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+
+  // Apply a payment-method filter.
+  await page.selectOption("#report-paymentmethod-filter", "cash");
+  await page.click("#report-apply-btn");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+  expect(reportRequests[reportRequests.length - 1].get("paymentMethod")).toBe(
+    "cash",
+  );
+
+  // Paginating forward keeps the payment-method filter applied.
+  await page.click("#report-next-page");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText(
+    "Net Sales",
+  );
+  const last = reportRequests[reportRequests.length - 1];
+  expect(last.get("paymentMethod")).toBe("cash");
+  expect(last.get("page")).toBe("2");
+});
+
+test("a refund success dialog is accepted exactly once and does not block", async ({ page }) => {
+  const dialogs = [];
+  let acceptCount = 0;
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.message());
+    // The proper flow: await the accept so the dialog is fully
+    // dismissed before the test continues.
+    dialog.accept().then(() => {
+      acceptCount += 1;
+    }).catch(() => {});
+  });
+
+  mockApi(page, (route, url) => {
+    if (url.pathname === `/api/pos/orders/${ORDER_ID}`) {
+      return route.fulfill({ json: cloudOrderDetail() });
+    }
+    if (url.pathname === `/api/pos/orders/${ORDER_ID}/refunds`) {
+      if (route.request().method() === "POST") {
+        return route.fulfill({ json: refundSuccess() });
+      }
+      return route.fulfill({ json: [] });
+    }
+    return route.fulfill({ json: cloudListResponse([]) });
+  });
+
+  await openPos(page);
+  await configureCloud(page);
+
+  const pending = page.evaluate(
+    (orderId) => window.openRefundModal(orderId),
+    ORDER_ID,
+  );
+  await expect(page.locator("#cloud-refund-modal-overlay")).toBeVisible();
+  await pending;
+
+  await page.fill(".refund-qty-input >> nth=0", "1");
+  await page.fill("#refund-reason-input", "dialog sync scenario");
+  await page.click("#refund-submit-btn");
+  await pending;
+
+  // The success dialog was shown and accepted exactly once.
+  await expect
+    .poll(() => dialogs.some((message) => message.includes("REF-101-1")))
+    .toBeTruthy();
+  await expect.poll(() => acceptCount).toBeGreaterThanOrEqual(1);
+  // The page is not blocked: the modal closed cleanly.
+  await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
+});
