@@ -237,12 +237,15 @@ function mockApi(page, handler) {
 }
 
 /** Records every dialog and accepts it so assertions can
- *  inspect the messages without blocking the page. */
+ *  inspect the messages without blocking the page. A dialog
+ *  that arrives after the test has finished (for example the
+ *  success alert once the final assertion has passed) must
+ *  not fail the test, so a late accept is swallowed. */
 function recordDialogs(page) {
   const dialogs = [];
   page.on("dialog", (dialog) => {
     dialogs.push(dialog.message());
-    dialog.accept();
+    dialog.accept().catch(() => {});
   });
   return dialogs;
 }
