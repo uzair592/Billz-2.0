@@ -39,20 +39,45 @@ function formatDate(iso) {
   return date.toLocaleDateString();
 }
 
+export const DEFAULT_TRUSTED_CHECKOUT_HOSTS = Object.freeze([
+  "checkout.stripe.com",
+]);
+
 /**
- * Only a trusted HTTPS URL may be navigated to.
- * Anything else (javascript:, data:, plain http:)
- * is refused rather than assigned.
+ * Validates that a checkout URL points to an authorized payment provider.
+ *
+ * Requirements:
+ * - valid absolute URL;
+ * - HTTPS protocol only (no http, javascript, data, file, blob);
+ * - no embedded username or password;
+ * - hostname must match an allowed host EXACTLY (case-insensitive);
+ * - no substring or deceptive suffix matching (e.g. checkout.stripe.com.evil.example is rejected).
+ *
+ * @param {string} url
+ * @param {Iterable<string>} [allowedHosts]
+ * @returns {boolean}
  */
-function isTrustedRedirect(url) {
-  if (typeof url !== "string") return false;
+export function isTrustedRedirect(
+  url,
+  allowedHosts = DEFAULT_TRUSTED_CHECKOUT_HOSTS,
+) {
+  if (typeof url !== "string" || !url.trim()) return false;
   let parsed;
   try {
-    parsed = new URL(url);
+    parsed = new URL(url.trim());
   } catch {
     return false;
   }
-  return parsed.protocol === "https:";
+
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.username !== "" || parsed.password !== "") return false;
+
+  const hostname = parsed.hostname.toLowerCase();
+  const hostsSet = new Set(
+    Array.from(allowedHosts, (h) => String(h).toLowerCase()),
+  );
+
+  return hostsSet.has(hostname);
 }
 
 const STATUS_LABELS = {
@@ -70,7 +95,10 @@ function statusLabel(status) {
   return STATUS_LABELS[status] ?? escapeHtml(status || "None");
 }
 
-export function createBillingUI({ onUpdated } = {}) {
+export function createBillingUI({
+  onUpdated,
+  trustedCheckoutHosts = DEFAULT_TRUSTED_CHECKOUT_HOSTS,
+} = {}) {
   let busy = false;
 
   function element(id) {
@@ -258,7 +286,7 @@ export function createBillingUI({ onUpdated } = {}) {
         idempotencyKey: generateIdempotencyKey(),
       });
       if (result?.checkoutUrl) {
-        if (!isTrustedRedirect(result.checkoutUrl)) {
+        if (!isTrustedRedirect(result.checkoutUrl, trustedCheckoutHosts)) {
           setStatus(
             "The payment provider returned an untrusted checkout link.",
             "error",

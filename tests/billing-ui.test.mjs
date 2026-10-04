@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createBillingUI } from "../src/client/billing-ui.mjs";
+import {
+  DEFAULT_TRUSTED_CHECKOUT_HOSTS,
+  createBillingUI,
+  isTrustedRedirect,
+} from "../src/client/billing-ui.mjs";
 
 function createFakeDom() {
   const elements = new Map();
@@ -145,7 +149,11 @@ function jsonResponse(payload, { status = 200 } = {}) {
   };
 }
 
-function setup({ fetchImpl, confirm = true } = {}) {
+function setup({
+  fetchImpl,
+  confirm = true,
+  trustedCheckoutHosts = ["pay.example", "checkout.stripe.com"],
+} = {}) {
   const dom = createFakeDom();
   const redirects = [];
   const confirms = [];
@@ -174,7 +182,7 @@ function setup({ fetchImpl, confirm = true } = {}) {
     activeRestaurant: async () => "22222222-2222-4222-8222-222222222222",
   };
 
-  const ui = createBillingUI();
+  const ui = createBillingUI({ trustedCheckoutHosts });
 
   return {
     dom,
@@ -656,5 +664,108 @@ describe("billing UI", () => {
     }
 
     assert.deepEqual(redirects, []);
+  });
+
+  describe("isTrustedRedirect policy", () => {
+    it("accepts legitimate Stripe Checkout hostnames", () => {
+      assert.equal(
+        isTrustedRedirect("https://checkout.stripe.com/c/pay/cs_test_12345"),
+        true,
+      );
+      assert.equal(
+        isTrustedRedirect("https://checkout.stripe.com/pay/cs_test_abc123?session=xyz"),
+        true,
+      );
+    });
+
+    it("accepts configured trusted hosts case-insensitively", () => {
+      assert.equal(
+        isTrustedRedirect("https://CHECKOUT.STRIPE.COM/pay/123"),
+        true,
+      );
+      assert.equal(
+        isTrustedRedirect("https://pay.example/session/abc", ["pay.example"]),
+        true,
+      );
+    });
+
+    it("rejects non-HTTPS schemes", () => {
+      assert.equal(
+        isTrustedRedirect("http://checkout.stripe.com/c/pay/cs_test_12345"),
+        false,
+      );
+      assert.equal(isTrustedRedirect("javascript:alert(1)"), false);
+      assert.equal(isTrustedRedirect("data:text/html,<script>alert(1)</script>"), false);
+      assert.equal(isTrustedRedirect("file:///etc/passwd"), false);
+      assert.equal(isTrustedRedirect("blob:https://checkout.stripe.com/123"), false);
+    });
+
+    it("rejects untrusted domains and deceptive suffix hostnames", () => {
+      assert.equal(isTrustedRedirect("https://malicious.example/phishing"), false);
+      assert.equal(
+        isTrustedRedirect("https://checkout.stripe.com.evil.example/pay"),
+        false,
+      );
+      assert.equal(
+        isTrustedRedirect("https://stripe.com.evil.example/pay"),
+        false,
+      );
+      assert.equal(
+        isTrustedRedirect("https://evil-checkout.stripe.com/pay"),
+        false,
+      );
+    });
+
+    it("rejects relative URLs and malformed inputs", () => {
+      assert.equal(isTrustedRedirect("/checkout/pay"), false);
+      assert.equal(isTrustedRedirect("not-a-url"), false);
+      assert.equal(isTrustedRedirect(""), false);
+      assert.equal(isTrustedRedirect(null), false);
+      assert.equal(isTrustedRedirect(undefined), false);
+      assert.equal(isTrustedRedirect(12345), false);
+    });
+
+    it("rejects URLs containing embedded user credentials", () => {
+      assert.equal(
+        isTrustedRedirect("https://user:pass@checkout.stripe.com/pay"),
+        false,
+      );
+      assert.equal(
+        isTrustedRedirect("https://user@checkout.stripe.com/pay"),
+        false,
+      );
+    });
+  });
+
+  it("displays untrusted checkout error, does not redirect, restores busy state, and permits retry", async () => {
+    let checkoutCount = 0;
+    const { dom, ui, redirects, restore } = setup({
+      fetchImpl: async () => {
+        checkoutCount++;
+        return jsonResponse({
+          replayed: false,
+          checkoutUrl: "https://checkout.stripe.com.evil.example/phishing",
+          plan: { code: "STANDARD", name: "Standard" },
+          amountMinor: 9_999_00,
+          currencyCode: "PKR",
+          status: "awaiting_payment",
+        });
+      },
+    });
+    try {
+      await ui.startCheckout("STANDARD");
+    } finally {
+      restore();
+    }
+
+    assert.equal(redirects.length, 0);
+    const status = dom.document.getElementById("billing-status");
+    assert.match(status.textContent, /untrusted checkout link/i);
+    assert.match(status.className, /error/);
+    assert.equal(
+      dom.document.getElementById("billing-screen-body").className.includes("hidden"),
+      false,
+    );
+    assert.equal(checkoutCount, 1);
   });
 });
