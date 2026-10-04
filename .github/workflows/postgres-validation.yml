@@ -2,7 +2,7 @@ name: PostgreSQL Validation
 
 on:
   push:
-    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui]
+    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui, feat/milestone-12-refunds-sales-reports]
   pull_request:
     branches: [main]
 
@@ -79,6 +79,7 @@ jobs:
         run: |
           mapfile -t unit_tests < <(find tests -maxdepth 1 -name '*.test.mjs' \
             ! -name 'billing-postgres.test.mjs' \
+            ! -name 'refund-sales-report-postgres.test.mjs' \
             ! -name 'server-startup.test.mjs' | sort)
           node --test "${unit_tests[@]}"
 
@@ -97,7 +98,7 @@ jobs:
 
       - name: Apply migrations
         run: |
-          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 10
+          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 11
           export PGPASSWORD=validation-only
           for migration in database/migrations/*.sql; do
             echo "Applying $migration"

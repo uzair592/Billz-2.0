@@ -110,6 +110,27 @@ describe("legacy POS application integrity", () => {
     assert.match(html, /function submitCloudSignOut\(\)/);
   });
 
+  it("splits the reports screen into local and cloud tabs", async () => {
+    const html = await readLegacyApp();
+
+    // The tab switcher delegates to the cloud bootstrap, which
+    // owns both views.
+    assert.match(html, /id="reports-tab-local"/);
+    assert.match(html, /onclick="showLocalReports\(\)"/);
+    assert.match(html, /id="reports-tab-cloud"/);
+    assert.match(html, /onclick="showCloudSalesReport\(\)"/);
+
+    // Local totals stay in their own view; the cloud dashboard
+    // mounts into its own container so the two are never mixed.
+    assert.match(html, /id="local-reports-view"/);
+    assert.match(html, /id="cloud-sales-report-view"/);
+    assert.match(html, /id="cloud-sales-report-container"/);
+
+    const cloudView = html.indexOf('id="cloud-sales-report-view"');
+    const cloudTag = html.slice(cloudView, html.indexOf(">", cloudView));
+    assert.match(cloudTag, /class="hidden"/);
+  });
+
   it("keeps the cloud panel hidden until it is opened", async () => {
     const html = await readLegacyApp();
     const overlay = html.indexOf('id="cloud-account-modal-overlay"');
