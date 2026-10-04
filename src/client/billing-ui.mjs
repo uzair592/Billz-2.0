@@ -39,6 +39,22 @@ function formatDate(iso) {
   return date.toLocaleDateString();
 }
 
+/**
+ * Only a trusted HTTPS URL may be navigated to.
+ * Anything else (javascript:, data:, plain http:)
+ * is refused rather than assigned.
+ */
+function isTrustedRedirect(url) {
+  if (typeof url !== "string") return false;
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:";
+}
+
 const STATUS_LABELS = {
   active: "✅ Active",
   trialing: "🧪 Trial",
@@ -242,6 +258,13 @@ export function createBillingUI({ onUpdated } = {}) {
         idempotencyKey: generateIdempotencyKey(),
       });
       if (result?.checkoutUrl) {
+        if (!isTrustedRedirect(result.checkoutUrl)) {
+          setStatus(
+            "The payment provider returned an untrusted checkout link.",
+            "error",
+          );
+          return;
+        }
         window.location.assign(result.checkoutUrl);
         return;
       }

@@ -17,9 +17,19 @@
  * (editing, payment-status flips, remaining-due edits, local
  * deletion) are blocked for them — the cloud only exposes
  * cancellation as a compensating action.
+ *
+ * Only a genuine network failure falls back to the local
+ * renderer (the order may exist in this device's ledger if
+ * it was synced here). Any other API answer is a real
+ * response and is surfaced to the user instead of silently
+ * rendering nothing.
  */
 
-import { orderHistoryApi } from "./api-client.mjs";
+import {
+  classifyApiError,
+  describeCloudError,
+  orderHistoryApi,
+} from "./api-client.mjs";
 import {
   isCloudOrderId,
   mapCloudOrderDetail,
@@ -102,6 +112,10 @@ export function createOrderDetailUI({ storage } = {}) {
           return;
         } catch (error) {
           console.warn(`${name} failed for cloud order ${args[0]}:`, error);
+          if (classifyApiError(error) !== "unreachable") {
+            alert(describeCloudError(error));
+            return;
+          }
         }
       }
       return original(...args);

@@ -31,8 +31,25 @@ export function isCloudOrderId(value) {
   return UUID_PATTERN.test(String(value ?? ""));
 }
 
+/**
+ * Minor units cross into rupees with rounding, matching
+ * MoneyEngine.fromMinor. Zero stays zero (it is a real
+ * amount, not a missing one), negative values pass
+ * through intentionally (refunds), and anything that is
+ * not a finite number degrades to zero instead of
+ * producing NaN totals.
+ */
 function fromMinor(value) {
-  return Math.round(Number(value) || 0) / 100;
+  const number = Number(value);
+  return Math.round(Number.isFinite(number) ? number : 0) / 100;
+}
+
+/**
+ * A malformed collection degrades to an empty list so one
+ * bad field cannot break the whole render.
+ */
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function orderTypeLabel(value) {
@@ -140,18 +157,18 @@ export function mapCloudOrderSummary(summary) {
  * built from GET /api/pos/orders/:orderId.
  */
 export function mapCloudOrderDetail(detail) {
-  const order = detail.order ?? {};
+  const order = detail?.order ?? {};
   const paymentStatus = legacyPaymentStatus(order.paymentStatus);
   const totalBill = fromMinor(order.totalMinor);
 
-  const items = (detail.items ?? []).map((item) => {
-    const { offerLabel, originalPrice } = offerFromSnapshot(item.recipe);
-    const unitCost = fromMinor(item.unitCostMinor);
+  const items = asArray(detail?.items).map((item) => {
+    const { offerLabel, originalPrice } = offerFromSnapshot(item?.recipe);
+    const unitCost = fromMinor(item?.unitCostMinor);
     return {
-      id: item.menuItemId ?? item.id,
-      name: item.name,
-      qty: Number(item.quantity) || 0,
-      price: fromMinor(item.unitPriceMinor),
+      id: item?.menuItemId ?? item?.id,
+      name: item?.name,
+      qty: Number(item?.quantity) || 0,
+      price: fromMinor(item?.unitPriceMinor),
       offerLabel,
       originalPrice,
       extras: [],
@@ -161,20 +178,20 @@ export function mapCloudOrderDetail(detail) {
     };
   });
 
-  const additionalCharges = (detail.charges ?? []).map((charge) => ({
-    name: charge.name,
-    type: charge.type === "percent" ? "percent" : "flat",
-    value: charge.type === "percent"
-      ? Number(charge.value) || 0
-      : fromMinor(charge.value),
-    amount: fromMinor(charge.amountMinor),
+  const additionalCharges = asArray(detail?.charges).map((charge) => ({
+    name: charge?.name,
+    type: charge?.type === "percent" ? "percent" : "flat",
+    value: charge?.type === "percent"
+      ? Number(charge?.value) || 0
+      : fromMinor(charge?.value),
+    amount: fromMinor(charge?.amountMinor),
     enabled: true,
   }));
 
-  const payments = detail.payments ?? [];
-  const captured = payments.filter((payment) => payment.status === "captured");
+  const payments = asArray(detail?.payments);
+  const captured = payments.filter((payment) => payment?.status === "captured");
   const receivedMinor = captured.reduce(
-    (sum, payment) => sum + (Number(payment.amountMinor) || 0),
+    (sum, payment) => sum + (Number(payment?.amountMinor) || 0),
     0,
   );
   const primaryPayment = captured[0] ?? payments[0];
@@ -184,10 +201,8 @@ export function mapCloudOrderDetail(detail) {
     ? Number(order.discountValue) || 0
     : fromMinor(order.discountMinor);
 
-  const cancellation = detail.cancellation ?? null;
-  const restocked = Array.isArray(cancellation?.restocked)
-    ? cancellation.restocked
-    : [];
+  const cancellation = detail?.cancellation ?? null;
+  const restocked = asArray(cancellation?.restocked);
 
   return {
     id: order.id,
@@ -214,24 +229,24 @@ export function mapCloudOrderDetail(detail) {
       : "Cash",
     paymentAccountId: primaryPayment?.financialAccountId ?? null,
     amountReceived: fromMinor(receivedMinor),
-    editHistory: (detail.events ?? []).map((event) => ({
-      type: event.type,
-      date: dateFromIso(event.createdAt),
-      time: timeFromIso(event.createdAt),
-      changes: Array.isArray(event.changes) ? event.changes : [],
-      note: event.note ?? "",
+    editHistory: asArray(detail?.events).map((event) => ({
+      type: event?.type,
+      date: dateFromIso(event?.createdAt),
+      time: timeFromIso(event?.createdAt),
+      changes: asArray(event?.changes),
+      note: event?.note ?? "",
     })),
-    lastEditedDate: detail.events?.length
-      ? dateFromIso(detail.events[detail.events.length - 1].createdAt)
+    lastEditedDate: detail?.events?.length
+      ? dateFromIso(detail.events[detail.events.length - 1]?.createdAt)
       : "",
-    lastEditedTime: detail.events?.length
-      ? timeFromIso(detail.events[detail.events.length - 1].createdAt)
+    lastEditedTime: detail?.events?.length
+      ? timeFromIso(detail.events[detail.events.length - 1]?.createdAt)
       : "",
     orderStatus: legacyOrderStatus(order.orderStatus),
     statusReason: order.cancellationReason ?? cancellation?.reason ?? "",
     restockSummary: restocked.length
       ? restocked
-          .map((entry) => `${entry.stockItemId} +${entry.quantityBaseUnits}`)
+          .map((entry) => `${entry?.stockItemId} +${entry?.quantityBaseUnits}`)
           .join("; ")
       : "",
     costOfGoods: fromMinor(order.costOfGoodsMinor),

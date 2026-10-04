@@ -5,18 +5,35 @@
  * When a catalog has been imported to the cloud (the CLOUD_CONTEXT_KEY
  * context exists), the history is served by the cloud API with
  * server-side search, status/payment filtering, date ranges and
- * cursor pagination. If the cloud is unreachable — or no catalog
- * was ever imported — the original local IndexedDB rendering runs
- * unchanged, so a sale or a history view never fails just because
- * the network is down.
+ * cursor pagination.
+ *
+ * Fallback rules:
+ *  * no cloud context, or a genuine network failure (the cloud
+ *    is unreachable) — the original local IndexedDB rendering runs
+ *    unchanged, so a sale or a history view never fails just
+ *    because the network is down;
+ *  * any other API answer (401, 402, 403, 404, 409, 422, 429,
+ *    5xx, malformed response) is a real response, not an outage —
+ *    it is shown as a user-facing error and the local ledger is
+ *    never presented as if it were cloud history.
  *
  * The legacy "Edited" filter has no server-side equivalent (the
  * list endpoint does not carry per-order edit trails), so it falls
  * back to the local ledger, which keeps the full edit trail for
  * every order this device has synced.
+ *
+ * Requests are sequenced: a filter change supersedes an in-flight
+ * request, so a slow earlier response can never overwrite newer
+ * results, and appended pages are de-duplicated by order id.
  */
 
-import { orderHistoryApi } from "./api-client.mjs";
+import {
+  ApiErrorKind,
+  classifyApiError,
+  describeCloudError,
+  isRetriableApiError,
+  orderHistoryApi,
+} from "./api-client.mjs";
 import {
   isCloudOrderId,
   mapCloudOrderSummary,
@@ -47,7 +64,9 @@ export function createOrderHistoryUI({
   }
 
   let cursor = null;
-  let loading = false;
+  let loadingMore = false;
+  let requestSequence = 0;
+  let renderedOrderIds = new Set();
 
   async function cloudConfigured() {
     try {
@@ -96,10 +115,21 @@ export function createOrderHistoryUI({
     element("history-cloud-notice")?.classList.add("hidden");
   }
 
-  function showError(message) {
+  function showError(message, { retry } = {}) {
     const errorEl = element("history-error");
     if (!errorEl) return;
-    errorEl.textContent = message;
+    errorEl.innerHTML = "";
+    const text = document.createElement("span");
+    text.textContent = message;
+    errorEl.appendChild(text);
+    if (retry) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = "Retry";
+      button.className = "history-retry-btn";
+      button.addEventListener("click", retry);
+      errorEl.appendChild(button);
+    }
     errorEl.classList.remove("hidden");
   }
 
@@ -131,11 +161,6 @@ export function createOrderHistoryUI({
   function createOrderRow(order) {
     const tr = document.createElement("tr");
     tr.style.cursor = "pointer";
-    const orderId = escapeHtml(order.id);
-    tr.setAttribute(
-      "onclick",
-      `showOrderInvoiceDetailsView('${orderId}')`,
-    );
 
     const cancelled = order.orderStatus === "Cancelled";
     const unpaid = order.paymentStatus === "Unpaid";
@@ -159,20 +184,34 @@ export function createOrderHistoryUI({
         : "badge-takeaway";
 
     tr.innerHTML = `
-      <td><strong>#${order.orderNumber}</strong>${order.legacyOrderId != null ? `<div style="font-size:10px;color:#94a3b8;">local #${order.legacyOrderId}</div>` : ""}</td>
+      <td><strong>#${escapeHtml(String(order.orderNumber))}</strong>${order.legacyOrderId != null ? `<div style="font-size:10px;color:#94a3b8;">local #${escapeHtml(String(order.legacyOrderId))}</div>` : ""}</td>
       <td>${escapeHtml(order.date)} <span style="color:#94a3b8; font-size:12px; margin-left:4px;">${escapeHtml(order.time || "")}</span></td>
       <td><strong>${escapeHtml(order.customerName || "Walk-In Customer")}</strong>${order.statusReason ? `<div style="font-size:11px;color:#94a3b8;">${escapeHtml(order.statusReason)}</div>` : ""}</td>
       <td><span class="badge ${typeClass}">${escapeHtml(order.orderType)}</span>${order.orderType === "Dine-In" && order.tableNumber ? ` <span class="badge" style="background:#e0e7ff; color:#3730a3;">🪑 #${escapeHtml(order.tableNumber)}</span>` : ""}</td>
       <td style="max-width:250px; color:#94a3b8; font-size:12px;">—</td>
       <td style="font-weight:bold; color:#dc2626;">${remainingDue > 0 ? `Rs. ${remainingDue}` : '<span style="color:#94a3b8;">Rs. 0</span>'}</td>
-      <td style="font-weight:bold; ${cancelled ? "text-decoration:line-through; color:#94a3b8;" : unpaid ? "color:#dc2626;" : "color:var(--text-dark);"}">Rs. ${order.totalBill}</td>
+      <td style="font-weight:bold; ${cancelled ? "text-decoration:line-through; color:#94a3b8;" : unpaid ? "color:#dc2626;" : "color:var(--text-dark);"}">Rs. ${escapeHtml(String(order.totalBill))}</td>
       <td style="color:#94a3b8; font-size:12px;">—</td>
       <td style="text-align:center;">${statusBadge}</td>
       <td style="text-align:center; white-space:nowrap;">
-        <button type="button" class="edit-item-btn" style="margin:0; background:#0ea5e9; padding:4px 10px;" onclick="event.stopPropagation(); reprintOrderReceipt('${orderId}');">🖨️ Print</button>
-        ${cancelled ? "" : `<button type="button" class="delete-item-btn" style="margin:0 0 0 4px; padding:4px 10px;" onclick="event.stopPropagation(); cancelCloudOrder('${orderId}');">❌ Cancel</button>`}
+        <button type="button" class="edit-item-btn history-reprint-btn" style="margin:0; background:#0ea5e9; padding:4px 10px;">🖨️ Print</button>
+        ${cancelled ? "" : `<button type="button" class="delete-item-btn history-cancel-btn" style="margin:0 0 0 4px; padding:4px 10px;">❌ Cancel</button>`}
       </td>
     `;
+
+    // Event listeners instead of inline handlers: order ids and
+    // names can never leak into a JavaScript string literal.
+    tr.addEventListener("click", () => {
+      window.showOrderInvoiceDetailsView(order.id);
+    });
+    tr.querySelector(".history-reprint-btn")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.reprintOrderReceipt(order.id);
+    });
+    tr.querySelector(".history-cancel-btn")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.cancelCloudOrder(order.id);
+    });
     return tr;
   }
 
@@ -191,61 +230,98 @@ export function createOrderHistoryUI({
     element("history-load-more")?.classList.toggle("hidden", !hasMore);
   }
 
-  async function loadCloudHistory(append = false) {
-    if (loading) return;
-    loading = true;
+  /**
+   * A genuine network failure is the only condition under which
+   * the local ledger may stand in for cloud history.
+   */
+  function handleHistoryError(error) {
+    if (classifyApiError(error) === ApiErrorKind.UNREACHABLE) {
+      renderedOrderIds = new Set();
+      showNotice("Cloud unavailable — showing this device's local orders.");
+      showLoadMore(false);
+      legacyRender();
+      return;
+    }
+    console.warn("Cloud order history failed:", error);
+    showError(describeCloudError(error), {
+      retry: isRetriableApiError(error) ? renderOrdersHistory : null,
+    });
+    showLoadMore(false);
+  }
+
+  async function renderOrdersHistory() {
+    if (!(await cloudConfigured())) {
+      legacyRender();
+      return;
+    }
+
+    const filters = readFilters();
+    if (filters.status === "Edited") {
+      // The cloud list endpoint carries no per-order edit trail;
+      // this device's ledger keeps the full trail for synced orders.
+      renderedOrderIds = new Set();
+      showNotice(
+        "Cloud history is active — the edit-history filter shows this device's local ledger.",
+      );
+      legacyRender();
+      return;
+    }
+
+    // A newer request supersedes any in-flight one, so a slow
+    // earlier response can never overwrite newer filter results.
+    const sequence = (requestSequence += 1);
+    cursor = null;
+    showLoading(true);
+    hideError();
+    try {
+      const response = await orderHistoryApi.list(toCloudParams(filters));
+      if (sequence !== requestSequence) return;
+      const orders = (response.orders ?? []).map(mapCloudOrderSummary);
+      const summary = mapCloudSummary(response.summary ?? {});
+      cursor = response.nextCursor || null;
+      renderedOrderIds = new Set(orders.map((order) => order.id));
+      renderRows(orders, false);
+      updateSummary(summary);
+      showLoadMore(Boolean(cursor));
+      hideNotice();
+    } catch (error) {
+      if (sequence !== requestSequence) return;
+      handleHistoryError(error);
+    } finally {
+      if (sequence === requestSequence) showLoading(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!cursor || loadingMore) return;
+    loadingMore = true;
+    const sequence = (requestSequence += 1);
     showLoading(true);
     hideError();
     try {
       const response = await orderHistoryApi.list(toCloudParams(readFilters()));
+      if (sequence !== requestSequence) return;
       const orders = (response.orders ?? []).map(mapCloudOrderSummary);
       const summary = mapCloudSummary(response.summary ?? {});
       cursor = response.nextCursor || null;
-
-      renderRows(orders, append);
+      // The same order can appear on overlapping cursor pages;
+      // never render a row twice.
+      const fresh = orders.filter((order) => !renderedOrderIds.has(order.id));
+      fresh.forEach((order) => renderedOrderIds.add(order.id));
+      renderRows(fresh, true);
       updateSummary(summary);
       showLoadMore(Boolean(cursor));
-      hideNotice();
-    } finally {
-      loading = false;
-      showLoading(false);
-    }
-  }
-
-  async function renderOrdersHistory() {
-    if (await cloudConfigured()) {
-      const filters = readFilters();
-      if (filters.status === "Edited") {
-        // The cloud list endpoint carries no per-order edit trail;
-        // this device's ledger keeps the full trail for synced orders.
-        showNotice(
-          "Cloud history is active — the edit-history filter shows this device's local ledger.",
-        );
-        legacyRender();
-        return;
-      }
-      try {
-        cursor = null;
-        await loadCloudHistory(false);
-        return;
-      } catch (error) {
-        console.warn("Cloud order history unavailable:", error);
-        showNotice(
-          "Cloud unavailable — showing this device's local orders.",
-        );
-        showLoadMore(false);
-      }
-    }
-    legacyRender();
-  }
-
-  async function loadMore() {
-    if (!cursor) return;
-    try {
-      await loadCloudHistory(true);
     } catch (error) {
+      if (sequence !== requestSequence) return;
       console.warn("Cloud order history page failed:", error);
-      showError("Could not load the next page. Try again.");
+      showError(describeCloudError(error), {
+        retry: isRetriableApiError(error) ? loadMore : null,
+      });
+    } finally {
+      if (sequence === requestSequence) {
+        loadingMore = false;
+        showLoading(false);
+      }
     }
   }
 
@@ -256,7 +332,6 @@ export function createOrderHistoryUI({
       search.addEventListener("input", () => {
         clearTimeout(debounce);
         debounce = setTimeout(() => {
-          cursor = null;
           renderOrdersHistory();
         }, 300);
       });
@@ -266,7 +341,6 @@ export function createOrderHistoryUI({
       const el = element(id);
       if (el) {
         el.addEventListener("change", () => {
-          cursor = null;
           renderOrdersHistory();
         });
       }

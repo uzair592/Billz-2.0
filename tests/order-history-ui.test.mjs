@@ -83,7 +83,19 @@ function createFakeDom() {
       get value() {
         return this._value;
       },
-      textContent: "",
+      _text: "",
+      set textContent(value) {
+        this._text = value;
+        this.children = [];
+      },
+      get textContent() {
+        return (
+          this._text +
+          this.children
+            .map((child) => child.text ?? child.textContent ?? "")
+            .join("")
+        );
+      },
       hidden: false,
       set innerText(value) {
         this.textContent = value;
@@ -105,6 +117,7 @@ function createFakeDom() {
         this.children.push(child);
         return child;
       },
+      _listeners: listeners,
       classList: {
         add(...classes) {
           element.className = [
@@ -228,13 +241,12 @@ describe("order history UI", () => {
     assert.match(dom.rows[0].innerHTML, /Ayesha Khan/);
     assert.match(dom.rows[0].innerHTML, /Dine-In/);
     assert.match(dom.rows[0].innerHTML, /Rs. 100/);
-    assert.match(dom.rows[0].innerHTML, /showOrderInvoiceDetailsView|#42/);
-    assert.equal(
-      dom.rows[0]["data-onclick"],
-      "showOrderInvoiceDetailsView('22222222-2222-4222-8222-222222222222')",
-    );
-    assert.match(dom.rows[0].innerHTML, /reprintOrderReceipt\('22222222-2222-4222-8222-222222222222'\)/);
-    assert.match(dom.rows[0].innerHTML, /cancelCloudOrder\('22222222-2222-4222-8222-222222222222'\)/);
+    // Rows use event listeners, never inline handlers:
+    // no order id or name can leak into a string literal.
+    assert.doesNotMatch(dom.rows[0].innerHTML, /onclick/);
+    assert.equal(dom.rows[0]._listeners.has("click"), true);
+    assert.match(dom.rows[0].innerHTML, /history-reprint-btn/);
+    assert.match(dom.rows[0].innerHTML, /history-cancel-btn/);
 
     const count = dom.document.getElementById("history-results-count-text").textContent;
     assert.match(count, /1 order found/);
@@ -301,7 +313,19 @@ describe("order history UI", () => {
       fetchImpl: async (url) => {
         pages.push(url);
         if (url.includes("cursor=page2")) {
-          return jsonResponse(cloudList({ nextCursor: null }));
+          return jsonResponse(
+            cloudList({
+              orders: [
+                {
+                  ...cloudList().orders[0],
+                  id: "33333333-3333-4333-8333-333333333333",
+                  orderNumber: 43,
+                  customerName: "Sara Ahmed",
+                },
+              ],
+              nextCursor: null,
+            }),
+          );
         }
         return jsonResponse(cloudList({ nextCursor: "page2" }));
       },
@@ -318,6 +342,26 @@ describe("order history UI", () => {
     assert.equal(pages.length, 2);
     assert.match(pages[1], /cursor=page2/);
     assert.equal(dom.rows.length, 2);
+    assert.match(dom.rows[1].innerHTML, /Sara Ahmed/);
+  });
+
+  it("does not duplicate a row when a cursor page overlaps", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async (url) =>
+        jsonResponse(
+          cloudList({
+            nextCursor: url.includes("cursor=") ? null : "page2",
+          }),
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+      await ui.loadMore();
+    } finally {
+      restore();
+    }
+
+    assert.equal(dom.rows.length, 1);
   });
 
   it("falls back to the local ledger when the cloud is unreachable", async () => {
@@ -390,5 +434,282 @@ describe("order history UI", () => {
 
     assert.equal(requests.length, 1);
     assert.match(requests[0], /search=ayesha/);
+  });
+
+  it("shows a session error for 401 instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          { error: "Authentication is required.", code: "UNAUTHENTICATED" },
+          { status: 401 },
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /session expired/i);
+    assert.doesNotMatch(
+      dom.document.getElementById("history-cloud-notice").textContent,
+      /Cloud unavailable/,
+    );
+  });
+
+  it("shows a subscription error for 402 instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          { error: "An active restaurant subscription is required.", code: "SUBSCRIPTION_REQUIRED" },
+          { status: 402 },
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /subscription/i);
+    assert.match(error.textContent, /Billing/i);
+  });
+
+  it("shows a validation error for 422 instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          { error: "The start date cannot be after the end date.", code: "INVALID_DATE_RANGE" },
+          { status: 422 },
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    assert.match(
+      dom.document.getElementById("history-error").textContent,
+      /not valid/i,
+    );
+  });
+
+  it("shows a rate-limit error with a retry control", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({ error: "Rate limited", code: "RATE_LIMITED" }, { status: 429 }),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /Too many requests/i);
+    assert.equal(error._listeners === undefined, false);
+    assert.ok(
+      [...error.children].some((child) => child.textContent === "Retry"),
+      "a retry button is offered",
+    );
+  });
+
+  it("shows a server error with a retry control", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({ error: "Internal server error." }, { status: 500 }),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /could not complete/i);
+    assert.ok(
+      [...error.children].some((child) => child.textContent === "Retry"),
+      "a retry button is offered",
+    );
+  });
+
+  it("shows an unreadable-response error instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () => ({
+        ok: false,
+        status: 502,
+        headers: new Map([["content-type", "application/json"]]),
+        async json() {
+          throw new SyntaxError("Unexpected token");
+        },
+        async text() {
+          throw new SyntaxError("Unexpected token");
+        },
+      }),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    assert.match(
+      dom.document.getElementById("history-error").textContent,
+      /unreadable/i,
+    );
+  });
+
+  it("suppresses a stale response when filters change mid-flight", async () => {
+    let firstFetchStarted;
+    const firstFetchStartedPromise = new Promise((resolve) => {
+      firstFetchStarted = resolve;
+    });
+    let resolveFirstFetch;
+    const { dom, ui, restore } = setup({
+      fetchImpl: async (url) => {
+        if (!url.includes("search=")) {
+          firstFetchStarted();
+          await new Promise((resolve) => {
+            resolveFirstFetch = resolve;
+          });
+          return jsonResponse(
+            cloudList({
+              orders: [
+                {
+                  ...cloudList().orders[0],
+                  customerName: "Stale Result",
+                },
+              ],
+            }),
+          );
+        }
+        return jsonResponse(
+          cloudList({
+            orders: [
+              {
+                ...cloudList().orders[0],
+                customerName: "Fresh Result",
+              },
+            ],
+          }),
+        );
+      },
+    });
+    try {
+      const first = ui.renderOrdersHistory();
+      // Wait until the first request has actually reached
+      // the network layer, then change the filter.
+      await firstFetchStartedPromise;
+      dom.document.getElementById("history-search").value = "ayesha";
+      const second = ui.renderOrdersHistory();
+      resolveFirstFetch();
+      await Promise.all([first, second]);
+    } finally {
+      restore();
+    }
+
+    // Only the newer filter's results may be rendered.
+    assert.equal(dom.rows.length, 1);
+    assert.match(dom.rows[0].innerHTML, /Fresh Result/);
+    assert.doesNotMatch(dom.rows[0].innerHTML, /Stale Result/);
+  });
+
+  it("resets the pagination cursor when a filter changes", async () => {
+    const requests = [];
+    const { dom, ui, restore } = setup({
+      fetchImpl: async (url) => {
+        requests.push(url);
+        return jsonResponse(cloudList({ nextCursor: "page2" }));
+      },
+    });
+    try {
+      await ui.renderOrdersHistory();
+      await ui.loadMore();
+      dom.document.getElementById("history-payment-filter").value = "Unpaid";
+      dom.document
+        .getElementById("history-payment-filter")
+        .dispatch("change");
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    // The request after the filter change must not carry
+    // the previous page's cursor.
+    const last = requests.at(-1);
+    assert.doesNotMatch(last, /cursor=/);
+    assert.match(last, /paymentStatus=unpaid/);
+  });
+
+  it("escapes hostile markup in every rendered order field", async () => {
+    const hostile = `<img src=x onerror=alert(1)><script>alert(2)</script>`;
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          cloudList({
+            orders: [
+              {
+                ...cloudList().orders[0],
+                customerName: hostile,
+                cancellationReason: hostile,
+                tableNumber: hostile,
+                orderType: hostile,
+                orderNumber: 42,
+              },
+            ],
+          }),
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    const row = dom.rows[0].innerHTML;
+    // No raw hostile tag may reach the DOM.
+    assert.doesNotMatch(row, /<img/);
+    assert.doesNotMatch(row, /<script>/);
+    // The escaped entity form is present instead, so the
+    // markup is rendered as inert text.
+    assert.match(row, /&lt;img/);
+    assert.match(row, /&lt;script&gt;/);
+  });
+
+  it("renders the summary through text nodes, not markup", async () => {
+    const hostile = `<img src=x onerror=alert(1)>`;
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          cloudList({
+            summary: {
+              ...cloudList().summary,
+              orderCount: 1,
+              cancelledCount: 0,
+            },
+          }),
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    const count = dom.document.getElementById("history-results-count-text");
+    // innerText is assigned, so innerHTML is never populated
+    // with markup and the value stays plain text.
+    assert.equal(count._innerHTML, "");
+    assert.doesNotMatch(count.textContent, /<img/);
+    assert.doesNotMatch(count.textContent, /onerror/);
   });
 });

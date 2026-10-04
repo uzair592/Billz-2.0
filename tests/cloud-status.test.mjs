@@ -24,7 +24,7 @@ async function flush() {
   }
 }
 
-function setup({ context = null, outbox = [], billing = null, online = true } = {}) {
+function setup({ context = null, outbox = [], billing = null, networkDown = false, online = true } = {}) {
   const badges = [];
   const storage = {
     async get(key) {
@@ -48,10 +48,14 @@ function setup({ context = null, outbox = [], billing = null, online = true } = 
     clearInterval: globalThis.clearInterval,
   };
 
-  globalThis.fetch = async () =>
-    billing === null
-      ? Promise.reject(new TypeError("network down"))
-      : Promise.resolve(jsonResponse(billing));
+  globalThis.fetch = async () => {
+    if (networkDown) throw new TypeError("network down");
+    // A healthy billing overview by default: the billing
+    // endpoint is reachable without a paid subscription.
+    return Promise.resolve(
+      jsonResponse(billing ?? { plans: [], subscription: null }),
+    );
+  };
   globalThis.document = {
     querySelector: () => {
       const badge = {
@@ -227,6 +231,79 @@ describe("cloud status indicator", () => {
       await refreshAndWait();
       assert.equal(latestLabel(badges), "Cloud connected");
     } finally {
+      restore();
+    }
+  });
+
+  it("reports an expired session instead of a sync failure", async () => {
+    const { badges, refreshAndWait, restore } = setup({
+      context: { restaurantId },
+      billing: null,
+      networkDown: false,
+    });
+    // Simulate a 401 from the billing probe.
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      jsonResponse(
+        { error: "Authentication is required.", code: "UNAUTHENTICATED" },
+        { status: 401 },
+      );
+    try {
+      await refreshAndWait();
+      assert.match(latestLabel(badges), /Sign in required/);
+    } finally {
+      globalThis.fetch = previousFetch;
+      restore();
+    }
+  });
+
+  it("reports an unreachable cloud instead of claiming connected", async () => {
+    const { badges, refreshAndWait, restore } = setup({
+      context: { restaurantId },
+      networkDown: true,
+    });
+    try {
+      await refreshAndWait();
+      assert.match(latestLabel(badges), /Cloud unreachable/);
+    } finally {
+      restore();
+    }
+  });
+
+  it("sequences overlapping refreshes so stale state cannot win", async () => {
+    const { badges, status, restore } = setup({
+      context: { restaurantId },
+    });
+    let resolveFirst;
+    const previousFetch = globalThis.fetch;
+    let call = 0;
+    globalThis.fetch = async () => {
+      call += 1;
+      if (call === 1) {
+        await new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+        return jsonResponse({ plans: [], subscription: null });
+      }
+      return jsonResponse({
+        plans: [],
+        subscription: { id: "sub", status: "expired", plan: null },
+      });
+    };
+    try {
+      const first = status.refresh();
+      const second = status.refresh();
+      // Let both refreshes reach the mocked fetch before
+      // releasing the stalled one.
+      await new Promise((resolve) => setImmediate(resolve));
+      resolveFirst();
+      await Promise.all([first, second]);
+      await flush();
+      // The second (newer) refresh must win even though
+      // the first one resolved later.
+      assert.equal(latestLabel(badges), "Subscription problem — billing access only");
+    } finally {
+      globalThis.fetch = previousFetch;
       restore();
     }
   });

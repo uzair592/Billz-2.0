@@ -491,24 +491,36 @@ test("cancelling a cloud order posts the reason with an idempotency key", async 
   await page.evaluate(() => window.renderOrdersHistory());
   await expect(page.locator("#history-orders-rows tr")).toHaveCount(1);
 
-  const pending = page.evaluate((orderId) => {
-    window.openCancelOrderModal(orderId);
-  }, ORDER_ID);
+  // The evaluate callback returns the promise so the test
+  // waits for the whole flow (dialog, POST, confirmation
+  // alert) instead of racing it.
+  const pending = page.evaluate(
+    (orderId) => window.openCancelOrderModal(orderId),
+    ORDER_ID,
+  );
 
   await expect(page.locator("#cloud-cancel-dialog-overlay")).toBeVisible();
   await expect(page.locator("#cloud-cancel-dialog-overlay")).toContainText(
     "#1001",
   );
   await page.fill("#cloud-cancel-reason", "customer changed mind");
+
+  const cancelRequestPromise = page.waitForRequest(
+    (request) => request.method() === "POST"
+      && request.url().includes(`/api/pos/orders/${ORDER_ID}/cancel`),
+  );
   await page.click("#cloud-cancel-confirm");
+  const cancelRequest = await cancelRequestPromise;
   await pending;
 
+  const body = JSON.parse(cancelRequest.postData());
+  expect(body.reason).toBe("customer changed mind");
+  expect(body.idempotencyKey).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  );
   expect(cancellations).toHaveLength(1);
   expect(cancellations[0].method).toBe("POST");
   expect(cancellations[0].body.reason).toBe("customer changed mind");
-  expect(cancellations[0].body.idempotencyKey).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-  );
   await expect
     .poll(() => dialogs.some((message) => message.includes("cancelled")))
     .toBeTruthy();
@@ -542,12 +554,19 @@ test("cancellation reports an already-cancelled order without compensating twice
   await openPos(page);
   await configureCloud(page);
 
-  const pending = page.evaluate((orderId) => {
-    window.openCancelOrderModal(orderId);
-  }, ORDER_ID);
+  const pending = page.evaluate(
+    (orderId) => window.openCancelOrderModal(orderId),
+    ORDER_ID,
+  );
   await expect(page.locator("#cloud-cancel-dialog-overlay")).toBeVisible();
   await page.fill("#cloud-cancel-reason", "wrong order");
+
+  const cancelRequestPromise = page.waitForRequest(
+    (request) => request.method() === "POST"
+      && request.url().includes(`/api/pos/orders/${ORDER_ID}/cancel`),
+  );
   await page.click("#cloud-cancel-confirm");
+  await cancelRequestPromise;
   await pending;
 
   expect(cancellations).toHaveLength(1);
@@ -620,7 +639,19 @@ test("billing screen renders without a subscription", async ({ page }) => {
 });
 
 test("cloud status indicator reflects the outbox state", async ({ page }) => {
-  mockApi(page, (route) => route.fulfill({ json: {} }));
+  mockApi(page, (route, url) => {
+    if (url.pathname === "/api/pos/orders"
+      && route.request().method() === "POST") {
+      // The outbox transport: a retryable failure keeps
+      // queued records queued (retrying still counts as
+      // pending) instead of consuming them.
+      return route.fulfill({
+        status: 500,
+        json: { error: "Internal server error." },
+      });
+    }
+    return route.fulfill({ json: {} });
+  });
 
   await openPos(page);
   await expect(page.locator(".status-badge")).toContainText(

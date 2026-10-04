@@ -15,7 +15,9 @@
  */
 
 import {
+  ApiErrorKind,
   CloudApiError,
+  classifyApiError,
   generateIdempotencyKey,
   orderCancellationApi,
   orderHistoryApi,
@@ -151,27 +153,32 @@ export function createOrderCancellationUI({
   }
 
   function describeError(error) {
-    if (error?.code === "CLOUD_UNREACHABLE") {
-      return "You're offline. Orders stored in the cloud can't be cancelled until the connection is back.";
+    switch (classifyApiError(error)) {
+      case ApiErrorKind.UNREACHABLE:
+        return "You're offline. Orders stored in the cloud can't be cancelled until the connection is back.";
+      case ApiErrorKind.AUTHENTICATION:
+        return "Your cloud session expired. Sign in again to cancel this order.";
+      case ApiErrorKind.AUTHORIZATION:
+        return "You don't have permission to cancel orders for this restaurant.";
+      case ApiErrorKind.SUBSCRIPTION:
+        return "This restaurant's subscription is not active. Open Billing to restore access.";
+      case ApiErrorKind.VALIDATION:
+        return "The cancellation request was not valid. Review the reason and try again.";
+      case ApiErrorKind.NOT_FOUND:
+        return "This order no longer exists in the cloud.";
+      case ApiErrorKind.CONFLICT:
+        return error.code === "ORDER_ALREADY_CANCELLED"
+          ? "This order was already cancelled."
+          : "This order was changed just now. Review it and try again.";
+      case ApiErrorKind.RATE_LIMITED:
+        return "Too many requests. Wait a moment and try again.";
+      case ApiErrorKind.SERVER:
+        return "The cloud could not cancel this order right now. Please try again.";
+      case ApiErrorKind.INVALID_RESPONSE:
+        return "The cloud returned an unreadable response.";
+      default:
+        return "The order could not be cancelled.";
     }
-    if (error instanceof CloudApiError) {
-      switch (error.status) {
-        case 403:
-          return "You don't have permission to cancel orders for this restaurant.";
-        case 404:
-          return "This order no longer exists in the cloud.";
-        case 409:
-          return error.code === "ORDER_ALREADY_CANCELLED"
-            ? "This order was already cancelled."
-            : "This order was changed just now. Review it and try again.";
-        default:
-          if (error.status >= 500) {
-            return "The cloud could not cancel this order right now. Please try again.";
-          }
-          return error.message || "The order could not be cancelled.";
-      }
-    }
-    return "The order could not be cancelled.";
   }
 
   async function cancelCloudOrder(orderId) {
@@ -221,11 +228,12 @@ export function createOrderCancellationUI({
 
   // The history rows and the invoice modal both open the cancel
   // flow through openCancelOrderModal; cloud orders take the
-  // cloud path, local orders keep the restock checklist.
+  // cloud path (which alerts when the cloud is not configured),
+  // local orders keep the restock checklist.
   const legacyOpenCancelOrderModal = window.openCancelOrderModal;
   if (typeof legacyOpenCancelOrderModal === "function") {
     window.openCancelOrderModal = async function wrapped(orderId) {
-      if (isCloudOrderId(orderId) && await cloudConfigured()) {
+      if (isCloudOrderId(orderId)) {
         await cancelCloudOrder(orderId);
         return;
       }

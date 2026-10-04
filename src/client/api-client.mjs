@@ -9,9 +9,11 @@
  * for this account — a value the browser cannot forge is never trusted
  * as authorization, the server re-checks it on every request.
  *
- * Network failures are normalized to CloudApiError with the
- * CLOUD_UNREACHABLE code so callers can distinguish "offline" from a
- * real API error and fall back to local data.
+ * Failures are classified into explicit categories (ApiErrorKind).
+ * Only genuine network failures are "unreachable" — an HTTP 401, 402,
+ * 403, 404, 409, 422, 429 or 5xx response is a real API answer, not
+ * an outage, and callers must not treat it as "offline" or silently
+ * fall back to local data because of it.
  */
 
 const API_BASE = "/api";
@@ -26,8 +28,123 @@ export class CloudApiError extends Error {
   }
 }
 
+/**
+ * Failure categories. These are the only classifications callers
+ * should branch on — never on the raw status alone, because the
+ * server also uses 402 for subscription gates and 409 for
+ * idempotent replays, both of which need distinct handling.
+ */
+export const ApiErrorKind = Object.freeze({
+  UNREACHABLE: "unreachable",
+  AUTHENTICATION: "authentication",
+  AUTHORIZATION: "authorization",
+  SUBSCRIPTION: "subscription",
+  VALIDATION: "validation",
+  NOT_FOUND: "not_found",
+  CONFLICT: "conflict",
+  RATE_LIMITED: "rate_limited",
+  SERVER: "server",
+  INVALID_RESPONSE: "invalid_response",
+  UNKNOWN: "unknown",
+});
+
+const SUBSCRIPTION_CODE_PATTERN = /SUBSCRIPTION|PLAN|BILLING/i;
+
+/**
+ * Classify an error thrown by this client.
+ *
+ * - a TypeError from fetch() or a CLOUD_UNREACHABLE CloudApiError
+ *   (status 0) is a genuine network failure;
+ * - 401 is an authentication failure (expired/missing session);
+ * - 402 is the server's subscription gate on /api/pos routes;
+ * - 403 is authorization, unless the server code marks it as a
+ *   subscription/plan/billing restriction;
+ * - 404 is a missing resource, 409 a conflict or idempotent replay,
+ *   422/400 a validation failure, 429 a rate limit, 5xx a server
+ *   failure;
+ * - an unreadable response body is INVALID_RESPONSE.
+ */
+export function classifyApiError(error) {
+  if (error instanceof TypeError) return ApiErrorKind.UNREACHABLE;
+  if (!(error instanceof CloudApiError)) return ApiErrorKind.UNKNOWN;
+  if (error.code === "CLOUD_UNREACHABLE" || !error.status) {
+    return ApiErrorKind.UNREACHABLE;
+  }
+  // A malformed body is its own category even when the
+  // HTTP status itself is a 5xx.
+  if (error.code === "INVALID_RESPONSE") {
+    return ApiErrorKind.INVALID_RESPONSE;
+  }
+  switch (error.status) {
+    case 400:
+    case 422:
+      return ApiErrorKind.VALIDATION;
+    case 401:
+      return ApiErrorKind.AUTHENTICATION;
+    case 402:
+      return ApiErrorKind.SUBSCRIPTION;
+    case 403:
+      return SUBSCRIPTION_CODE_PATTERN.test(String(error.code ?? ""))
+        ? ApiErrorKind.SUBSCRIPTION
+        : ApiErrorKind.AUTHORIZATION;
+    case 404:
+      return ApiErrorKind.NOT_FOUND;
+    case 409:
+      return ApiErrorKind.CONFLICT;
+    case 429:
+      return ApiErrorKind.RATE_LIMITED;
+    default:
+      return error.status >= 500 ? ApiErrorKind.SERVER : ApiErrorKind.UNKNOWN;
+  }
+}
+
+/**
+ * Whether retrying the same request can succeed later. Network
+ * failures, rate limits and server failures are transient; client
+ * errors (auth, validation, not found) are not.
+ */
+export function isRetriableApiError(error) {
+  const kind = classifyApiError(error);
+  return (
+    kind === ApiErrorKind.UNREACHABLE
+    || kind === ApiErrorKind.RATE_LIMITED
+    || kind === ApiErrorKind.SERVER
+  );
+}
+
+/**
+ * A short, user-facing message for an error. Never includes raw
+ * server output, stack traces or sensitive details.
+ */
+export function describeCloudError(error) {
+  switch (classifyApiError(error)) {
+    case ApiErrorKind.UNREACHABLE:
+      return "The cloud service is unreachable. Check your connection.";
+    case ApiErrorKind.AUTHENTICATION:
+      return "Your cloud session expired. Sign in again.";
+    case ApiErrorKind.AUTHORIZATION:
+      return "You don't have permission to do that.";
+    case ApiErrorKind.SUBSCRIPTION:
+      return "This restaurant's subscription is not active. Open Billing to restore access.";
+    case ApiErrorKind.VALIDATION:
+      return "The request was not valid. Review the entered values.";
+    case ApiErrorKind.NOT_FOUND:
+      return "The requested resource no longer exists.";
+    case ApiErrorKind.CONFLICT:
+      return "The request conflicted with a recent change. Review and try again.";
+    case ApiErrorKind.RATE_LIMITED:
+      return "Too many requests. Wait a moment and try again.";
+    case ApiErrorKind.SERVER:
+      return "The cloud could not complete the request. Try again.";
+    case ApiErrorKind.INVALID_RESPONSE:
+      return "The cloud returned an unreadable response.";
+    default:
+      return "The request could not be completed.";
+  }
+}
+
 function isUnreachable(error) {
-  return error instanceof TypeError || error instanceof CloudApiError;
+  return classifyApiError(error) === ApiErrorKind.UNREACHABLE;
 }
 
 async function resolveRestaurantId() {
@@ -68,10 +185,15 @@ async function apiRequest(path, options = {}) {
 
   const contentType = response.headers.get("content-type") || "";
   let data;
-  if (contentType.includes("application/json")) {
-    data = await response.json();
-  } else {
-    data = await response.text();
+  try {
+    data = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+  } catch {
+    throw new CloudApiError("The cloud returned an unreadable response.", {
+      status: response.status,
+      code: "INVALID_RESPONSE",
+    });
   }
 
   if (!response.ok) {

@@ -189,8 +189,8 @@
 
 **Tests (`tests/`):** `cloud-order-mapper`, `api-client`,
 `order-history-ui`, `order-cancellation-ui`, `billing-ui`,
-`cloud-status` — 54 new unit tests, all passing. Full unit
-suite: 362 passing, 0 failing. PostgreSQL integration
+`cloud-status`, `order-detail-ui` — the hardening pass brings the
+full unit suite to 406 passing, 0 failing. PostgreSQL integration
 suite: 24 passing. Playwright browser suite
 (`tests/browser/pos-operations.spec.mjs`): 15 passing —
 history rendering, server-side filters, cursor pagination,

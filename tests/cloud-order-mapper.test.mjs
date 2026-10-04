@@ -248,4 +248,176 @@ describe("cloud order mapper", () => {
     assert.equal(summary.paid, 1000);
     assert.equal(summary.due, 205);
   });
+
+  it("keeps zero amounts exact and does not treat them as missing", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({
+        subtotalMinor: 0,
+        discountMinor: 0,
+        deliveryMinor: 0,
+        totalMinor: 0,
+      }),
+    );
+    assert.equal(order.subtotal, 0);
+    assert.equal(order.discountAmount, 0);
+    assert.equal(order.deliveryCharges, 0);
+    assert.equal(order.totalBill, 0);
+    assert.equal(order.amountReceived, 0);
+  });
+
+  it("passes negative minor units through for refunds", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({ totalMinor: -9_250, discountMinor: -1_000 }),
+    );
+    assert.equal(order.totalBill, -92.5);
+    assert.equal(order.discountAmount, -10);
+  });
+
+  it("degrades non-finite money values to zero instead of NaN", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({
+        subtotalMinor: "not-a-number",
+        totalMinor: null,
+        deliveryMinor: undefined,
+      }),
+    );
+    assert.equal(order.subtotal, 0);
+    assert.equal(order.totalBill, 0);
+    assert.equal(order.deliveryCharges, 0);
+    assert.ok(Number.isFinite(order.totalBill));
+  });
+
+  it("keeps large integer minor units exact", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({ totalMinor: 9_007_199_254_740_991 }),
+    );
+    assert.equal(order.totalBill, 90_071_992_547_409.91);
+  });
+
+  it("handles missing optional customer fields without crashing", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({
+        customerName: null,
+        customerPhone: null,
+        riderName: null,
+        tableNumber: null,
+        cancellationReason: null,
+      }),
+    );
+    assert.equal(order.customerName, "");
+    assert.equal(order.customerPhone, "");
+    assert.equal(order.riderName, "");
+    assert.equal(order.tableNumber, null);
+    assert.equal(order.statusReason, "");
+  });
+
+  it("renders unicode customer and item names safely", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({ customerName: "عائشہ خان — Burger & Co." }),
+    );
+    assert.equal(order.customerName, "عائشہ خان — Burger & Co.");
+
+    const detail = {
+      order: cloudSummary(),
+      items: [
+        {
+          menuItemId: "44444444-4444-4444-8444-444444444444",
+          name: "🍔 برقر — <special> & 'fresh'",
+          quantity: 1,
+          unitPriceMinor: 500,
+          unitCostMinor: 200,
+          recipe: null,
+        },
+      ],
+      charges: [],
+      payments: [],
+      events: [],
+      cancellation: null,
+    };
+    const mapped = mapCloudOrderDetail(detail);
+    assert.equal(mapped.items[0].name, "🍔 برقر — <special> & 'fresh'");
+  });
+
+  it("degrades malformed collections to empty lists", () => {
+    const detail = {
+      order: cloudSummary(),
+      items: "not-an-array",
+      charges: null,
+      payments: 42,
+      events: {},
+      cancellation: { restocked: "nope" },
+    };
+    const mapped = mapCloudOrderDetail(detail);
+    assert.deepEqual(mapped.items, []);
+    assert.deepEqual(mapped.additionalCharges, []);
+    assert.equal(mapped.paymentMethod, "Cash");
+    assert.deepEqual(mapped.editHistory, []);
+    assert.equal(mapped.restockSummary, "");
+  });
+
+  it("maps a completely empty detail payload", () => {
+    const mapped = mapCloudOrderDetail({});
+    assert.equal(mapped.orderNumber, 0);
+    assert.equal(mapped.totalBill, 0);
+    assert.deepEqual(mapped.items, []);
+    assert.equal(mapped.paymentStatus, "Paid");
+    assert.equal(mapped.orderStatus, "Completed");
+  });
+
+  it("returns empty time and date for invalid timestamps", () => {
+    const order = mapCloudOrderSummary(
+      cloudSummary({ orderedAt: "not-a-timestamp" }),
+    );
+    assert.equal(order.time, "");
+    assert.equal(order.date, "2026-10-02");
+
+    const detail = {
+      order: cloudSummary(),
+      items: [],
+      charges: [],
+      payments: [],
+      events: [{ type: "edit", changes: [], note: "x", createdAt: "nope" }],
+      cancellation: null,
+    };
+    const mapped = mapCloudOrderDetail(detail);
+    assert.equal(mapped.editHistory[0].date, "");
+    assert.equal(mapped.editHistory[0].time, "");
+    assert.equal(mapped.lastEditedDate, "");
+  });
+
+  it("only counts captured payments as received", () => {
+    const detail = {
+      order: cloudSummary({ paymentStatus: "partially_paid" }),
+      items: [],
+      charges: [],
+      payments: [
+        { id: "a", method: "cash", status: "authorized", amountMinor: 5_000 },
+        { id: "b", method: "cash", status: "captured", amountMinor: 3_000 },
+        { id: "c", method: "bank_account", status: "failed", amountMinor: 1_000 },
+      ],
+      events: [],
+      cancellation: null,
+    };
+    const mapped = mapCloudOrderDetail(detail);
+    assert.equal(mapped.amountReceived, 30);
+    assert.equal(mapped.paymentMethod, "Cash");
+    assert.equal(mapped.paymentStatus, "Unpaid");
+  });
+
+  it("reconstructs flat charges from minor-unit snapshot values", () => {
+    const detail = {
+      order: cloudSummary(),
+      items: [],
+      charges: [
+        { id: "a", name: "Service", type: "flat", value: 2_500, amountMinor: 2_500 },
+      ],
+      payments: [],
+      events: [],
+      cancellation: null,
+    };
+    const mapped = mapCloudOrderDetail(detail);
+    assert.equal(mapped.additionalCharges[0].type, "flat");
+    assert.equal(mapped.additionalCharges[0].value, 25);
+    assert.equal(mapped.additionalCharges[0].amount, 25);
+  });
 });

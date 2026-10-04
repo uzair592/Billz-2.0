@@ -1,155 +1,176 @@
 /**
- * Cloud / offline status indicator.
+ * Cloud connection status indicator.
  *
- * Shows the till operator, at a glance:
- *   - whether the browser is online,
- *   - whether a catalog has been imported to the cloud,
- *   - how many orders are waiting to sync,
- *   - whether any sync attempt has failed,
- *   - whether the restaurant's subscription has a problem
- *     (which is what makes cloud APIs start returning 403).
+ * States, in priority order:
+ *  * browser offline — local sales keep working;
+ *  * cloud unreachable (network failure) — local sales keep
+ *    working, sync is queued;
+ *  * session expired (401) — sign-in required;
+ *  * subscription problem (past due / unpaid / canceled /
+ *    expired) — billing access only;
+ *  * not configured — the device has not copied its catalog
+ *    to the cloud yet;
+ *  * outbox has failed records — sync failed;
+ *  * outbox has pending records — syncing;
+ *  * otherwise — connected.
  *
- * The indicator is derived from the outbox records the
- * browser already owns plus the billing overview — it never
- * guesses: when the cloud cannot be reached it says so
- * instead of implying a state it cannot verify.
+ * Subscription and authentication problems are never labelled
+ * "offline" or "sync failed". Overlapping refreshes are
+ * sequenced so a stale response can never overwrite a
+ * newer status.
  */
 
-import { billingApi } from "./api-client.mjs";
+import {
+  ApiErrorKind,
+  billingApi,
+  classifyApiError,
+} from "./api-client.mjs";
 import { CLOUD_CONTEXT_KEY } from "./legacy-cloud-adapter.mjs";
-import { DEFAULT_STORAGE_KEY as CLOUD_OUTBOX_KEY } from "./order-outbox.mjs";
-
-const REFRESH_INTERVAL_MS = 60_000;
 
 const SUBSCRIPTION_PROBLEM_STATUSES = new Set([
   "past_due",
   "unpaid",
-  "expired",
   "canceled",
+  "expired",
 ]);
 
 export function createCloudStatus({
   storage,
-  refreshIntervalMs = REFRESH_INTERVAL_MS,
+  refreshIntervalMs = 60_000,
 } = {}) {
   if (!storage || typeof storage.get !== "function") {
     throw new TypeError("storage must provide a get function.");
   }
 
   let timer = null;
+  let started = false;
+  let refreshGeneration = 0;
 
   function badge() {
     return document.querySelector(".status-badge");
   }
 
-  function render(state) {
-    const element = badge();
-    if (!element) return;
-    const colors = {
-      gray: "#94a3b8",
-      green: "#22c55e",
-      amber: "#f59e0b",
-      red: "#ef4444",
-    };
-    const color = colors[state.tone] ?? colors.gray;
-    // textContent wipes the dot, so rebuild it with the
-    // same inline styling the stylesheet gives it.
-    element.textContent = "";
-    const dotElement = document.createElement("i");
-    dotElement.style.background = color;
-    dotElement.style.boxShadow = `0 0 0 3px ${color}20`;
-    element.appendChild(dotElement);
-    element.appendChild(document.createTextNode(` ${state.label}`));
-    element.style.color = color;
+  function render({ tone, text }) {
+    const el = badge();
+    if (!el) return;
+    el.textContent = text;
+    el.className = `status-badge status-${tone}`;
   }
 
   async function readOutbox() {
     try {
-      const records = await storage.get(CLOUD_OUTBOX_KEY);
+      const records = await storage.get("pos_cloud_order_outbox_v1");
       return Array.isArray(records) ? records : [];
     } catch {
       return [];
     }
   }
 
-  async function readContext() {
+  /**
+   * The billing overview is reachable without a paid
+   * subscription, so it doubles as a session probe: a 401
+   * means the session expired, and a network failure means
+   * the cloud is unreachable.
+   */
+  async function readConnectionProblem() {
+    let data;
     try {
-      const context = await storage.get(CLOUD_CONTEXT_KEY);
-      return context?.restaurantId ? context : null;
-    } catch {
+      data = await billingApi.overview();
+    } catch (error) {
+      const kind = classifyApiError(error);
+      if (kind === ApiErrorKind.AUTHENTICATION) {
+        return {
+          tone: "amber",
+          text: "Sign in required — cloud features are limited",
+        };
+      }
+      if (kind === ApiErrorKind.UNREACHABLE) {
+        return {
+          tone: "amber",
+          text: "Cloud unreachable — sales keep working locally",
+        };
+      }
       return null;
     }
-  }
-
-  async function readSubscriptionProblem() {
-    try {
-      const data = await billingApi.overview();
-      const status = data?.subscription?.status;
-      return SUBSCRIPTION_PROBLEM_STATUSES.has(status)
-        ? status
-        : null;
-    } catch {
-      // Unauthenticated, unconfigured or offline — the sync
-      // state below is still accurate, so stay quiet.
-      return null;
+    const status = data?.subscription?.status;
+    if (status && SUBSCRIPTION_PROBLEM_STATUSES.has(status)) {
+      return {
+        tone: "red",
+        text: "Subscription problem — billing access only",
+      };
     }
+    return null;
   }
 
   async function refresh() {
+    const generation = (refreshGeneration += 1);
+    const apply = (state) => {
+      if (generation === refreshGeneration) render(state);
+    };
+
     if (!navigator.onLine) {
-      render({ tone: "gray", label: "Offline — sales keep working locally" });
+      apply({
+        tone: "gray",
+        text: "Offline — sales keep working locally",
+      });
       return;
     }
 
-    const [context, records, subscriptionProblem] = await Promise.all([
-      readContext(),
-      readOutbox(),
-      readSubscriptionProblem(),
-    ]);
-
-    if (subscriptionProblem) {
-      render({ tone: "red", label: "Subscription problem — billing access only" });
+    const problem = await readConnectionProblem();
+    if (problem) {
+      apply(problem);
       return;
     }
 
-    if (!context) {
-      render({ tone: "gray", label: "Offline & ready" });
+    const context = await storage.get(CLOUD_CONTEXT_KEY);
+    if (!context?.restaurantId) {
+      apply({ tone: "gray", text: "Offline & ready" });
       return;
     }
 
-    const pending = records.filter((record) =>
-      ["pending", "retrying"].includes(record.status),
+    const records = await readOutbox();
+    const pending = records.filter(
+      (record) => record.status === "pending"
+        || record.status === "retrying",
     ).length;
-    const failed = records.filter((record) => record.status === "failed")
-      .length;
+    const failed = records.filter(
+      (record) => record.status === "failed",
+    ).length;
 
     if (failed > 0) {
-      render({ tone: "red", label: `Cloud sync failed (${failed})` });
+      apply({ tone: "red", text: `Cloud sync failed (${failed})` });
       return;
     }
     if (pending > 0) {
-      render({ tone: "amber", label: `Cloud syncing (${pending} pending)` });
+      apply({ tone: "amber", text: `Cloud syncing (${pending} pending)` });
       return;
     }
-    render({ tone: "green", label: "Cloud connected" });
+    apply({ tone: "green", text: "Cloud connected" });
   }
 
   function start() {
+    if (started) return;
+    started = true;
     refresh();
-    globalThis.addEventListener("online", refresh);
-    globalThis.addEventListener("offline", refresh);
-    if (timer) clearInterval(timer);
     timer = setInterval(refresh, refreshIntervalMs);
+    globalThis.addEventListener("online", () => {
+      refresh();
+    });
+    globalThis.addEventListener("offline", () => {
+      refresh();
+    });
   }
 
   function stop() {
-    globalThis.removeEventListener("online", refresh);
-    globalThis.removeEventListener("offline", refresh);
     if (timer) clearInterval(timer);
     timer = null;
+    started = false;
   }
 
+  // The indicator refreshes from the moment it is created,
+  // matching the legacy app's boot sequence; start() is
+  // idempotent for callers that prefer to control it.
   start();
 
-  return Object.freeze({ refresh, start, stop });
+  return Object.freeze({ start, stop, refresh });
 }

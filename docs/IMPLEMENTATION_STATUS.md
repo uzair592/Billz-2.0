@@ -2,8 +2,15 @@
 
 ## Current milestone
 
-Milestone 10: subscription checkout, verified billing webhooks, and the billing
-surface an owner uses to pay.
+Milestone 11: the POS operations UI is connected to the cloud.
+
+The order history, order detail, receipt reprint, order
+cancellation, billing, and cloud-status surfaces now read from the
+server APIs instead of the local IndexedDB ledger, while every
+offline behavior is preserved: a local sale never fails because the
+server is unavailable, the history falls back to the local ledger
+when the cloud is unreachable, and the billing page renders for
+every signed-in account, paid or not.
 
 A restaurant owner can now see plans, start a provider checkout, change plan,
 cancel, resume, and read payment history, and a verified provider webhook is the
@@ -164,6 +171,29 @@ behavior at every step.
 - Registered the webhook in its own Fastify context with a raw body parser,
   because a signature computed over a re-serialized payload is unverifiable.
 - Added webhook, Stripe adapter, migration contract, and billing HTTP tests.
+- Added a unified cloud API client that classifies every failure into an
+  explicit category (unreachable, authentication, authorization, subscription,
+  validation, not-found, conflict, rate-limited, server, invalid-response) so
+  callers never mistake a 401/402/403/409/422/429/5xx answer for an outage.
+- Added a cloud-first order history: server-side search, date range, payment
+  and status filters, keyset-cursor pagination, and the server's same-range
+  summary; it falls back to the local ledger only when the cloud is genuinely
+  unreachable or no catalog was imported, and the "Edited" filter uses the
+  local ledger because the list endpoint carries no edit trails.
+- Added cloud order detail and receipt reprint through the single-order API,
+  rendering the frozen server snapshot without disturbing the local ledger.
+- Added compensating order cancellation from the POS: a confirmation dialog,
+  a fresh idempotency key per attempt, and distinct handling for success,
+  replay, 403, 404, 409, 5xx and offline.
+- Added the billing screen (plans, checkout redirect, subscription, payment
+  history, cancel-at-period-end, resume) reachable without a paid subscription.
+- Added a cloud/offline status indicator reflecting the outbox and subscription
+  state: offline, not configured, connected, N pending, sync failed, and
+  subscription problem.
+- Hardened every rendered field against injection: all cloud values pass
+  through HTML escaping or text-node assignment, and rows use event
+  listeners instead of inline handlers so no identifier can reach a string
+  literal.
 
 ## Migration guardrails
 
@@ -175,8 +205,8 @@ behavior at every step.
 
 ## Next milestone
 
-Drive order history and cancellation from the POS interface, then add partial
-refunds and sales reports. The platform admin area follows that work.
+Add partial refunds and sales reports, then the platform admin
+area.
 
 The repository contains ten forward-only migrations. Apply all of them to a
 clean PostgreSQL 17 instance with `compose.validation.yaml` after any schema
@@ -193,5 +223,7 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current external-service-free run has 283 passing tests. PostgreSQL
-integration tests run separately with `npm run test:integration`.
+The current external-service-free unit run has 406 passing tests.
+PostgreSQL integration tests run separately with `npm run test:integration`
+(24 passing), and the Playwright browser suite with `npx playwright test`
+(15 passing).

@@ -443,4 +443,218 @@ describe("billing UI", () => {
     assert.match(status.textContent, /unreachable/);
     assert.match(status.className, /error/);
   });
+
+  it("renders a trialing subscription with its trial end date", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          billingOverview({
+            subscription: {
+              ...billingOverview().subscription,
+              status: "trialing",
+              trialEndsAt: "2026-10-15T00:00:00.000Z",
+            },
+          }),
+        ),
+    });
+    try {
+      await ui.renderBilling();
+    } finally {
+      restore();
+    }
+
+    const subscription = dom.document.getElementById("billing-current-subscription").innerHTML;
+    assert.match(subscription, /Trial/);
+    assert.match(subscription, /Trial ends/);
+  });
+
+  it("marks a subscription that cancels at period end", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          billingOverview({
+            subscription: {
+              ...billingOverview().subscription,
+              cancelAtPeriodEnd: true,
+            },
+          }),
+        ),
+    });
+    try {
+      await ui.renderBilling();
+    } finally {
+      restore();
+    }
+
+    const subscription = dom.document.getElementById("billing-current-subscription").innerHTML;
+    assert.match(subscription, /cancellation scheduled/);
+    // No cancel button once cancellation is already scheduled.
+    const actions = dom.document.getElementById("billing-actions").innerHTML;
+    assert.doesNotMatch(actions, /Cancel subscription/);
+  });
+
+  it("offers resume for an expired subscription", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          billingOverview({
+            subscription: {
+              ...billingOverview().subscription,
+              status: "expired",
+            },
+          }),
+        ),
+    });
+    try {
+      await ui.renderBilling();
+    } finally {
+      restore();
+    }
+
+    const subscription = dom.document.getElementById("billing-current-subscription").innerHTML;
+    assert.match(subscription, /Expired/);
+    const actions = dom.document.getElementById("billing-actions").innerHTML;
+    assert.match(actions, /Resume subscription/);
+  });
+
+  it("renders safely with incomplete provider data", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({
+          plans: [
+            {
+              id: "plan-1",
+              code: "STARTER",
+              name: "Starter",
+              description: null,
+              features: null,
+              prices: null,
+            },
+          ],
+          subscription: {
+            id: "sub-1",
+            status: "active",
+            plan: null,
+            currentPeriodEnd: null,
+            trialEndsAt: null,
+            graceEndsAt: null,
+            cancelAtPeriodEnd: null,
+            provider: null,
+          },
+          payments: null,
+        }),
+    });
+    try {
+      await ui.renderBilling();
+    } finally {
+      restore();
+    }
+
+    const subscription = dom.document.getElementById("billing-current-subscription").innerHTML;
+    assert.match(subscription, /Plan/);
+    const plans = dom.document.getElementById("billing-plans").innerHTML;
+    assert.match(plans, /Starter/);
+    assert.match(plans, /Unavailable/);
+    const payments = dom.document.getElementById("billing-payments").innerHTML;
+    assert.match(payments, /No payments recorded yet/);
+  });
+
+  it("shows a server failure without leaving the screen disabled", async () => {
+    const { dom, ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({ error: "Internal server error." }, { status: 500 }),
+    });
+    try {
+      await ui.renderBilling();
+    } finally {
+      restore();
+    }
+
+    const status = dom.document.getElementById("billing-status");
+    assert.match(status.textContent, /Internal server error/);
+    assert.match(status.className, /error/);
+    // The screen body is visible again after the failure.
+    assert.equal(
+      dom.document.getElementById("billing-screen-body").className.includes("hidden"),
+      false,
+    );
+  });
+
+  it("ignores repeated checkout clicks while one is in flight", async () => {
+    const requests = [];
+    let releaseCheckout;
+    const checkoutStarted = new Promise((resolve) => {
+      releaseCheckout = resolve;
+    });
+    const { ui, redirects, restore } = setup({
+      fetchImpl: async (url) => {
+        if (url.includes("/checkout")) {
+          requests.push(url);
+          await checkoutStarted;
+          return jsonResponse({
+            replayed: false,
+            checkoutUrl: "https://pay.example/session/abc",
+            plan: { code: "STANDARD", name: "Standard" },
+            amountMinor: 9_999_00,
+            currencyCode: "PKR",
+            status: "awaiting_payment",
+          });
+        }
+        return jsonResponse(billingOverview());
+      },
+    });
+    try {
+      const first = ui.startCheckout("STANDARD");
+      const second = ui.startCheckout("STANDARD");
+      releaseCheckout();
+      await Promise.all([first, second]);
+    } finally {
+      restore();
+    }
+
+    assert.equal(requests.length, 1);
+    assert.deepEqual(redirects, ["https://pay.example/session/abc"]);
+  });
+
+  it("refuses to navigate to an untrusted checkout URL", async () => {
+    const { ui, redirects, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({
+          replayed: false,
+          checkoutUrl: "javascript:alert(1)",
+          plan: { code: "STANDARD", name: "Standard" },
+          amountMinor: 9_999_00,
+          currencyCode: "PKR",
+          status: "awaiting_payment",
+        }),
+    });
+    try {
+      await ui.startCheckout("STANDARD");
+    } finally {
+      restore();
+    }
+
+    assert.deepEqual(redirects, []);
+  });
+
+  it("refuses plain-http checkout URLs", async () => {
+    const { ui, redirects, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse({
+          replayed: false,
+          checkoutUrl: "http://pay.example/session/abc",
+          plan: { code: "STANDARD", name: "Standard" },
+          amountMinor: 9_999_00,
+          currencyCode: "PKR",
+          status: "awaiting_payment",
+        }),
+    });
+    try {
+      await ui.startCheckout("STANDARD");
+    } finally {
+      restore();
+    }
+
+    assert.deepEqual(redirects, []);
+  });
 });
