@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ApiErrorKind,
   CloudApiError,
   api,
   billingApi,
+  classifyApiError,
   cloudSessionApi,
+  describeCloudError,
   generateIdempotencyKey,
+  isRetriableApiError,
   orderCancellationApi,
   orderHistoryApi,
 } from "../src/client/api-client.mjs";
@@ -232,5 +236,75 @@ describe("api client", () => {
     assert.equal(api.orderCancellation.cancel, orderCancellationApi.cancel);
     assert.equal(api.billing.overview, billingApi.overview);
     assert.equal(api.cloud.signIn, cloudSessionApi.signIn);
+  });
+
+  describe("error classification model", () => {
+    it("classifies network TypeErrors as UNREACHABLE and retriable", () => {
+      const err = new TypeError("Failed to fetch");
+      assert.equal(classifyApiError(err), ApiErrorKind.UNREACHABLE);
+      assert.equal(isRetriableApiError(err), true);
+      assert.match(describeCloudError(err), /unreachable/i);
+    });
+
+    it("classifies CLOUD_UNREACHABLE CloudApiError as UNREACHABLE", () => {
+      const err = new CloudApiError("Offline", { code: "CLOUD_UNREACHABLE", status: 0 });
+      assert.equal(classifyApiError(err), ApiErrorKind.UNREACHABLE);
+      assert.equal(isRetriableApiError(err), true);
+    });
+
+    it("classifies 401 as AUTHENTICATION (non-retriable)", () => {
+      const err = new CloudApiError("Unauthorized", { status: 401, code: "UNAUTHENTICATED" });
+      assert.equal(classifyApiError(err), ApiErrorKind.AUTHENTICATION);
+      assert.equal(isRetriableApiError(err), false);
+      assert.match(describeCloudError(err), /session expired/i);
+    });
+
+    it("classifies 402 and 403-subscription as SUBSCRIPTION", () => {
+      const err402 = new CloudApiError("Sub required", { status: 402 });
+      assert.equal(classifyApiError(err402), ApiErrorKind.SUBSCRIPTION);
+      assert.equal(isRetriableApiError(err402), false);
+      assert.match(describeCloudError(err402), /subscription/i);
+
+      const err403Sub = new CloudApiError("Billing error", { status: 403, code: "SUBSCRIPTION_EXPIRED" });
+      assert.equal(classifyApiError(err403Sub), ApiErrorKind.SUBSCRIPTION);
+
+      const err403Auth = new CloudApiError("Forbidden", { status: 403, code: "FORBIDDEN" });
+      assert.equal(classifyApiError(err403Auth), ApiErrorKind.AUTHORIZATION);
+    });
+
+    it("classifies 400 and 422 as VALIDATION", () => {
+      const err400 = new CloudApiError("Bad request", { status: 400 });
+      assert.equal(classifyApiError(err400), ApiErrorKind.VALIDATION);
+      const err422 = new CloudApiError("Invalid input", { status: 422 });
+      assert.equal(classifyApiError(err422), ApiErrorKind.VALIDATION);
+      assert.equal(isRetriableApiError(err422), false);
+    });
+
+    it("classifies 404 as NOT_FOUND and 409 as CONFLICT", () => {
+      const err404 = new CloudApiError("Missing", { status: 404 });
+      assert.equal(classifyApiError(err404), ApiErrorKind.NOT_FOUND);
+      const err409 = new CloudApiError("Conflict", { status: 409 });
+      assert.equal(classifyApiError(err409), ApiErrorKind.CONFLICT);
+    });
+
+    it("classifies 429 as RATE_LIMITED and retriable", () => {
+      const err = new CloudApiError("Too many requests", { status: 429 });
+      assert.equal(classifyApiError(err), ApiErrorKind.RATE_LIMITED);
+      assert.equal(isRetriableApiError(err), true);
+      assert.match(describeCloudError(err), /Too many requests/i);
+    });
+
+    it("classifies 500+ as SERVER and retriable", () => {
+      const err = new CloudApiError("Server error", { status: 500 });
+      assert.equal(classifyApiError(err), ApiErrorKind.SERVER);
+      assert.equal(isRetriableApiError(err), true);
+      assert.match(describeCloudError(err), /could not complete/i);
+    });
+
+    it("classifies INVALID_RESPONSE code as INVALID_RESPONSE", () => {
+      const err = new CloudApiError("Unreadable JSON", { status: 502, code: "INVALID_RESPONSE" });
+      assert.equal(classifyApiError(err), ApiErrorKind.INVALID_RESPONSE);
+      assert.match(describeCloudError(err), /unreadable response/i);
+    });
   });
 });

@@ -479,6 +479,44 @@ describe("order history UI", () => {
     assert.match(error.textContent, /Billing/i);
   });
 
+  it("shows an authorization error for 403 instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          { error: "Access denied.", code: "FORBIDDEN" },
+          { status: 403 },
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /permission/i);
+  });
+
+  it("shows a not-found error for 404 instead of local history", async () => {
+    const { dom, ui, legacyRenders, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(
+          { error: "Endpoint not found.", code: "NOT_FOUND" },
+          { status: 404 },
+        ),
+    });
+    try {
+      await ui.renderOrdersHistory();
+    } finally {
+      restore();
+    }
+
+    assert.equal(legacyRenders.length, 0);
+    const error = dom.document.getElementById("history-error");
+    assert.match(error.textContent, /no longer exists/i);
+  });
+
   it("shows a validation error for 422 instead of local history", async () => {
     const { dom, ui, legacyRenders, restore } = setup({
       fetchImpl: async () =>
