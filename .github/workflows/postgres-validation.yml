@@ -2,7 +2,7 @@ name: PostgreSQL Validation
 
 on:
   push:
-    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui, feat/milestone-12-refunds-sales-reports]
+    branches: [main, feat/milestone-13-production-pilot]
   pull_request:
     branches: [main]
 
@@ -105,6 +105,34 @@ jobs:
             psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
           done
 
+      - name: Run migration runner tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/migration-runner.test.mjs
+
+      - name: Run production configuration tests
+        run: node --test tests/production-config.test.mjs
+
+      - name: Run health endpoint tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/health-endpoints.test.mjs
+
+      - name: Run bootstrap CLI tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/bootstrap-first-restaurant.test.mjs
+
+      - name: Run graceful shutdown tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/graceful-shutdown.test.mjs
+
+      - name: Run backup and restore tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --test tests/backup-restore.test.mjs
+
       - name: Run integration tests
         env:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
@@ -157,3 +185,195 @@ jobs:
             exit 1
           fi
           echo "Working tree is clean"
+
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMOKE_DB: restaurant_pos_smoke
+      SMOKE_USER: pos_smoke
+      SMOKE_PASSWORD: smoke-only
+      SMOKE_PEPPER: smoke-pepper-at-least-16-chars
+      SMOKE_SESSION: smoke-session-secret-at-least-16
+      SMOKE_OWNER_PASSWORD: smoke-password-12345
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: restaurant_pos_smoke
+          POSTGRES_USER: pos_smoke
+          POSTGRES_PASSWORD: smoke-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U pos_smoke -d restaurant_pos_smoke"
+          --health-interval=2s
+          --health-timeout=2s
+          --health-retries=20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: bite-tech-pos:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Confirm image runs as non-root
+        run: |
+          docker run --rm --entrypoint sh bite-tech-pos:smoke -c 'id -u' | grep -v '^0$'
+
+      - name: Apply migrations through the runner
+        env:
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          MIGRATIONS_DIR: /app/database/migrations
+        run: |
+          docker run --rm \
+            -e DATABASE_URL \
+            -e MIGRATIONS_DIR \
+            --network host \
+            --entrypoint node \
+            bite-tech-pos:smoke \
+            src/server/database/migration-runner.mjs
+
+      - name: Bootstrap the first restaurant
+        env:
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
+          RESTAURANT_NAME: Pilot Restaurant
+          RESTAURANT_SLUG: pilot-restaurant
+          RESTAURANT_TIMEZONE: Asia/Karachi
+          RESTAURANT_CURRENCY: PKR
+          OWNER_EMAIL: owner@pilot.example
+          OWNER_DISPLAY_NAME: Pilot Owner
+          BOOTSTRAP_OWNER_PASSWORD: ${{ env.SMOKE_OWNER_PASSWORD }}
+          SUBSCRIPTION_STATUS: trial
+        run: |
+          docker run --rm \
+            -e DATABASE_URL \
+            -e PASSWORD_PEPPER \
+            -e RESTAURANT_NAME \
+            -e RESTAURANT_SLUG \
+            -e RESTAURANT_TIMEZONE \
+            -e RESTAURANT_CURRENCY \
+            -e OWNER_EMAIL \
+            -e OWNER_DISPLAY_NAME \
+            -e BOOTSTRAP_OWNER_PASSWORD \
+            -e SUBSCRIPTION_STATUS \
+            --network host \
+            --entrypoint node \
+            bite-tech-pos:smoke \
+            src/server/bootstrap-first-restaurant.mjs
+
+      - name: Start the production container
+        env:
+          # The production-built image is exercised here. NODE_ENV is
+          # development for the CI smoke run only, because the runner
+          # has no real HTTPS origin; a real deployment sets
+          # NODE_ENV=production and an HTTPS TRUSTED_ORIGINS value.
+          NODE_ENV: development
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          TRUSTED_ORIGINS: http://localhost:3000
+          SESSION_SECRET: ${{ env.SMOKE_SESSION }}
+          PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
+          PAYMENT_PROVIDER: manual
+          LOG_LEVEL: info
+          PORT: "3000"
+          HOST: 0.0.0.0
+        run: |
+          docker run -d --name pos-smoke \
+            -e NODE_ENV \
+            -e DATABASE_URL \
+            -e TRUSTED_ORIGINS \
+            -e SESSION_SECRET \
+            -e PASSWORD_PEPPER \
+            -e PAYMENT_PROVIDER \
+            -e LOG_LEVEL \
+            -e PORT \
+            -e HOST \
+            -p 3000:3000 \
+            --network host \
+            bite-tech-pos:smoke
+
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health/ready; then
+              echo "Application is ready"
+              exit 0
+            fi
+            echo "Waiting for readiness (attempt $attempt/30)..."
+            sleep 2
+          done
+          echo "Application did not become ready"
+          docker logs pos-smoke
+          exit 1
+
+      - name: Verify liveness and readiness
+        run: |
+          echo "Liveness:"
+          curl -fsS http://localhost:3000/health/live
+          echo ""
+          echo "Readiness:"
+          curl -fsS http://localhost:3000/health/ready
+          echo ""
+
+      - name: Load the POS page
+        run: |
+          curl -fsS http://localhost:3000/ | grep -q "Fast Food POS\|bite\|POS" || \
+            curl -fsS http://localhost:3000/ | head -c 200
+
+      - name: Verify an unauthenticated protected endpoint is rejected
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:3000/api/auth/me)
+          echo "Unauthenticated /api/auth/me returned $status"
+          if [ "$status" != "401" ]; then
+            echo "Expected 401 for an unauthenticated protected endpoint, got $status"
+            exit 1
+          fi
+
+      - name: Verify an invalid Stripe webhook is rejected
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "content-type: application/json" \
+            -H "x-billing-signature: t=1,v1=invalid" \
+            --data '{}' \
+            http://localhost:3000/webhook)
+          echo "Invalid webhook returned $status"
+          if [ "$status" = "200" ]; then
+            echo "An invalid webhook must not be accepted"
+            exit 1
+          fi
+
+      - name: Send SIGTERM
+        run: |
+          docker kill --signal=SIGTERM pos-smoke
+
+      - name: Confirm clean shutdown
+        run: |
+          for attempt in $(seq 1 15); do
+            if ! docker ps --format '{{.Names}}' | grep -q '^pos-smoke$'; then
+              echo "Container exited cleanly after $attempt checks"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not stop after SIGTERM"
+          docker logs pos-smoke
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f pos-smoke || true

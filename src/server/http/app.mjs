@@ -2,11 +2,13 @@ import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { PERMISSION } from "../authorization/permissions.mjs";
 import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
+import { createStaticFileHandler } from "./static-files.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
@@ -243,22 +245,53 @@ export async function buildHttpApp({
   subscriptionService = null,
   billingWebhookService = null,
   trustedOrigin,
+  trustedOrigins = null,
   secureCookies = true,
   logger = false,
+  databasePool = null,
+  migrationsDir = null,
+  verifyMigrationsCurrent = null,
+  serveClient = true,
+  nodeEnv = "development",
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
 
-  const app = Fastify({ logger, trustProxy: true, bodyLimit: 64 * 1024 });
+  const originAllowlist = trustedOrigins ?? [trustedOrigin];
+
+  const app = Fastify({
+    logger,
+    trustProxy: true,
+    bodyLimit: 64 * 1024,
+    genReqId: (request) =>
+      request.headers["x-request-id"]
+        ?? randomUUID(),
+  });
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { global: true, max: 120, timeWindow: "1 minute" });
+
+  // Security headers that do not depend on helmet's CSP. The legacy POS
+  // uses inline event handlers and inline scripts, so a restrictive CSP
+  // would break it; CSP is deliberately left off and this limitation is
+  // documented.
+  app.addHook("onSend", async (_request, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    reply.header("X-Request-Id", _request.id);
+  });
+
+  // Request ID propagation for every request.
+  app.addHook("onRequest", async (request, reply) => {
+    reply.header("X-Request-Id", request.id);
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     if (["GET", "HEAD", "OPTIONS"].includes(request.method)) return;
     const fetchSite = request.headers["sec-fetch-site"];
     const origin = request.headers.origin;
-    if (fetchSite === "cross-site" || (origin && origin !== trustedOrigin)) {
+    if (fetchSite === "cross-site" || (origin && !originAllowlist.includes(origin))) {
       return reply.code(403).send({ error: "Cross-site request rejected." });
     }
   });
@@ -285,7 +318,58 @@ export async function buildHttpApp({
     ];
   });
 
-  app.get("/health", async () => ({ status: "ok" }));
+  // Liveness: confirms the process and event loop are alive. It must not
+  // query the database or expose any configuration, so a database outage
+  // does not cause the orchestrator to restart a healthy process.
+  app.get("/health/live", async () => ({ status: "ok" }));
+
+  // Readiness: confirms the application can safely receive traffic. It
+  // verifies PostgreSQL connectivity with a short timeout and that the
+  // schema is current. It never exposes hostnames, credentials, stack
+  // traces, tenant data, or Stripe configuration.
+  app.get("/health/ready", async (_request, reply) => {
+    if (!databasePool) {
+      return reply.code(503).send({ status: "not_ready", reason: "no_database" });
+    }
+    try {
+      const { checkDatabaseReady } = await import("../database/pool.mjs");
+      const reachable = await checkDatabaseReady(databasePool, { timeoutMs: 3_000 });
+      if (!reachable) {
+        return reply.code(503).send({ status: "not_ready", reason: "database_unreachable" });
+      }
+    } catch {
+      return reply.code(503).send({ status: "not_ready", reason: "database_unreachable" });
+    }
+
+    if (verifyMigrationsCurrent && migrationsDir) {
+      try {
+        const { current, pending, drifted } = await verifyMigrationsCurrent({
+          pool: databasePool,
+          migrationsDir,
+        });
+        if (!current) {
+          return reply.code(503).send({
+            status: "not_ready",
+            reason: pending ? "migrations_pending" : "migration_drift",
+          });
+        }
+      } catch {
+        return reply.code(503).send({ status: "not_ready", reason: "migration_check_failed" });
+      }
+    }
+
+    return reply.code(200).send({ status: "ready" });
+  });
+
+  // The legacy POS client is served by the application container in
+  // production. In development the separate static server is used, so
+  // serving can be disabled to avoid a conflict.
+  if (serveClient) {
+    const serveStatic = createStaticFileHandler();
+    app.get("/", { config: { subscriptionExempt: true } }, serveStatic);
+    app.get("/src/client/*", { config: { subscriptionExempt: true } }, serveStatic);
+    app.get(`/${"Fast_Food_POS_Custom_Bill_Header_XXXL.html"}`, { config: { subscriptionExempt: true } }, serveStatic);
+  }
 
   if (billingWebhookService) {
     // Registered in its own context because a webhook signature is computed over

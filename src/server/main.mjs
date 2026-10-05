@@ -1,5 +1,5 @@
-import pg from "pg";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import path from "node:path";
 import { buildHttpApp } from "./http/app.mjs";
 import { createBillingWebhookService } from "./billing/billing-webhook-service.mjs";
 import { createSubscriptionService } from "./billing/subscription-service.mjs";
@@ -13,29 +13,54 @@ import {
   loadBillingConfiguration,
   loadServerConfiguration,
 } from "./config/environment.mjs";
+import {
+  checkDatabaseReady,
+  closeDatabasePool,
+  createDatabasePool,
+} from "./database/pool.mjs";
+import { verifyMigrationsCurrent } from "./database/migration-runner.mjs";
 
 /**
  * Assembles the runnable server from configuration.
  *
  * Wiring lives here rather than inside any service, so the composition is
- * visible in one place and can be asserted in a test without opening a socket.
+ * visible in one place and can be asserted in a test without opening a
+ * socket.
  */
 export async function createServer({
   env = process.env,
   logger = { info() {}, warn() {}, error() {} },
   pool = null,
+  migrationsDir = "auto",
+  verifyMigrations = true,
 } = {}) {
   const config = loadServerConfiguration(env);
   const billing = loadBillingConfiguration(env);
 
-  const database = pool ?? new pg.Pool({
-    connectionString: config.databaseUrl,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    // The application role is deliberately not a superuser: forced row-level
-    // security has to apply to it, or tenant isolation would be untested.
-    options: "-c statement_timeout=15000",
-  });
+  const database = pool ?? createDatabasePool(env, logger);
+
+  // Startup readiness: the process must not claim readiness before the
+  // database is usable. A deployment that cannot reach PostgreSQL fails
+  // fast instead of serving 500s.
+  const databaseReady = await checkDatabaseReady(database, { timeoutMs: 10_000 });
+  if (!databaseReady) {
+    await closeDatabasePool(database);
+    throw Object.assign(new Error("PostgreSQL is unavailable at startup."), {
+      code: "DATABASE_UNAVAILABLE",
+    });
+  }
+
+  // Migration verification is wired for the real server (the default
+  // "auto" resolves the bundled migrations directory). Tests inject a
+  // mock pool that cannot run the verification queries, so they pass
+  // migrationsDir: null to opt out.
+  const defaultMigrationsDir = path.join(
+    path.dirname(fileURLToPath(import.meta.url)), "..", "..", "database", "migrations",
+  );
+  const resolvedMigrationsDir = migrationsDir === "auto"
+    ? defaultMigrationsDir
+    : migrationsDir;
+  const shouldVerifyMigrations = verifyMigrations && resolvedMigrationsDir !== null;
 
   const billingWebhookService = createBillingWebhookService({
     pool: database,
@@ -48,7 +73,7 @@ export async function createServer({
 
   const subscriptionService = createSubscriptionService(database, {
     provider: billing.provider,
-    trustedOrigins: [config.trustedOrigin],
+    trustedOrigins: config.trustedOrigins,
   });
 
   const authService = createAuthService({
@@ -71,8 +96,13 @@ export async function createServer({
     orderRefundService,
     salesReportService,
     trustedOrigin: config.trustedOrigin,
+    trustedOrigins: config.trustedOrigins,
     secureCookies: config.secureCookies,
-    logger: { level: config.nodeEnv === "production" ? "info" : "warn" },
+    logger: { level: config.logLevel },
+    databasePool: database,
+    migrationsDir: shouldVerifyMigrations ? resolvedMigrationsDir : null,
+    verifyMigrationsCurrent: shouldVerifyMigrations ? verifyMigrationsCurrent : null,
+    nodeEnv: config.nodeEnv,
   });
 
   return {
@@ -85,7 +115,7 @@ export async function createServer({
     billingWebhookService,
     async close() {
       await app.close();
-      if (!pool) await database.end();
+      if (!pool) await closeDatabasePool(database);
     },
   };
 }
@@ -102,12 +132,72 @@ export async function startServer(options = {}) {
   return server;
 }
 
+/**
+ * Runs the server as a process with graceful SIGTERM/SIGINT handling.
+ *
+ * On a termination signal the server stops accepting new connections,
+ * gives in-flight requests a grace period, closes Fastify and the
+ * PostgreSQL pool cleanly, and exits. Fatal startup errors exit
+ * non-zero.
+ */
+export async function runServer({ env = process.env, logger = console, shutdownGraceMs = 3_000 } = {}) {
+  let server = null;
+  let shuttingDown = false;
+
+  const shutdown = async (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info?.({ message: "shutdown_initiated", signal });
+
+    // Force-exit after the grace period so a lingering keep-alive
+    // connection can never block a deployment from stopping.
+    const forceExit = setTimeout(() => {
+      logger.warn?.({ message: "shutdown_forced", signal });
+      process.exit(0);
+    }, shutdownGraceMs);
+    forceExit.unref?.();
+
+    if (server) {
+      try {
+        await server.close();
+        logger.info?.({ message: "shutdown_complete" });
+      } catch (error) {
+        logger.error?.({ message: "shutdown_error", error: error.message });
+        clearTimeout(forceExit);
+        process.exit(1);
+      }
+    }
+    clearTimeout(forceExit);
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
+  process.on("SIGINT", () => { void shutdown("SIGINT"); });
+
+  process.on("unhandledRejection", (reason) => {
+    logger.error?.({
+      message: "unhandled_rejection",
+      error: reason instanceof Error ? reason.message : String(reason),
+    });
+  });
+
+  try {
+    server = await startServer({ env, logger });
+  } catch (error) {
+    logger.error?.({
+      message: "pos_server_start_failed",
+      error: error.message,
+      code: error.code,
+    });
+    process.exit(1);
+  }
+
+  return server;
+}
+
 const invokedDirectly = process.argv[1]
-  && pathToFileURL(process.argv[1]).href === import.meta.url;
+  && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  startServer({ logger: console }).catch((error) => {
-    console.error({ message: "pos_server_start_failed", error: error.message });
-    process.exitCode = 1;
-  });
+  void runServer({ logger: console });
 }

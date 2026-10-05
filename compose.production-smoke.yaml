@@ -1,0 +1,98 @@
+# Production-like smoke test for local simulation.
+#
+# This is NOT the final hosted database. It runs the production Docker
+# image against a disposable PostgreSQL 17 instance with a persistent
+# named volume, health checks, and dependency conditions, so the full
+# startup path (migrations -> bootstrap -> serve -> readiness) can be
+# exercised locally before deploying to a managed provider.
+#
+# No production secrets are hardcoded. Values are read from the
+# environment or a local .env file that is never committed.
+
+name: bite-tech-pos-production-smoke
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
+      POSTGRES_USER: ${SMOKE_POSTGRES_USER:-pos_smoke}
+      POSTGRES_PASSWORD: ${SMOKE_POSTGRES_PASSWORD:-smoke-only}
+    volumes:
+      - smoke_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  # Applies migrations as a release step, not at application startup.
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "src/server/database/migration-runner.mjs"]
+    environment:
+      DATABASE_URL: postgresql://${SMOKE_POSTGRES_USER:-pos_smoke}:${SMOKE_POSTGRES_PASSWORD:-smoke-only}@postgres:5432/${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
+      MIGRATIONS_DIR: /app/database/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Creates the first restaurant tenant with test-only credentials.
+  bootstrap:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["node", "src/server/bootstrap-first-restaurant.mjs"]
+    environment:
+      DATABASE_URL: postgresql://${SMOKE_POSTGRES_USER:-pos_smoke}:${SMOKE_POSTGRES_PASSWORD:-smoke-only}@postgres:5432/${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
+      PASSWORD_PEPPER: ${SMOKE_PASSWORD_PEPPER:-smoke-pepper-at-least-16-chars}
+      RESTAURANT_NAME: ${SMOKE_RESTAURANT_NAME:-Pilot Restaurant}
+      RESTAURANT_SLUG: ${SMOKE_RESTAURANT_SLUG:-pilot-restaurant}
+      RESTAURANT_TIMEZONE: ${SMOKE_RESTAURANT_TIMEZONE:-Asia/Karachi}
+      RESTAURANT_CURRENCY: ${SMOKE_RESTAURANT_CURRENCY:-PKR}
+      OWNER_EMAIL: ${SMOKE_OWNER_EMAIL:-owner@pilot.example}
+      OWNER_DISPLAY_NAME: ${SMOKE_OWNER_DISPLAY_NAME:-Pilot Owner}
+      BOOTSTRAP_OWNER_PASSWORD: ${SMOKE_OWNER_PASSWORD:-smoke-password-12345}
+      SUBSCRIPTION_STATUS: trial
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # The production image is exercised here. NODE_ENV is left at
+      # development for the local smoke run only, because a local
+      # smoke has no real HTTPS origin yet; a real deployment sets
+      # NODE_ENV=production and an HTTPS TRUSTED_ORIGINS value.
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgresql://${SMOKE_POSTGRES_USER:-pos_smoke}:${SMOKE_POSTGRES_PASSWORD:-smoke-only}@postgres:5432/${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
+      TRUSTED_ORIGINS: ${SMOKE_TRUSTED_ORIGINS:-http://localhost:3000}
+      SESSION_SECRET: ${SMOKE_SESSION_SECRET:-smoke-session-secret-at-least-16}
+      PASSWORD_PEPPER: ${SMOKE_PASSWORD_PEPPER:-smoke-pepper-at-least-16-chars}
+      PAYMENT_PROVIDER: manual
+      LOG_LEVEL: info
+    ports:
+      - "${SMOKE_APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  smoke_pgdata:

@@ -150,14 +150,24 @@ describe("mailer fails closed", () => {
 describe("server bootstrap", () => {
   it("assembles the billing stack without opening a socket", async () => {
     const pool = {
-      async query() { return { rows: [] }; },
+      async query(sql) {
+        // The startup readiness probe runs SELECT 1 AS ok.
+        if (String(sql).includes("SELECT 1")) return { rows: [{ ok: 1 }] };
+        return { rows: [] };
+      },
       async connect() {
-        return { async query() { return { rows: [] }; }, release() {} };
+        return {
+          async query(sql) {
+            if (String(sql).includes("SELECT 1")) return { rows: [{ ok: 1 }] };
+            return { rows: [] };
+          },
+          release() {},
+        };
       },
       async end() {},
     };
 
-    const server = await createServer({ env: validEnv, pool });
+    const server = await createServer({ env: validEnv, pool, migrationsDir: null });
 
     try {
       assert.equal(server.billing.providerName, "manual");
@@ -165,8 +175,12 @@ describe("server bootstrap", () => {
       assert.equal(typeof server.billingWebhookService.handle, "function");
       assert.equal(server.billingWebhookService.webhookSignatureHeader, "x-billing-signature");
 
-      const health = await server.app.inject({ method: "GET", url: "/health" });
+      const health = await server.app.inject({ method: "GET", url: "/health/live" });
       assert.equal(health.statusCode, 200);
+
+      // Readiness with a mock pool that reports a reachable database.
+      const ready = await server.app.inject({ method: "GET", url: "/health/ready" });
+      assert.equal(ready.statusCode, 200);
 
       // The webhook must exist even with no subscription, because it is what
       // later grants one.
