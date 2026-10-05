@@ -105,6 +105,25 @@ jobs:
             psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
           done
 
+      - name: Install PostgreSQL 17 client tools
+        # The backup/restore tests invoke pg_dump, pg_restore,
+        # and psql. The runner ships PostgreSQL 16 client tools,
+        # but the service container runs PostgreSQL 17, and
+        # pg_dump refuses to run against a newer server. Install
+        # the matching PostgreSQL 17 client tools from the
+        # PostgreSQL Global Development Group apt repository.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends gnupg curl ca-certificates
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo "Installed client tools:"
+          pg_dump --version
+          pg_restore --version
+          psql --version
+
       - name: Run PostgreSQL-dependent tests
         env:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
