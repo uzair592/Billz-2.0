@@ -93,6 +93,49 @@ export function createOrderDetailUI({ storage } = {}) {
     withCloudOrderVisible(mapped, () => {
       legacyShowOrderInvoiceDetailsView(mapped.id);
     });
+    injectCloudRefundButton(orderId, mapped);
+  }
+
+  /**
+   * Adds a "Refund" action to the invoice modal for cloud
+   * orders that are completed and have a captured payment.
+   * The refund modal itself re-checks the remaining
+   * refundable balance, so a fully-refunded order is
+   * rejected there rather than hiding the entry point.
+   */
+  function injectCloudRefundButton(orderId, mapped) {
+    if (typeof window.openRefundModal !== "function") return;
+    const modalContent = document.getElementById("invoice-modal-content");
+    if (!modalContent) return;
+
+    const status = String(mapped.orderStatus ?? "").toLowerCase();
+    const payment = String(mapped.paymentStatus ?? "").toLowerCase();
+    const eligible = status === "completed" && payment === "paid";
+    if (!eligible) return;
+
+    modalContent
+      .querySelectorAll("[data-cloud-refund-btn]")
+      .forEach((node) => node.remove());
+
+    const printButton = Array.from(
+      modalContent.querySelectorAll("button"),
+    ).find((button) =>
+      (button.getAttribute("onclick") || "").includes("reprintOrderReceipt"),
+    );
+    if (!printButton || !printButton.parentElement) return;
+
+    const refundButton = document.createElement("button");
+    refundButton.type = "button";
+    refundButton.className = "clear-dates-btn";
+    refundButton.setAttribute("data-cloud-refund-btn", "true");
+    refundButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.openRefundModal(orderId);
+    });
+    refundButton.style.cssText =
+      "margin: 0; padding: 8px 20px; background: #7c3aed; color: white;";
+    refundButton.textContent = "↩️ Refund";
+    printButton.parentElement.insertBefore(refundButton, printButton);
   }
 
   async function reprintCloudOrder(orderId) {

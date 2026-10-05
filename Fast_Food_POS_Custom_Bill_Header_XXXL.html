@@ -11635,9 +11635,39 @@
                 📊 Visual Graph View
               </button>
             </div>
+
+            <div
+              style="
+                background: #e2e8f0;
+                padding: 4px;
+                border-radius: 8px;
+                display: flex;
+                gap: 4px;
+              "
+            >
+              <button
+                type="button"
+                id="reports-tab-local"
+                class="mode-switch-btn active-switch"
+                onclick="showLocalReports()"
+                title="Local device reports (IndexedDB)"
+              >
+                💾 Local Reports
+              </button>
+              <button
+                type="button"
+                id="reports-tab-cloud"
+                class="mode-switch-btn"
+                onclick="showCloudSalesReport()"
+                title="Server-authoritative cloud sales report"
+              >
+                ☁️ Cloud Sales Report
+              </button>
+            </div>
           </div>
 
           
+          <div id="local-reports-view">
           <div class="date-filter-bar">
             <div class="date-input-group">
               <label for="report-date-from">From:</label>
@@ -12173,6 +12203,11 @@
                 <tbody id="rep-ing-rows"></tbody>
               </table>
             </div>
+          </div>
+          </div>
+
+          <div id="cloud-sales-report-view" class="hidden">
+            <div id="cloud-sales-report-container"></div>
           </div>
         </section>
 

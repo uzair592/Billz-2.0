@@ -365,9 +365,66 @@ export function generateIdempotencyKey() {
   return crypto.randomUUID();
 }
 
+export const orderRefundApi = {
+  async createRefund(orderId, refundPayload, idempotencyKey) {
+    const key = idempotencyKey || generateIdempotencyKey();
+    return apiRequest(`/pos/orders/${encodeURIComponent(orderId)}/refunds`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": key,
+      },
+      body: {
+        ...refundPayload,
+        idempotencyKey: key,
+      },
+    });
+  },
+
+  async listRefunds(orderId) {
+    return apiRequest(`/pos/orders/${encodeURIComponent(orderId)}/refunds`);
+  },
+
+  async getRefund(refundId) {
+    return apiRequest(`/pos/refunds/${encodeURIComponent(refundId)}`);
+  },
+};
+
+export const salesReportApi = {
+  async getSalesReport(params = {}) {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set("startDate", params.startDate);
+    if (params.endDate) query.set("endDate", params.endDate);
+    if (params.timezone) query.set("timezone", params.timezone);
+    if (params.orderType) query.set("orderType", params.orderType);
+    if (params.paymentMethod) query.set("paymentMethod", params.paymentMethod);
+    if (params.groupBy) query.set("groupBy", params.groupBy);
+    if (params.page) query.set("page", String(params.page));
+    if (params.limit) query.set("limit", String(params.limit));
+
+    const queryString = query.toString();
+    const url = `/pos/reports/sales${queryString ? `?${queryString}` : ""}`;
+    return apiRequest(url);
+  },
+
+  async downloadSalesReportCsv(params = {}) {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set("startDate", params.startDate);
+    if (params.endDate) query.set("endDate", params.endDate);
+    if (params.timezone) query.set("timezone", params.timezone);
+    if (params.orderType) query.set("orderType", params.orderType);
+    if (params.paymentMethod) query.set("paymentMethod", params.paymentMethod);
+
+    const queryString = query.toString();
+    const url = `${API_BASE}/pos/reports/sales/export${queryString ? `?${queryString}` : ""}`;
+    window.location.href = url;
+  },
+};
+
 export const api = {
   orders: orderHistoryApi,
   orderCancellation: orderCancellationApi,
+  refunds: orderRefundApi,
+  salesReport: salesReportApi,
   createOrder: orderApi,
   billing: billingApi,
   cloud: cloudSessionApi,

@@ -56,6 +56,12 @@ Implemented foundations:
 - A compensating order cancellation that returns consumed stock, refunds captured
   payments into the same account, reverses the ledger, and records an auditable
   cancellation event. Replays never double-compensate.
+- Partial refunds for completed, paid cloud orders: item-level quantities,
+  mandatory reason, optional stock restock, deterministic split-tender
+  compensation, refund ledger debits, and idempotent replay.
+- Server-authoritative sales reporting: gross sales, discounts, refunds,
+  net sales, payment and order-type breakdowns, daily trends, and
+  paginated detailed rows, with CSV export.
 - An authenticated-user boundary and read-only policies that let a device list
   only its own restaurant memberships before any tenant is selected.
 - `GET /api/auth/me` returns the account's own restaurant memberships alongside
@@ -82,9 +88,6 @@ Not yet complete:
 
 - Transactional email provider connection.
 - Legacy IndexedDB order/expense/stock history import.
-- Partial refunds and sales-report APIs.
-- Driving order history and cancellation from the POS interface.
-- A billing page in the POS interface.
 - Platform-admin interface.
 - Production deployment.
 
@@ -226,7 +229,11 @@ Customer names and phone numbers currently exist only as order snapshots. A sepa
 │       ├── 004_menu_offers.sql
 │       ├── 005_legacy_operational_keys.sql
 │       ├── 006_order_cancellations.sql
-│       └── 007_session_tenant_selection.sql
+│       ├── 007_session_tenant_selection.sql
+│       ├── 008_billing_checkout_and_routes.sql
+│       ├── 009_checkout_attempts.sql
+│       ├── 010_checkout_attempt_subscriptions.sql
+│       └── 011_partial_refunds_and_sales_reporting.sql
 ├── docs/
 │   └── IMPLEMENTATION_STATUS.md
 ├── src/
@@ -312,7 +319,34 @@ stock to the branch as `sale_reversal` movements, marks captured payments as
 refunded, writes the matching ledger debits into the same financial accounts,
 and records an `order_edit_events` entry with the reason and the exact restocked
 quantities. Replaying the same request returns the stored cancellation instead
-of compensating twice. Partial refunds are not yet implemented.
+of compensating twice.
+
+`POST /api/pos/orders/:orderId/refunds` creates a partial refund for a
+completed, paid order. It requires an `idempotencyKey` and a non-empty
+`reason`, and accepts an `items` array of
+`{ orderItemId, quantity, restock }`. The service validates that the order
+belongs to the tenant, that each item belongs to the order, that the requested
+quantity never exceeds the remaining refundable quantity, and that the
+cumulative refund never exceeds the captured payment. Compensation is
+deterministic: each tender is debited in proportion to its captured share,
+refund ledger debits are written to the same financial accounts, and restock
+creates `sale_reversal` stock movements from the frozen recipe snapshot.
+The same idempotency key with the same payload replays the stored refund;
+the same key with a different payload is rejected with
+`IDEMPOTENCY_PAYLOAD_MISMATCH`. Refunds are online-only: the cloud refund
+modal refuses to open while the device is offline, and local checkout keeps
+working because it never waits for the cloud.
+
+The sales-report boundaries are `GET /api/pos/reports/sales` and
+`GET /api/pos/reports/sales/export`. Both accept `startDate`, `endDate`
+(`YYYY-MM-DD`, defaulting to the restaurant's current business day),
+`orderType`, `paymentMethod`, `groupBy`, `page`, and `limit`. The report is
+derived from committed transactions: gross sales minus discounts minus
+completed refunds equals net sales; cancelled orders and failed or pending
+payments are excluded; refunds are counted once; and every figure is
+tenant-isolated. The CSV export carries the same filters, is UTF-8 encoded
+with a BOM, and neutralizes spreadsheet formula injection by prefixing
+formula-leading cells.
 
 The billing boundaries are `GET /api/billing`, `POST /api/billing/checkout`,
 `POST /api/billing/change-plan`, `POST /api/billing/cancel`,
@@ -452,7 +486,6 @@ Before commercial deployment:
 - Add migration rollback/recovery documentation.
 - Connect transactional email and payment providers.
 - Add tenant-isolation integration tests using two restaurants.
-- Add partial-refund and report API tests.
 - Configure object storage and signed access.
 - Add CSP after frontend extraction removes incompatible inline handlers.
 - Configure HTTPS, HSTS, monitoring, structured logs, and alerts.

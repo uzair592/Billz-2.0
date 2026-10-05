@@ -343,6 +343,121 @@ describe("order detail UI", () => {
     assert.match(alerts[0], /session expired/i);
   });
 
+  it("injects a refund action for completed, paid cloud orders", async () => {
+    const refundCalls = [];
+    const previousOpenRefundModal = globalThis.openRefundModal;
+    globalThis.openRefundModal = (id) => {
+      refundCalls.push(id);
+    };
+
+    const inserted = [];
+    const clickListeners = [];
+    const printButton = {
+      getAttribute(name) {
+        return name === "onclick" ? "reprintOrderReceipt(7)" : null;
+      },
+      parentElement: {
+        insertBefore(node, ref) {
+          inserted.push({ node, ref });
+        },
+      },
+    };
+    const modalContent = {
+      querySelectorAll(selector) {
+        return selector === "button" ? [printButton] : [];
+      },
+    };
+    const { ui, restore } = setup();
+    globalThis.document = {
+      querySelector: () => null,
+      getElementById(id) {
+        return id === "invoice-modal-content" ? modalContent : null;
+      },
+      createElement() {
+        return {
+          type: "",
+          className: "",
+          attributes: {},
+          style: {},
+          textContent: "",
+          setAttribute(name, value) {
+            this.attributes[name] = value;
+          },
+          getAttribute(name) {
+            return this.attributes[name];
+          },
+          addEventListener(name, handler) {
+            if (name === "click") clickListeners.push(handler);
+          },
+        };
+      },
+    };
+    let propagationStopped = false;
+    try {
+      await ui.showCloudOrderDetails(orderId);
+      clickListeners[0]({
+        stopPropagation() {
+          propagationStopped = true;
+        },
+      });
+    } finally {
+      restore();
+      globalThis.openRefundModal = previousOpenRefundModal;
+    }
+
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].ref, printButton);
+    const refundButton = inserted[0].node;
+    assert.equal(refundButton.getAttribute("data-cloud-refund-btn"), "true");
+    assert.equal(refundButton.textContent, "↩️ Refund");
+    assert.equal(clickListeners.length, 1);
+    assert.equal(propagationStopped, true);
+    assert.deepEqual(refundCalls, [orderId]);
+  });
+
+  it("does not inject a refund action for unpaid cloud orders", async () => {
+    const inserted = [];
+    const printButton = {
+      getAttribute(name) {
+        return name === "onclick" ? "reprintOrderReceipt(7)" : null;
+      },
+      parentElement: {
+        insertBefore(node, ref) {
+          inserted.push({ node, ref });
+        },
+      },
+    };
+    const modalContent = {
+      querySelectorAll(selector) {
+        return selector === "button" ? [printButton] : [];
+      },
+    };
+    const { ui, restore } = setup({
+      fetchImpl: async () =>
+        jsonResponse(cloudDetail({ paymentStatus: "unpaid" })),
+    });
+    globalThis.document = {
+      querySelector: () => null,
+      getElementById(id) {
+        return id === "invoice-modal-content" ? modalContent : null;
+      },
+      createElement() {
+        return {
+          setAttribute() {},
+          addEventListener() {},
+          style: {},
+        };
+      },
+    };
+    try {
+      await ui.showCloudOrderDetails(orderId);
+    } finally {
+      restore();
+    }
+
+    assert.deepEqual(inserted, []);
+  });
+
   it("does not accumulate wrappers when created once", async () => {
     const { legacyCalls, ui, restore } = setup();
     try {

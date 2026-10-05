@@ -2,22 +2,29 @@
 
 ## Current milestone
 
-Milestone 11: the POS operations UI is connected to the cloud.
+Milestone 12: partial refunds and server-authoritative sales
+reporting are connected to the POS.
 
-The order history, order detail, receipt reprint, order
-cancellation, billing, and cloud-status surfaces now read from the
-server APIs instead of the local IndexedDB ledger, while every
-offline behavior is preserved: a local sale never fails because the
-server is unavailable, the history falls back to the local ledger
-when the cloud is unreachable, and the billing page renders for
-every signed-in account, paid or not.
+Cloud orders can now be partially refunded from the order
+invoice: the operator picks item quantities, enters a mandatory
+reason, optionally restocks the returned items, and the server
+compensates each captured tender in proportion to its share,
+writes the refund ledger debits, and returns stock from the
+frozen recipe snapshot. The reports screen gained a "Cloud Sales
+Report" tab next to the local totals: gross sales, discounts,
+refunds, net sales, payment and order-type breakdowns, daily
+trends, and paginated detailed rows, with a CSV export that
+carries the same filters. Local checkout is untouched: a refund
+is online-only and refuses to open while the device is offline,
+and a local sale never waits for the cloud.
 
-A restaurant owner can now see plans, start a provider checkout, change plan,
-cancel, resume, and read payment history, and a verified provider webhook is the
-only thing that can ever move a subscription to paid. Tenant-scoped order
-history, compensating order cancellation, browser sign-in, restaurant selection,
-and catalog import are implemented. The standalone POS HTML keeps its offline
-behavior at every step.
+Milestone 11 connected the order history, order detail, receipt
+reprint, order cancellation, billing, and cloud-status surfaces
+to the server APIs while preserving every offline behavior: a
+local sale never fails because the server is unavailable, the
+history falls back to the local ledger when the cloud is
+unreachable, and the billing page renders for every signed-in
+account, paid or not.
 
 ## Completed
 
@@ -194,6 +201,62 @@ behavior at every step.
   through HTML escaping or text-node assignment, and rows use event
   listeners instead of inline handlers so no identifier can reach a string
   literal.
+- Added migration `011_partial_refunds_and_sales_reporting.sql`:
+  `order_refunds`, `order_refund_items`, and `order_refund_tenders`
+  tables with tenant-scoped composite foreign keys, a per-restaurant
+  idempotency key, positive amount and quantity checks, report indexes,
+  and enabled-and-forced row-level security with tenant-isolation
+  policies. The payment-status checks were widened to
+  `partially_refunded` as a strict superset, so every existing row
+  stays valid.
+- Added the refund service: a single tenant transaction that locks the
+  order, validates item ownership and remaining refundable quantities,
+  aggregates previously refunded amounts, compensates each captured
+  tender in proportion to its captured share, writes refund ledger
+  debits into the same financial accounts, and creates
+  `sale_reversal` stock movements from the frozen recipe snapshot when
+  restock is requested. A refund that returns every remaining quantity
+  absorbs the exact remaining balance so a fully refunded order
+  settles at precisely zero refundable.
+- Made refunds idempotent and replay-safe: the same idempotency key
+  with the same payload returns the stored refund; the same key with a
+  different payload is rejected with `IDEMPOTENCY_PAYLOAD_MISMATCH`;
+  a fresh key that would over-refund is rejected with
+  `AMOUNT_EXCEEDS_REFUNDABLE` before any write.
+- Added refund HTTP routes: `POST /api/pos/orders/:orderId/refunds`
+  (create, 201), `GET /api/pos/orders/:orderId/refunds` (list), and
+  `GET /api/pos/refunds/:refundId` (retrieve), all behind session,
+  membership, subscription, and `REFUND_CREATE`/`REFUND_VIEW`
+  permission checks.
+- Added the sales-report service: every figure is derived from
+  committed transactions inside the tenant transaction — gross sales
+  minus discounts minus completed refunds equals net sales; cancelled
+  orders and failed or pending payments are excluded; refunds are
+  counted once; and cross-tenant rows are impossible under RLS.
+  Business-date boundaries follow the restaurant's timezone.
+- Added sales-report HTTP routes: `GET /api/pos/reports/sales` and
+  `GET /api/pos/reports/sales/export`, behind session, membership,
+  subscription, and `REPORT_VIEW`/`REPORT_EXPORT` checks. Omitted
+  dates default to the restaurant's current business day; an invalid
+  date format is rejected with 400; a range beyond 92 days is
+  rejected with 422 `DATE_RANGE_TOO_LARGE`.
+- Added CSV export security: UTF-8 with a BOM, a safe filename, and
+  formula-injection neutralization for cells beginning with `=`, `+`,
+  `-`, `@`, or a tab.
+- Added the refund modal to the POS: reachable from a completed, paid
+  cloud order's invoice, with per-item quantity inputs, a mandatory
+  reason, a restock checkbox per item, a live estimated amount, an
+  in-flight submit guard, and inline 403/409/validation reporting.
+  The modal refuses to open while the device is offline, and local
+  checkout keeps working because it never awaits the cloud.
+- Added the cloud sales-report dashboard to the reports screen as a
+  separate tab: preset and custom date filters, order-type and
+  payment-method filters, metric cards, breakdown tables, a daily
+  trend table, paginated detailed rows, and a CSV export button that
+  downloads the current filter range.
+- Added refund service, refund UI, sales-report service, sales-report
+  UI, HTTP contract, migration contract, and browser tests for the
+  refund and reporting workflows.
 
 ## Migration guardrails
 
@@ -205,10 +268,9 @@ behavior at every step.
 
 ## Next milestone
 
-Add partial refunds and sales reports, then the platform admin
-area.
+Add the platform admin area.
 
-The repository contains ten forward-only migrations. Apply all of them to a
+The repository contains eleven forward-only migrations. Apply all of them to a
 clean PostgreSQL 17 instance with `compose.validation.yaml` after any schema
 change:
 
@@ -223,7 +285,8 @@ docker compose -f compose.validation.yaml down
 npm test
 ```
 
-The current external-service-free unit run has 400 passing tests.
+The current external-service-free unit run has 484 passing tests.
 PostgreSQL integration tests run separately with `npm run test:integration`
-(24 passing), and the Playwright browser suite with `npx playwright test`
-(15 passing).
+(38 passing: 24 billing plus 14 refund/report), and the Playwright browser
+suite with `npx playwright test` (31 passing: 15 POS operations plus
+16 refund/report).

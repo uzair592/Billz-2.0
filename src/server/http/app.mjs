@@ -93,6 +93,33 @@ const cancelOrderSchema = z.object({
   idempotencyKey: z.uuid(),
 }).strict();
 
+const createRefundSchema = z.object({
+  idempotencyKey: z.uuid().optional(),
+  reason: z.string().trim().min(1).max(500),
+  notes: z.string().trim().max(1000).optional(),
+  amountMinor: z.number().int().positive().optional(),
+  items: z.array(
+    z.object({
+      orderItemId: z.uuid(),
+      quantity: z.number().positive().max(1000),
+      restock: z.boolean().default(false),
+    }).strict(),
+  ).max(100).optional(),
+}).strict();
+
+const refundParamsSchema = z.object({ refundId: z.uuid() }).strict();
+
+const salesReportQuerySchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  timezone: z.string().trim().max(100).optional(),
+  orderType: z.enum(["dine_in", "takeaway", "delivery"]).optional(),
+  paymentMethod: z.enum(["cash", "bank_account", "other"]).optional(),
+  groupBy: z.enum(["day", "week", "month"]).optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+}).strict();
+
 const checkoutSchema = z.object({
   planCode: z.string().trim().min(1).max(64),
   successUrl: z.string().trim().min(1).max(2_000),
@@ -210,6 +237,8 @@ export async function buildHttpApp({
   orderService = null,
   orderHistoryService = null,
   orderCancellationService = null,
+  orderRefundService = null,
+  salesReportService = null,
   catalogImportService = null,
   subscriptionService = null,
   billingWebhookService = null,
@@ -370,8 +399,8 @@ export async function buildHttpApp({
 
   if (tenantContextService
       && (menuService || businessSettingsService || orderService
-        || orderHistoryService || orderCancellationService || catalogImportService
-        || subscriptionService)) {
+        || orderHistoryService || orderCancellationService || orderRefundService
+        || salesReportService || catalogImportService || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -496,6 +525,121 @@ export async function buildHttpApp({
             idempotencyKey: body.idempotencyKey,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+    }
+
+    if (orderRefundService) {
+      app.post(
+        "/api/pos/orders/:orderId/refunds",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REFUND_CREATE),
+          ],
+        },
+        async (request, reply) => {
+          const { orderId } = orderParamsSchema.parse(request.params);
+          const idempotencyHeader = request.headers["idempotency-key"];
+          const body = createRefundSchema.parse(request.body ?? {});
+          const idempotencyKey = idempotencyHeader || body.idempotencyKey;
+
+          if (!idempotencyKey || typeof idempotencyKey !== "string"
+              || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey)) {
+            return reply.code(400).send({
+              error: "A valid Idempotency-Key header is required.",
+              code: "MISSING_IDEMPOTENCY_KEY",
+            });
+          }
+
+          const result = await orderRefundService.createRefund({
+            tenant: request.tenant,
+            userId: request.auth.user.id,
+            orderId,
+            input: {
+              ...body,
+              idempotencyKey,
+            },
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      app.get(
+        "/api/pos/orders/:orderId/refunds",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REFUND_VIEW),
+          ],
+        },
+        async (request) => {
+          const { orderId } = orderParamsSchema.parse(request.params);
+          return orderRefundService.listRefunds({
+            tenant: request.tenant,
+            orderId,
+          });
+        },
+      );
+
+      app.get(
+        "/api/pos/refunds/:refundId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REFUND_VIEW),
+          ],
+        },
+        async (request) => {
+          const { refundId } = refundParamsSchema.parse(request.params);
+          return orderRefundService.getRefund({
+            tenant: request.tenant,
+            refundId,
+          });
+        },
+      );
+    }
+
+    if (salesReportService) {
+      app.get(
+        "/api/pos/reports/sales",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REPORT_VIEW),
+          ],
+        },
+        async (request) => {
+          const filters = salesReportQuerySchema.parse(request.query ?? {});
+          return salesReportService.getSalesReport({
+            tenant: request.tenant,
+            filters,
+          });
+        },
+      );
+
+      app.get(
+        "/api/pos/reports/sales/export",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REPORT_EXPORT),
+          ],
+        },
+        async (request, reply) => {
+          const filters = salesReportQuerySchema.parse(request.query ?? {});
+          const csvData = await salesReportService.exportSalesReportCsv({
+            tenant: request.tenant,
+            filters,
+          });
+          const startDate = filters.startDate || "start";
+          const endDate = filters.endDate || "end";
+          const slug = request.tenant.restaurant.slug || "export";
+          const filename = `sales-report-${slug}-${startDate}-to-${endDate}.csv`;
+
+          reply.header("Content-Type", "text/csv; charset=utf-8");
+          reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+          return reply.send(csvData);
         },
       );
     }
