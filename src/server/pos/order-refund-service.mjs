@@ -628,9 +628,30 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
             }
           }
 
-          // Insert order_refund_tenders and ledger compensating entries
+          // Insert order_refund_tenders and ledger compensating entries.
+          //
+          // allocateProportional() may return entries with amountMinor 0
+          // (for example a one-minor-unit refund spread across two equal
+          // tenders, or a refund smaller than the number of tenders).
+          // order_refund_tenders.amount_minor has a strict > 0 check, so
+          // zero allocations are excluded before any insert, ledger write,
+          // or payment-state update. The positive allocations still sum
+          // exactly to totalRefundedMinor (verified above by the
+          // PAYMENT_ALLOCATION_FAILED guard), so excluding zeros never
+          // changes the refunded total.
+          const positiveTenders = allocatedTenders.filter(
+            (tender) => tender.amountMinor > 0,
+          );
+          if (positiveTenders.reduce((sum, t) => sum + t.amountMinor, 0) !== totalRefundedMinor) {
+            throw apiError(
+              "Unable to allocate refund across captured payments.",
+              "PAYMENT_ALLOCATION_FAILED",
+              409,
+            );
+          }
+
           const insertedTenders = [];
-          for (const tender of allocatedTenders) {
+          for (const tender of positiveTenders) {
             const tenderInsRes = await client.query(
               `INSERT INTO order_refund_tenders (
                  id, restaurant_id, refund_id, order_payment_id,

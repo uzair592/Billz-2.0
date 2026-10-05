@@ -1393,4 +1393,306 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
     assert.equal(Number(replayCash.amountMinor), 33333);
     assert.equal(Number(replayBank.amountMinor), 26667);
   });
+
+  it("CSV export reports correct refunded, net, and total values for a partially refunded order", async () => {
+    const reportService = createSalesReportService(pool);
+
+    // A dedicated restaurant with one partially refunded order.
+    const csvTenant = await seedRestaurant(admin, { name: "CSV Refund Columns" });
+    const csvAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [csvTenant.restaurantId, csvTenant.branchId],
+    );
+    const csvAccountId = csvAccountRes.rows[0].id;
+
+    // Order total 100000, partially refunded by 25000.
+    const orderRes = await admin.query(
+      `INSERT INTO orders (
+         id, restaurant_id, branch_id, order_number, order_type, order_status,
+         payment_status, subtotal_minor, discount_minor, delivery_minor,
+         additional_charges_minor, total_minor, business_date, ordered_at,
+         idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, 7001, 'dine_in', 'completed',
+         'partially_refunded', 100000, 0, 0, 0, 100000, CURRENT_DATE, now(),
+         gen_random_uuid(), $3
+       ) RETURNING id`,
+      [csvTenant.restaurantId, csvTenant.branchId, csvTenant.userId],
+    );
+    const csvOrderId = orderRes.rows[0].id;
+    await admin.query(
+      `INSERT INTO order_payments (
+         id, restaurant_id, order_id, financial_account_id, payment_method,
+         status, amount_minor, idempotency_key, created_by_user_id
+       ) VALUES (
+         gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 100000,
+         gen_random_uuid(), $4
+       )`,
+      [csvTenant.restaurantId, csvOrderId, csvAccountId, csvTenant.userId],
+    );
+
+    const refundService = createOrderRefundService(pool);
+    const tenantContext = {
+      restaurant: { id: csvTenant.restaurantId },
+      membership: { userId: csvTenant.userId, role: "owner" },
+    };
+    await refundService.createRefund({
+      tenant: tenantContext,
+      userId: csvTenant.userId,
+      orderId: csvOrderId,
+      input: {
+        idempotencyKey: "aaaaaaaa-0001-4000-8000-000000000001",
+        reason: "Partial refund for CSV columns",
+        amountMinor: 25000,
+      },
+    });
+
+    const csvContext = {
+      restaurant: {
+        id: csvTenant.restaurantId,
+        name: "CSV Refund Columns",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: csvTenant.userId, role: "owner" },
+    };
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+
+    const csv = await reportService.exportSalesReportCsv({
+      tenant: csvContext,
+      filters: { startDate: todayStr, endDate: todayStr },
+    });
+
+    // Find the detailed row for order 7001.
+    const rowLine = csv.split("\n").find((line) => {
+      const cells = line.split(",");
+      if (cells.length < 8) return false;
+      const orderNumber = Number(cells[0].replace(/^"|"$/g, ""));
+      return orderNumber === 7001;
+    });
+    assert.ok(rowLine, "order 7001 must appear in the CSV");
+
+    const cells = rowLine.split(",");
+    const parse = (cell) => Number(cell.replace(/^"|"$/g, ""));
+    const total = parse(cells[5]);
+    const refunded = parse(cells[6]);
+    const net = parse(cells[7]);
+
+    // The CSV stores PKR (minor / 100) with two decimals.
+    // Total 100000 minor = PKR 1000.00, refunded 25000 =
+    // PKR 250.00, net 75000 = PKR 750.00.
+    assert.equal(total, 1000, "total CSV value must be the order total in PKR");
+    assert.equal(refunded, 250, "refunded CSV value must be the refund total in PKR");
+    assert.equal(net, 750, "net CSV value must be total minus refund in PKR");
+  });
+
+  it("CSV export includes today's rows when dates are omitted", async () => {
+    const reportService = createSalesReportService(pool);
+
+    // A dedicated restaurant with one order today and one yesterday.
+    const noDateTenant = await seedRestaurant(admin, { name: "CSV No Dates" });
+    const noDateAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [noDateTenant.restaurantId, noDateTenant.branchId],
+    );
+    const noDateAccountId = noDateAccountRes.rows[0].id;
+
+    const insertOrder = async (orderNumber, businessDate) => {
+      const orderRes = await admin.query(
+        `INSERT INTO orders (
+           id, restaurant_id, branch_id, order_number, order_type, order_status,
+           payment_status, subtotal_minor, discount_minor, delivery_minor,
+           additional_charges_minor, total_minor, business_date, ordered_at,
+           idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'dine_in', 'completed',
+           'paid', 5000, 0, 0, 0, 5000, $4, now(),
+           gen_random_uuid(), $5
+         ) RETURNING id`,
+        [noDateTenant.restaurantId, noDateTenant.branchId, orderNumber, businessDate, noDateTenant.userId],
+      );
+      await admin.query(
+        `INSERT INTO order_payments (
+           id, restaurant_id, order_id, financial_account_id, payment_method,
+           status, amount_minor, idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 5000,
+           gen_random_uuid(), $4
+         )`,
+        [noDateTenant.restaurantId, orderRes.rows[0].id, noDateAccountId, noDateTenant.userId],
+      );
+      return orderRes.rows[0].id;
+    };
+
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+    const yesterdayStr = (
+      await admin.query("SELECT (CURRENT_DATE - 1)::text AS yesterday")
+    ).rows[0].yesterday;
+
+    const todayOrderId = await insertOrder(7101, todayStr);
+    await insertOrder(7102, yesterdayStr);
+
+    const csvContext = {
+      restaurant: {
+        id: noDateTenant.restaurantId,
+        name: "CSV No Dates",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: noDateTenant.userId, role: "owner" },
+    };
+
+    // Export with NO startDate/endDate: the server must default to
+    // the restaurant's current business day and include today's row.
+    const csv = await reportService.exportSalesReportCsv({
+      tenant: csvContext,
+      filters: {},
+    });
+
+    const parseOrderNumber = (cell) => Number(cell.replace(/^"|"$/g, ""));
+    const exportedNumbers = csv.split("\n")
+      .map((line) => {
+        const cells = line.split(",");
+        if (cells.length < 8) return null;
+        const n = parseOrderNumber(cells[0]);
+        return Number.isInteger(n) && n >= 7100 && n <= 7199 ? n : null;
+      })
+      .filter((n) => n !== null);
+
+    // Today's order (7101) must be included; yesterday's (7102) must not.
+    assert.ok(
+      exportedNumbers.includes(7101),
+      "today's order must be included when dates are omitted",
+    );
+    assert.ok(
+      !exportedNumbers.includes(7102),
+      "yesterday's order must be excluded when dates are omitted",
+    );
+
+    // The date-range heading must show today's resolved date.
+    assert.ok(
+      csv.includes(`Date Range,"${todayStr}" to "${todayStr}"`),
+      "the CSV date-range heading must show the resolved business day",
+    );
+
+    // Sanity: the today order id is the one we tracked.
+    assert.ok(todayOrderId);
+  });
+
+  it("CSV export is deterministic with duplicate order numbers across branches (>500 rows)", async () => {
+    const reportService = createSalesReportService(pool);
+
+    // A dedicated restaurant with two branches that both use the
+    // same order numbers, and more than 500 orders so the export
+    // paginates.
+    const detTenant = await seedRestaurant(admin, { name: "CSV Deterministic" });
+    const branchRes = await admin.query(
+      `INSERT INTO branches (id, restaurant_id, code, name, timezone)
+       VALUES (gen_random_uuid(), $1, 'SECOND', 'Second Branch', 'Asia/Karachi')
+       RETURNING id`,
+      [detTenant.restaurantId],
+    );
+    const secondBranchId = branchRes.rows[0].id;
+
+    const detAccountRes = await admin.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name)
+       VALUES ($1, $2, 'cash', 'Register Cash') RETURNING id`,
+      [detTenant.restaurantId, detTenant.branchId],
+    );
+    const detAccountId = detAccountRes.rows[0].id;
+
+    const totalOrders = 600;
+    const insertedIds = [];
+    for (let i = 1; i <= totalOrders; i += 1) {
+      // Alternate branches. Each branch gets a unique sequence
+      // (8001, 8002, ...) so the per-branch unique constraint
+      // (restaurant_id, branch_id, order_number) holds, while
+      // the SAME number appears on both branches — so the
+      // (business_date, order_number) pair is NOT globally
+      // unique and the export ordering must break ties by id.
+      const branchId = i % 2 === 0 ? secondBranchId : detTenant.branchId;
+      const orderNumber = 8000 + Math.ceil(i / 2);
+      const orderRes = await admin.query(
+        `INSERT INTO orders (
+           id, restaurant_id, branch_id, order_number, order_type, order_status,
+           payment_status, subtotal_minor, discount_minor, delivery_minor,
+           additional_charges_minor, total_minor, business_date, ordered_at,
+           idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'dine_in', 'completed',
+           'paid', 1000, 0, 0, 0, 1000, CURRENT_DATE, now(),
+           gen_random_uuid(), $4
+         ) RETURNING id`,
+        [detTenant.restaurantId, branchId, orderNumber, detTenant.userId],
+      );
+      insertedIds.push(orderRes.rows[0].id);
+      await admin.query(
+        `INSERT INTO order_payments (
+           id, restaurant_id, order_id, financial_account_id, payment_method,
+           status, amount_minor, idempotency_key, created_by_user_id
+         ) VALUES (
+           gen_random_uuid(), $1, $2, $3, 'cash', 'captured', 1000,
+           gen_random_uuid(), $4
+         )`,
+        [detTenant.restaurantId, orderRes.rows[0].id, detAccountId, detTenant.userId],
+      );
+    }
+
+    const csvContext = {
+      restaurant: {
+        id: detTenant.restaurantId,
+        name: "CSV Deterministic",
+        currencyCode: "PKR",
+        timezone: "Asia/Karachi",
+      },
+      membership: { userId: detTenant.userId, role: "owner" },
+    };
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
+
+    const csv = await reportService.exportSalesReportCsv({
+      tenant: csvContext,
+      filters: { startDate: todayStr, endDate: todayStr },
+    });
+
+    // Every detailed row carries an order number in the 8000+ range.
+    // Because order numbers repeat across branches, count rows by
+    // their full line and verify the count equals the number of
+    // inserted orders. Order numbers span 8001..8300 inclusive.
+    const rowLines = csv.split("\n").filter((line) => {
+      const cells = line.split(",");
+      if (cells.length < 8) return false;
+      const orderNumber = Number(cells[0].replace(/^"|"$/g, ""));
+      return Number.isInteger(orderNumber) && orderNumber >= 8001 && orderNumber <= 8300;
+    });
+    assert.equal(
+      rowLines.length,
+      totalOrders,
+      "every order must appear exactly once despite duplicate order numbers",
+    );
+
+    // Each order number appears exactly twice (once per
+    // branch). The CSV does not carry the order id or branch,
+    // so two rows with the same number are identical lines;
+    // the proof that no order is dropped or duplicated is that
+    // the total line count equals the inserted order count and
+    // each number occurs exactly twice.
+    const numberCounts = new Map();
+    for (const line of rowLines) {
+      const orderNumber = Number(line.split(",")[0].replace(/^"|"$/g, ""));
+      numberCounts.set(orderNumber, (numberCounts.get(orderNumber) ?? 0) + 1);
+    }
+    assert.equal(numberCounts.size, totalOrders / 2, "each order number must appear on both branches");
+    for (const [orderNumber, count] of numberCounts) {
+      assert.equal(count, 2, `order ${orderNumber} must appear exactly twice (once per branch)`);
+    }
+    assert.equal(insertedIds.length, totalOrders);
+  });
 });

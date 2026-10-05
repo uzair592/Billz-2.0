@@ -450,6 +450,14 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
      * the CSV export is complete regardless of how many orders match. The
      * interactive endpoint keeps its 200-row cap; the export paginates
      * internally with its own page size and never weakens that cap.
+     *
+     * Pagination is keyset-based on the deterministic total ordering
+     * (business_date ASC, order_number ASC, id ASC). The `id` column is
+     * a UUID and therefore unique, so the ordering is a total order even
+     * when two orders share a business_date and order_number (for example
+     * across branches). Keyset pagination cannot skip or duplicate a row
+     * when a concurrent insert lands between pages, unlike OFFSET, which
+     * shifts the window and can drop or repeat rows.
      */
     async *iterSalesReportRows({ tenant, filters = {} }) {
       const restaurantId = tenant.restaurant.id;
@@ -458,10 +466,12 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       const orderType = filters.orderType || null;
       const paymentMethod = filters.paymentMethod || null;
       const pageSize = 500;
-      let page = 1;
+
+      // Keyset cursor: the last (business_date, order_number, id) seen.
+      // Null on the first page, which has no lower bound.
+      let cursor = null;
 
       for (;;) {
-        const offset = (page - 1) * pageSize;
         const rows = await withTenantTransaction(
           pool,
           { restaurantId, userId: tenant.membership.userId },
@@ -476,21 +486,40 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
               tableName: "o",
             });
             const values = params.values;
+
+            // Keyset predicate: strictly after the cursor in the
+            // total ordering (business_date, order_number, id).
+            // Each column is compared with an explicit cast so the
+            // bound is exact even when business_date or order_number
+            // repeat across branches. The id is a UUID and therefore
+            // unique, making the ordering a total order.
+            let keysetClause = "";
+            if (cursor) {
+              const dateParam = params.add(cursor.businessDate);
+              const numberParam = params.add(cursor.orderNumber);
+              const idParam = params.add(cursor.id);
+              keysetClause = ` AND (
+                   o.business_date > ${dateParam}
+                   OR (o.business_date = ${dateParam} AND o.order_number > ${numberParam}::bigint)
+                   OR (o.business_date = ${dateParam} AND o.order_number = ${numberParam}::bigint AND o.id > ${idParam}::uuid)
+                 )`;
+            }
+
             const res = await client.query(
               `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
                       o.total_minor, o.business_date, o.ordered_at,
                       COALESCE(ref.refund_total, 0) AS refunded_minor
                  FROM orders o
-            LEFT JOIN (
-                    SELECT order_id, SUM(total_refunded_minor) AS refund_total
-                      FROM order_refunds
-                     WHERE restaurant_id = $1 AND status = 'completed'
-                     GROUP BY order_id
-                 ) ref ON ref.order_id = o.id
-                WHERE ${scopeWhere}
-                ORDER BY o.business_date ASC, o.order_number ASC
-                LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
-              [...values, pageSize, offset],
+           LEFT JOIN (
+                     SELECT order_id, SUM(total_refunded_minor) AS refund_total
+                       FROM order_refunds
+                      WHERE restaurant_id = $1 AND status = 'completed'
+                      GROUP BY order_id
+                  ) ref ON ref.order_id = o.id
+                WHERE ${scopeWhere}${keysetClause}
+                ORDER BY o.business_date ASC, o.order_number ASC, o.id ASC
+                LIMIT $${values.length + 1}`,
+              [...values, pageSize],
             );
             return res.rows;
           },
@@ -499,7 +528,14 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
         if (rows.length === 0) return;
         yield rows;
         if (rows.length < pageSize) return;
-        page += 1;
+
+        // Advance the cursor to the last row of this page.
+        const last = rows[rows.length - 1];
+        cursor = {
+          businessDate: last.business_date,
+          orderNumber: last.order_number,
+          id: last.id,
+        };
       }
     },
 
@@ -508,19 +544,42 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
      * The export paginates through the complete filtered range via
      * iterSalesReportRows, so it never truncates at the interactive
      * endpoint's 200-row limit.
+     *
+     * The filtered scope is resolved ONCE here and reused for the
+     * metrics report, the row iterator, and the CSV date-range
+     * heading. When the caller omits startDate/endDate, the
+     * restaurant's current business day (in its configured timezone)
+     * is resolved up front so the metrics, the streamed rows, and the
+     * heading all describe the same range instead of the metrics
+     * defaulting to today while the iterator receives undefined.
      */
     async exportSalesReportCsv({ tenant, filters = {} }) {
+      const timezone = filters.timezone || tenant.restaurant.timezone || "Asia/Karachi";
+      const todayStr = businessDateInTimezone(clock(), timezone);
+
+      // Resolve the export scope once. Omitted dates default to the
+      // restaurant's current business day, exactly as the interactive
+      // report does, so the iterator and the heading agree with the
+      // metrics.
+      const resolvedFilters = {
+        ...filters,
+        startDate: filters.startDate || todayStr,
+        endDate: filters.endDate || todayStr,
+        orderType: filters.orderType || null,
+        paymentMethod: filters.paymentMethod || null,
+      };
+
       // Metrics, breakdowns, and trends come from the same filtered scope.
       const report = await this.getSalesReport({
         tenant,
-        filters: { ...filters, page: 1, limit: 50 },
+        filters: { ...resolvedFilters, page: 1, limit: 50 },
       });
 
       const lines = [];
       // BOM for UTF-8 compatibility in MS Excel
       lines.push("﻿Sales Report Export");
       lines.push(`Restaurant,${sanitizeCsvValue(report.restaurant.name)}`);
-      lines.push(`Date Range,${sanitizeCsvValue(report.filters.startDate)} to ${sanitizeCsvValue(report.filters.endDate)}`);
+      lines.push(`Date Range,${sanitizeCsvValue(resolvedFilters.startDate)} to ${sanitizeCsvValue(resolvedFilters.endDate)}`);
       lines.push(`Generated At,${sanitizeCsvValue(clock().toISOString())}`);
       lines.push("");
 
@@ -562,10 +621,13 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       // which is not bounded by the interactive 200-row limit.
       lines.push("DETAILED SALES ROWS");
       lines.push("Order Number,Business Date,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
-      for await (const rows of this.iterSalesReportRows({ tenant, filters })) {
+      for await (const rows of this.iterSalesReportRows({ tenant, filters: resolvedFilters })) {
         for (const row of rows) {
           const total = minor(row.total_minor);
-          const ref = minor(row.refund_total);
+          // The iterator aliases the refund sum as `refunded_minor`;
+          // read that same property so the refunded and net columns
+          // reflect the actual refund total for the order.
+          const ref = minor(row.refunded_minor);
           const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
           lines.push(
             [

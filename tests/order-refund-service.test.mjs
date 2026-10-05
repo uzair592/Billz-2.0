@@ -1211,4 +1211,288 @@ describe("Order Refund Service (Unit Tests)", () => {
       90000,
     );
   });
+
+  it("excludes zero-value tender inserts for a one-minor-unit refund across two equal tenders", async () => {
+    // Two equal tenders of 50000 each. A 1-minor-unit refund
+    // allocates 1 to the first tender and 0 to the second.
+    // The zero allocation must NOT be inserted.
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 50000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const res = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "11111111-0000-4000-8000-000000000001",
+        reason: "One minor unit across equal tenders",
+        amountMinor: 1,
+      },
+    });
+
+    assert.equal(res.refund.totalRefundedMinor, 1);
+    // Only the non-zero allocation is inserted.
+    assert.equal(state.refundTenders.length, 1, "only one tender row must be inserted");
+    const insertedTender = state.refundTenders[0];
+    assert.equal(Number(insertedTender.amount_minor), 1);
+    assert.ok(Number(insertedTender.amount_minor) > 0, "no zero-value tender may be inserted");
+    // The positive allocations still sum exactly to the refund.
+    const sum = state.refundTenders.reduce((s, t) => s + Number(t.amount_minor), 0);
+    assert.equal(sum, 1);
+  });
+
+  it("excludes zero-value tender inserts when the refund is smaller than the number of tenders", async () => {
+    // Three tenders; a 2-minor-unit refund allocates to only
+    // two of them. The third (zero) allocation is excluded.
+    const threePayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 30000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 30000,
+      },
+      {
+        id: "66666666-6666-4666-a666-666666666668",
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "other",
+        status: "captured",
+        amount_minor: 30000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: threePayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const res = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "22222222-0000-4000-8000-000000000001",
+        reason: "Refund smaller than tender count",
+        amountMinor: 2,
+      },
+    });
+
+    assert.equal(res.refund.totalRefundedMinor, 2);
+    // Two non-zero allocations, one zero excluded.
+    assert.equal(state.refundTenders.length, 2, "two tender rows must be inserted");
+    for (const tender of state.refundTenders) {
+      assert.ok(Number(tender.amount_minor) > 0, "no zero-value tender may be inserted");
+    }
+    const sum = state.refundTenders.reduce((s, t) => s + Number(t.amount_minor), 0);
+    assert.equal(sum, 2, "positive allocations must sum exactly to the refund");
+  });
+
+  it("allocates an uneven three-tender refund without zero rows", async () => {
+    // 10000 across 30000/30000/40000 (total 100000):
+    // exact shares are 3000/3000/4000 — all non-zero.
+    const unevenPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 30000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 30000,
+      },
+      {
+        id: "66666666-6666-4666-a666-666666666668",
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "other",
+        status: "captured",
+        amount_minor: 40000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: unevenPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const res = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "33333333-0000-4000-8000-000000000001",
+        reason: "Uneven three-tender refund",
+        amountMinor: 10000,
+      },
+    });
+
+    assert.equal(res.refund.totalRefundedMinor, 10000);
+    assert.equal(state.refundTenders.length, 3);
+    const amounts = state.refundTenders
+      .map((t) => Number(t.amount_minor))
+      .sort((a, b) => a - b);
+    assert.deepEqual(amounts, [3000, 3000, 4000]);
+    const sum = amounts.reduce((s, a) => s + a, 0);
+    assert.equal(sum, 10000);
+  });
+
+  it("writes no zero-value ledger entries for excluded tenders", async () => {
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 50000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input: {
+        idempotencyKey: "44444444-0000-4000-8000-000000000001",
+        reason: "No zero ledger entries",
+        amountMinor: 1,
+      },
+    });
+
+    // Only one ledger entry (for the single non-zero tender).
+    assert.equal(state.ledgerEntries.length, 1);
+    // The ledger entry amount is positive.
+    assert.ok(Number(state.ledgerEntries[0][4]) > 0);
+  });
+
+  it("replays a zero-excluded allocation deterministically", async () => {
+    const splitPayments = [
+      {
+        id: PAYMENT_ID,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "cash",
+        status: "captured",
+        amount_minor: 50000,
+      },
+      {
+        id: PAYMENT_ID_2,
+        restaurant_id: RESTAURANT_ID,
+        order_id: ORDER_ID,
+        financial_account_id: ACCOUNT_ID,
+        payment_method: "bank_account",
+        status: "captured",
+        amount_minor: 50000,
+      },
+    ];
+
+    const { pool, state } = createMockPool({
+      order: sampleOrder,
+      orderItems: sampleItems,
+      payments: splitPayments,
+    });
+
+    const service = createOrderRefundService(pool);
+    const input = {
+      idempotencyKey: "55555555-0000-4000-8000-000000000001",
+      reason: "Replay zero-excluded",
+      amountMinor: 1,
+    };
+    const first = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input,
+    });
+    const replay = await service.createRefund({
+      tenant,
+      userId: tenant.membership.userId,
+      orderId: sampleOrder.id,
+      input,
+    });
+
+    assert.equal(replay.replayed, true);
+    // The replayed tender allocation is identical.
+    assert.equal(first.refund.tenders.length, 1);
+    assert.equal(replay.refund.tenders.length, 1);
+    assert.equal(
+      Number(replay.refund.tenders[0].amountMinor),
+      Number(first.refund.tenders[0].amountMinor),
+    );
+    assert.equal(Number(replay.refund.tenders[0].amountMinor), 1);
+    // Only one refund was persisted.
+    assert.equal(state.refunds.length, 1);
+    // Only one tender row was persisted.
+    assert.equal(state.refundTenders.length, 1);
+  });
 });

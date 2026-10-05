@@ -132,7 +132,12 @@ function refundSuccess(overrides = {}) {
 
 function salesReportPayload(overrides = {}) {
   return {
-    restaurant: { id: RESTAURANT_ID, name: "Test Restaurant", currencyCode: "PKR" },
+    restaurant: {
+      id: RESTAURANT_ID,
+      name: "Test Restaurant",
+      currencyCode: "PKR",
+      timezone: "Asia/Karachi",
+    },
     filters: { startDate: "2026-10-03", endDate: "2026-10-03" },
     metrics: {
       grossSalesMinor: 300000,
@@ -237,17 +242,36 @@ function mockApi(page, handler) {
 }
 
 /** Records every dialog and accepts it so assertions can
- *  inspect the messages without blocking the page. A dialog
- *  that arrives after the test has finished (for example the
- *  success alert once the final assertion has passed) must
- *  not fail the test, so a late accept is swallowed. */
+ *  inspect the messages without blocking the page.
+ *
+ *  Unlike a blanket swallow, an accept failure is surfaced
+ *  on the returned tracker so a test that expects a dialog
+ *  can await its acceptance and detect a real failure. Tests
+ *  that do NOT expect a dialog can assert `dialogs` stays
+ *  empty, so an unexpected dialog fails the test instead of
+ *  being silently accepted. */
 function recordDialogs(page) {
   const dialogs = [];
+  const accepts = [];
   page.on("dialog", (dialog) => {
     dialogs.push(dialog.message());
-    dialog.accept().catch(() => {});
+    accepts.push(
+      dialog
+        .accept()
+        .then(() => true)
+        .catch((error) => {
+          accepts.push(Promise.reject(error));
+          return false;
+        }),
+    );
   });
-  return dialogs;
+  return {
+    messages: dialogs,
+    /** Resolves once every recorded dialog has been accepted. */
+    allAccepted: () => Promise.all(accepts),
+    /** True once at least one dialog has been accepted. */
+    acceptedCount: () => accepts.filter(Boolean).length,
+  };
 }
 
 /** Reads the cloud-sync outbox straight from IndexedDB. */
@@ -379,10 +403,10 @@ test("a partial item refund posts the quantity, reason and restock flag", async 
     request.headers()["idempotency-key"],
   );
   await expect
-    .poll(() => dialogs.some((message) => message.includes("REF-101-1")))
+    .poll(() => dialogs.messages.some((message) => message.includes("REF-101-1")))
     .toBeTruthy();
   await expect
-    .poll(() => dialogs.some((message) => message.includes("completed successfully")))
+    .poll(() => dialogs.messages.some((message) => message.includes("completed successfully")))
     .toBeTruthy();
 });
 
@@ -433,7 +457,8 @@ test("a refund reason is mandatory", async ({ page }) => {
 
 test("restock can be switched off before submitting", async ({ page }) => {
   const refundPosts = [];
-  recordDialogs(page);
+  const dialogs = recordDialogs(page);
+  let refundedCallbackCount = 0;
   mockApi(page, (route, url) => {
     if (url.pathname === `/api/pos/orders/${ORDER_ID}`) {
       return route.fulfill({ json: cloudOrderDetail() });
@@ -450,6 +475,17 @@ test("restock can be switched off before submitting", async ({ page }) => {
 
   await openPos(page);
   await configureCloud(page);
+
+  // Spy on the success callback (renderOrdersHistory) so the
+  // test can prove the success flow ran to completion.
+  await page.evaluate(() => {
+    window.__refundedCallbackCount = 0;
+    const original = window.renderOrdersHistory;
+    window.renderOrdersHistory = function (...args) {
+      window.__refundedCallbackCount += 1;
+      return original?.apply(this, args);
+    };
+  });
 
   const pending = page.evaluate(
     (orderId) => window.openRefundModal(orderId),
@@ -472,6 +508,18 @@ test("restock can be switched off before submitting", async ({ page }) => {
 
   expect(refundPosts).toHaveLength(1);
   expect(refundPosts[0].items[0].restock).toBe(false);
+
+  // The full success flow completed: the success dialog was
+  // shown and accepted, the modal closed, and the success
+  // callback (renderOrdersHistory) ran.
+  await expect
+    .poll(() => dialogs.messages.some((message) => message.includes("REF-101-1")))
+    .toBeTruthy();
+  await expect.poll(() => dialogs.acceptedCount()).toBeGreaterThanOrEqual(1);
+  await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => window.__refundedCallbackCount))
+    .toBeGreaterThanOrEqual(1);
 });
 
 test("a second submit while one is in flight is ignored", async ({ page }) => {
@@ -526,7 +574,7 @@ test("a second submit while one is in flight is ignored", async ({ page }) => {
   expect(refundPosts).toHaveLength(1);
   // The single in-flight attempt completes and reports success.
   await expect
-    .poll(() => dialogs.some((message) => message.includes("REF-101-1")))
+    .poll(() => dialogs.messages.some((message) => message.includes("REF-101-1")))
     .toBeTruthy();
 });
 
@@ -563,7 +611,7 @@ test("a replayed refund reports the replay instead of a new refund", async ({ pa
   await pending;
 
   await expect
-    .poll(() => dialogs.some((message) => message.includes("replayed")))
+    .poll(() => dialogs.messages.some((message) => message.includes("replayed")))
     .toBeTruthy();
 });
 
@@ -604,12 +652,12 @@ test("a 403 refusal is reported inline without closing the modal", async ({ page
   await expect(page.locator("#refund-error-msg")).toContainText("permission");
   // The button is re-armed so the operator can retry or fix the session.
   await expect(page.locator("#refund-submit-btn")).toBeEnabled();
-  expect(dialogs).toHaveLength(0);
+  expect(dialogs.messages).toHaveLength(0);
 });
 
 test("a 409 over-refund is reported inline and the retry reuses the idempotency key", async ({ page }) => {
   const refundPosts = [];
-  recordDialogs(page);
+  const dialogs = recordDialogs(page);
   let call = 0;
   mockApi(page, (route, url) => {
     if (url.pathname === `/api/pos/orders/${ORDER_ID}`) {
@@ -640,6 +688,17 @@ test("a 409 over-refund is reported inline and the retry reuses the idempotency 
 
   await openPos(page);
   await configureCloud(page);
+
+  // Spy on the success callback (renderOrdersHistory) so the
+  // test can prove the retry's success flow ran to completion.
+  await page.evaluate(() => {
+    window.__refundedCallbackCount = 0;
+    const original = window.renderOrdersHistory;
+    window.renderOrdersHistory = function (...args) {
+      window.__refundedCallbackCount += 1;
+      return original?.apply(this, args);
+    };
+  });
 
   const pending = page.evaluate(
     (orderId) => window.openRefundModal(orderId),
@@ -676,6 +735,18 @@ test("a 409 over-refund is reported inline and the retry reuses the idempotency 
   expect(refundPosts[1].headers["idempotency-key"]).toBe(
     refundPosts[0].headers["idempotency-key"],
   );
+
+  // The retry's success flow completed: the success dialog was
+  // shown and accepted, the modal closed, and the success
+  // callback (renderOrdersHistory) ran.
+  await expect
+    .poll(() => dialogs.messages.some((message) => message.includes("REF-101-1")))
+    .toBeTruthy();
+  await expect.poll(() => dialogs.acceptedCount()).toBeGreaterThanOrEqual(1);
+  await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => window.__refundedCallbackCount))
+    .toBeGreaterThanOrEqual(1);
 });
 
 test("opening the refund modal offline refuses with a clear message", async ({ page }) => {
@@ -691,7 +762,7 @@ test("opening the refund modal offline refuses with a clear message", async ({ p
   );
 
   await expect
-    .poll(() => dialogs.some((message) => message.includes("offline")))
+    .poll(() => dialogs.messages.some((message) => message.includes("offline")))
     .toBeTruthy();
   await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
 });
@@ -1067,16 +1138,7 @@ test("the payment-method filter persists across pagination", async ({ page }) =>
 });
 
 test("a refund success dialog is accepted exactly once and does not block", async ({ page }) => {
-  const dialogs = [];
-  let acceptCount = 0;
-  page.on("dialog", (dialog) => {
-    dialogs.push(dialog.message());
-    // The proper flow: await the accept so the dialog is fully
-    // dismissed before the test continues.
-    dialog.accept().then(() => {
-      acceptCount += 1;
-    }).catch(() => {});
-  });
+  const dialogs = recordDialogs(page);
 
   mockApi(page, (route, url) => {
     if (url.pathname === `/api/pos/orders/${ORDER_ID}`) {
@@ -1108,9 +1170,9 @@ test("a refund success dialog is accepted exactly once and does not block", asyn
 
   // The success dialog was shown and accepted exactly once.
   await expect
-    .poll(() => dialogs.some((message) => message.includes("REF-101-1")))
+    .poll(() => dialogs.messages.some((message) => message.includes("REF-101-1")))
     .toBeTruthy();
-  await expect.poll(() => acceptCount).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => dialogs.acceptedCount()).toBeGreaterThanOrEqual(1);
   // The page is not blocked: the modal closed cleanly.
   await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
 });

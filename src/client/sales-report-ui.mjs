@@ -46,11 +46,62 @@ function formatDateInTimezone(instant, timeZone) {
   }).format(instant);
 }
 
-/** Adds/subtracts whole calendar days in the restaurant's timezone by
- *  shifting the instant by the day count and re-formatting in-zone. */
-function shiftDateInTimezone(instant, timeZone, dayDelta) {
-  const shifted = new Date(instant.getTime() + dayDelta * 24 * 60 * 60 * 1000);
-  return formatDateInTimezone(shifted, timeZone);
+/** Parses a YYYY-MM-DD string into its calendar components. */
+function parseCalendarDate(dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+  };
+}
+
+/** Formats calendar components back into a YYYY-MM-DD string. */
+function formatCalendarDate(year, month, day) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/**
+ * Adds (or subtracts) whole calendar days to a YYYY-MM-DD date using
+ * true calendar arithmetic via the proleptic Gregorian day-number
+ * formula. This is correct across daylight-saving transitions and
+ * month/year boundaries, unlike adding 24-hour instants, which can
+ * skip or repeat a calendar day when the offset changes.
+ *
+ * The algorithm converts the date to an absolute day number (the
+ * Howard Hinnant civil-from-days / days-from-civil pair), adds the
+ * delta, and converts back. It never touches the clock or timezone,
+ * so a DST spring-forward or fall-back cannot shift the result.
+ */
+function shiftCalendarDate(dateStr, dayDelta) {
+  const parsed = parseCalendarDate(dateStr);
+  if (!parsed) return dateStr;
+
+  // Days from civil (Howard Hinnant's algorithm).
+  const { year, month, day } = parsed;
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yoe = y - era * 400;
+  const doy = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  const dayNumber = era * 146097 + doe - 719468;
+
+  // Civil from days.
+  const shifted = dayNumber + dayDelta;
+  const z = shifted + 719468;
+  const era2 = Math.floor(z / 146097);
+  const doe2 = z - era2 * 146097;
+  const yoe2 = Math.floor((doe2 - Math.floor(doe2 / 1460) + Math.floor(doe2 / 36524) - Math.floor(doe2 / 146096)) / 365);
+  const y2 = yoe2 + era2 * 400;
+  const doy2 = doe2 - (365 * yoe2 + Math.floor(yoe2 / 4) - Math.floor(yoe2 / 100));
+  const mp = Math.floor((5 * doy2 + 2) / 153);
+  const d2 = doy2 - Math.floor((153 * mp + 2) / 5) + 1;
+  const m2 = mp + (mp < 10 ? 3 : -9);
+  const year2 = y2 + (m2 <= 2 ? 1 : 0);
+
+  return formatCalendarDate(year2, m2, d2);
 }
 
 export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Karachi" } = {}) {
@@ -65,10 +116,16 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     limit: 50,
   };
 
-  // The restaurant's configured timezone, taken from the report response
-  // when the server provides one so presets always match the server's
-  // business-date calendar.
+  // The restaurant's configured timezone. It starts as the
+  // constructor default and is replaced by the value the server
+  // reports in its first response, so presets always match the
+  // restaurant's own business-date calendar. Until the first
+  // response arrives, the initial request omits startDate/endDate
+  // entirely and lets the server resolve the restaurant's current
+  // business day — the UI never assumes a timezone it has not
+  // observed.
   let activeTimezone = restaurantTimezone;
+  let hasObservedTimezone = false;
 
   // Monotonic request token: a response is only rendered when it belongs
   // to the most recent request, so a slow older request can never
@@ -76,28 +133,30 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
   let requestToken = 0;
 
   function getPresetDates(preset) {
-    const now = new Date();
     const zone = activeTimezone;
 
     switch (preset) {
       case "yesterday": {
-        const y = shiftDateInTimezone(now, zone, -1);
+        // Calendar-day arithmetic, correct across DST transitions.
+        const today = formatDateInTimezone(new Date(), zone);
+        const y = shiftCalendarDate(today, -1);
         return { startDate: y, endDate: y };
       }
       case "last7days": {
-        const start = shiftDateInTimezone(now, zone, -6);
-        return { startDate: start, endDate: formatDateInTimezone(now, zone) };
+        const today = formatDateInTimezone(new Date(), zone);
+        const start = shiftCalendarDate(today, -6);
+        return { startDate: start, endDate: today };
       }
       case "month": {
         // First day of the current calendar month in the restaurant's
         // timezone, derived from the in-zone today string.
-        const todayStr = formatDateInTimezone(now, zone);
+        const todayStr = formatDateInTimezone(new Date(), zone);
         const monthStart = `${todayStr.substring(0, 8)}01`;
         return { startDate: monthStart, endDate: todayStr };
       }
       case "today":
       default: {
-        const today = formatDateInTimezone(now, zone);
+        const today = formatDateInTimezone(new Date(), zone);
         return { startDate: today, endDate: today };
       }
     }
@@ -105,6 +164,11 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
 
   function renderSkeleton() {
     if (!containerEl) return;
+    // Preserve the operator's current filter selections so a
+    // reload (initial load, pagination, or filter change) does
+    // not reset the visible controls to their defaults.
+    const { startDate, endDate, orderType, paymentMethod, preset } = currentFilters;
+    const selectedPreset = preset || "today";
     containerEl.innerHTML = `
       <div style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:20px; max-width:1200px; margin:0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -122,28 +186,28 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         <!-- Date Controls & Filter Bar -->
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
           <div style="display:flex; gap:6px;">
-            <button type="button" class="preset-btn" data-preset="today" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Today</button>
-            <button type="button" class="preset-btn" data-preset="yesterday" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Yesterday</button>
-            <button type="button" class="preset-btn" data-preset="last7days" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Last 7 Days</button>
-            <button type="button" class="preset-btn" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Current Month</button>
+            <button type="button" class="preset-btn${selectedPreset === "today" ? " active" : ""}" data-preset="today" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Today</button>
+            <button type="button" class="preset-btn${selectedPreset === "yesterday" ? " active" : ""}" data-preset="yesterday" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Yesterday</button>
+            <button type="button" class="preset-btn${selectedPreset === "last7days" ? " active" : ""}" data-preset="last7days" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Last 7 Days</button>
+            <button type="button" class="preset-btn${selectedPreset === "month" ? " active" : ""}" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Current Month</button>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <input type="date" id="report-start-date" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <input type="date" id="report-start-date" value="${startDate ? startDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <span style="font-size:13px; color:#64748b;">to</span>
-            <input type="date" id="report-end-date" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <input type="date" id="report-end-date" value="${endDate ? endDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
           </div>
           <div style="display:flex; gap:8px;">
             <select id="report-ordertype-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
-              <option value="">All Order Types</option>
-              <option value="dine_in">Dine In</option>
-              <option value="takeaway">Takeaway</option>
-              <option value="delivery">Delivery</option>
+              <option value=""${orderType === "" ? " selected" : ""}>All Order Types</option>
+              <option value="dine_in"${orderType === "dine_in" ? " selected" : ""}>Dine In</option>
+              <option value="takeaway"${orderType === "takeaway" ? " selected" : ""}>Takeaway</option>
+              <option value="delivery"${orderType === "delivery" ? " selected" : ""}>Delivery</option>
             </select>
             <select id="report-paymentmethod-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
-              <option value="">All Payment Methods</option>
-              <option value="cash">Cash</option>
-              <option value="bank_account">Bank Account</option>
-              <option value="other">Other</option>
+              <option value=""${paymentMethod === "" ? " selected" : ""}>All Payment Methods</option>
+              <option value="cash"${paymentMethod === "cash" ? " selected" : ""}>Cash</option>
+              <option value="bank_account"${paymentMethod === "bank_account" ? " selected" : ""}>Bank Account</option>
+              <option value="other"${paymentMethod === "other" ? " selected" : ""}>Other</option>
             </select>
             <button type="button" id="report-apply-btn" style="padding:6px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;">Apply</button>
           </div>
@@ -353,9 +417,24 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
   async function loadReport() {
     renderSkeleton();
 
-    const dates = currentFilters.preset === "custom"
-      ? { startDate: currentFilters.startDate, endDate: currentFilters.endDate }
-      : getPresetDates(currentFilters.preset);
+    // On the very first load — before the restaurant's timezone
+    // has been observed from any server response — omit the dates
+    // entirely and let the server resolve the restaurant's current
+    // business day in its own timezone. The UI must not assume
+    // Asia/Karachi (or any other zone) for a restaurant that may
+    // be configured differently. Once the first response arrives,
+    // hasObservedTimezone flips and subsequent loads compute dates
+    // in the observed zone.
+    const isInitialLoad = !hasObservedTimezone;
+
+    let dates;
+    if (isInitialLoad) {
+      dates = { startDate: "", endDate: "" };
+    } else if (currentFilters.preset === "custom") {
+      dates = { startDate: currentFilters.startDate, endDate: currentFilters.endDate };
+    } else {
+      dates = getPresetDates(currentFilters.preset);
+    }
 
     currentFilters.startDate = dates.startDate;
     currentFilters.endDate = dates.endDate;
@@ -370,8 +449,10 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
 
     try {
       const report = await salesReportApi.getSalesReport({
-        startDate: currentFilters.startDate,
-        endDate: currentFilters.endDate,
+        // Omit startDate/endDate on the initial load so the server
+        // applies its own business-day default.
+        startDate: currentFilters.startDate || undefined,
+        endDate: currentFilters.endDate || undefined,
         orderType: currentFilters.orderType || undefined,
         paymentMethod: currentFilters.paymentMethod || undefined,
         groupBy: currentFilters.groupBy,
@@ -383,10 +464,30 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       // overwrite the results of a newer filter request.
       if (myToken !== requestToken) return;
 
-      // Adopt the restaurant's configured timezone from the response so
-      // subsequent preset calculations use the server's business calendar.
+      // Adopt the restaurant's configured timezone from the
+      // response so subsequent preset calculations use the
+      // server's business calendar.
       if (report.restaurant?.timezone) {
         activeTimezone = report.restaurant.timezone;
+        hasObservedTimezone = true;
+      }
+      // Only adopt the server-resolved filter dates when the
+      // request omitted them (the initial load). When the
+      // operator chose an explicit range or preset, the
+      // response's dates merely echo the request and must not
+      // overwrite the operator's selection.
+      if (isInitialLoad) {
+        if (report.filters?.startDate) {
+          currentFilters.startDate = report.filters.startDate;
+        }
+        if (report.filters?.endDate) {
+          currentFilters.endDate = report.filters.endDate;
+        }
+        // Reflect the server-resolved dates in the visible inputs.
+        const startInput = containerEl.querySelector("#report-start-date");
+        const endInput = containerEl.querySelector("#report-end-date");
+        if (startInput) startInput.value = currentFilters.startDate;
+        if (endInput) endInput.value = currentFilters.endDate;
       }
 
       renderReportContent(report);

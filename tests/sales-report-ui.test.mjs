@@ -24,6 +24,36 @@ function yesterdayStr() {
   return formatInTimezone(new Date(Date.now() - 24 * 60 * 60 * 1000));
 }
 
+/** Calendar-day arithmetic (proleptic Gregorian day number),
+ *  mirroring the UI's shiftCalendarDate so preset expectations
+ *  stay correct across DST transitions. */
+function shiftCalendarDays(dateStr, dayDelta) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) return dateStr;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yoe = y - era * 400;
+  const doy = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+  const dayNumber = era * 146097 + doe - 719468;
+  const shifted = dayNumber + dayDelta;
+  const z = shifted + 719468;
+  const era2 = Math.floor(z / 146097);
+  const doe2 = z - era2 * 146097;
+  const yoe2 = Math.floor((doe2 - Math.floor(doe2 / 1460) + Math.floor(doe2 / 36524) - Math.floor(doe2 / 146096)) / 365);
+  const y2 = yoe2 + era2 * 400;
+  const doy2 = doe2 - (365 * yoe2 + Math.floor(yoe2 / 4) - Math.floor(yoe2 / 100));
+  const mp = Math.floor((5 * doy2 + 2) / 153);
+  const d2 = doy2 - Math.floor((153 * mp + 2) / 5) + 1;
+  const m2 = mp + (mp < 10 ? 3 : -9);
+  const year2 = y2 + (m2 <= 2 ? 1 : 0);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${year2}-${pad(m2)}-${pad(d2)}`;
+}
+
 function jsonResponse(payload, { status = 200 } = {}) {
   return {
     ok: status >= 200 && status < 300,
@@ -40,7 +70,7 @@ function jsonResponse(payload, { status = 200 } = {}) {
 
 function reportPayload(overrides = {}) {
   return {
-    restaurant: { id: restaurantId, name: "Test Restaurant", currencyCode: "PKR" },
+    restaurant: { id: restaurantId, name: "Test Restaurant", currencyCode: "PKR", timezone: TEST_TIMEZONE },
     filters: { startDate: todayStr(), endDate: todayStr() },
     metrics: {
       grossSalesMinor: 300_000,
@@ -224,11 +254,17 @@ describe("sales report UI", () => {
     assert.equal(requests.length, 1);
     const url = new URL(requests[0].url, "http://localhost");
     assert.equal(url.pathname, "/api/pos/reports/sales");
-    assert.equal(url.searchParams.get("startDate"), todayStr());
-    assert.equal(url.searchParams.get("endDate"), todayStr());
+    // The initial request omits startDate/endDate so the server
+    // resolves the restaurant's current business day in its own
+    // timezone; the UI must not assume a timezone it has not
+    // observed.
+    assert.equal(url.searchParams.get("startDate"), null);
+    assert.equal(url.searchParams.get("endDate"), null);
     assert.equal(url.searchParams.get("groupBy"), "day");
     assert.equal(url.searchParams.get("limit"), "50");
 
+    // After the response, the resolved filter dates from the
+    // server are adopted into the visible inputs.
     assert.equal(startDateInput.value, todayStr());
     assert.equal(endDateInput.value, todayStr());
 
@@ -531,5 +567,109 @@ describe("sales report UI", () => {
     }
 
     assert.match(contentArea.innerHTML, /No orders match the selected filters/);
+  });
+
+  it("preserves orderType and paymentMethod selections after a reload", async () => {
+    const { containerEl, orderTypeSelect, paymentMethodSelect, applyBtn, restore } = setup();
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      // Apply filters.
+      orderTypeSelect.value = "dine_in";
+      paymentMethodSelect.value = "cash";
+      applyBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    // The skeleton re-render must keep the operator's selections.
+    assert.equal(orderTypeSelect.value, "dine_in");
+    assert.equal(paymentMethodSelect.value, "cash");
+  });
+
+  it("preserves the date inputs and selections across pagination", async () => {
+    const { containerEl, startDateInput, endDateInput, orderTypeSelect, paymentMethodSelect, applyBtn, nextPageBtn, restore } = setup({
+      report: reportPayload({
+        detailedRows: {
+          rows: [],
+          pagination: { page: 1, limit: 50, totalRows: 120, totalPages: 3 },
+        },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      // Set a custom range and filters.
+      startDateInput.value = "2026-09-01";
+      endDateInput.value = "2026-09-30";
+      orderTypeSelect.value = "dine_in";
+      paymentMethodSelect.value = "cash";
+      applyBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Move to page 2.
+      nextPageBtn.dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    assert.equal(startDateInput.value, "2026-09-01");
+    assert.equal(endDateInput.value, "2026-09-30");
+    assert.equal(orderTypeSelect.value, "dine_in");
+    assert.equal(paymentMethodSelect.value, "cash");
+  });
+
+  it("computes Yesterday and Last 7 Days with calendar arithmetic across DST", async () => {
+    // A restaurant in America/New_York. The preset dates must be
+    // whole calendar days, computed without 24-hour instant math
+    // that would break across a DST transition.
+    const { requests, containerEl, presetButtons, restore } = setup({
+      report: reportPayload({
+        restaurant: { id: restaurantId, name: "Test Restaurant", currencyCode: "PKR", timezone: "America/New_York" },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      // After the first response the timezone is observed.
+      // Yesterday preset.
+      presetButtons[1].dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    const yesterday = formatInTimezone(new Date(Date.now() - 24 * 60 * 60 * 1000), "America/New_York");
+    const last = requests[requests.length - 1];
+    const url = new URL(last.url, "http://localhost");
+    // The Yesterday preset must be a single calendar day, not a
+    // 24-hour window that could straddle a DST boundary.
+    assert.equal(url.searchParams.get("startDate"), yesterday);
+    assert.equal(url.searchParams.get("endDate"), yesterday);
+  });
+
+  it("adopts a non-Karachi timezone from the first response", async () => {
+    const { requests, containerEl, presetButtons, restore } = setup({
+      report: reportPayload({
+        restaurant: { id: restaurantId, name: "Test Restaurant", currencyCode: "PKR", timezone: "America/New_York" },
+      }),
+    });
+    try {
+      const ui = createSalesReportUI({ containerEl });
+      await ui.mount();
+      // Last 7 Days preset, computed in the adopted timezone.
+      presetButtons[2].dispatch("click");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      restore();
+    }
+
+    const today = formatInTimezone(new Date(), "America/New_York");
+    const sixDaysAgo = shiftCalendarDays(today, -6);
+    const last = requests[requests.length - 1];
+    const url = new URL(last.url, "http://localhost");
+    assert.equal(url.searchParams.get("startDate"), sixDaysAgo);
+    assert.equal(url.searchParams.get("endDate"), today);
   });
 });
