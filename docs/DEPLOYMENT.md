@@ -47,6 +47,7 @@ application refuses placeholder values in production.
 | `TRUSTED_ORIGINS` | yes | comma-separated exact HTTPS origins, no wildcards |
 | `SESSION_SECRET` | yes | at least 32 random bytes |
 | `PASSWORD_PEPPER` | yes | at least 32 random bytes, different from `SESSION_SECRET` |
+| `MAIL_PROVIDER` | conditional | transactional mail provider name; when absent in production, self-registration is disabled |
 | `PAYMENT_PROVIDER` | yes | `stripe` or `manual` |
 | `STRIPE_SECRET_KEY` | conditional | required when `PAYMENT_PROVIDER=stripe` |
 | `STRIPE_WEBHOOK_SECRET` | conditional | required when `PAYMENT_PROVIDER=stripe` |
@@ -116,6 +117,27 @@ https://<your-domain>/webhook
 The endpoint verifies the raw request body against
 `STRIPE_WEBHOOK_SECRET`. The application never parses and re-serializes
 the webhook body, so the signature remains verifiable.
+
+## 6a. Registration and transactional mail
+
+Transactional email is not implemented. In production, self-registration
+is therefore **disabled by default** unless a real transactional mail
+provider is configured via `MAIL_PROVIDER`. This is deliberate: a
+verification mail that is never delivered would lock a restaurant out of
+its own account.
+
+- The production server starts with registration disabled when no
+  provider is configured.
+- A registration attempt while disabled fails with `503`
+  `REGISTRATION_DISABLED` and never creates a pending user.
+- The production mailer never logs verification tokens or passwords.
+- Bootstrap-created owners are written directly by the bootstrap CLI and
+  are not self-registrations, so they are unaffected.
+- Development keeps the existing logging mailer behavior.
+
+To enable self-registration in production, configure a real transactional
+mail provider and set `MAIL_PROVIDER` to its name. Until then, create
+owners with the bootstrap CLI (section 9).
 
 ## 7. Add a custom domain and configure DNS
 

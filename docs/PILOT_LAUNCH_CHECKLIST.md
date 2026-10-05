@@ -10,6 +10,7 @@ Go-live checklist for the first production restaurant pilot.
 - [ ] `SESSION_SECRET` generated (32+ random bytes)
 - [ ] `PASSWORD_PEPPER` generated (32+ random bytes, differs from session secret)
 - [ ] `TRUSTED_ORIGINS` set to the production HTTPS origin(s)
+- [ ] `MAIL_PROVIDER` configured if self-registration is required (otherwise registration is disabled in production)
 - [ ] `PAYMENT_PROVIDER` set to `stripe` (or `manual` for a no-payment pilot)
 - [ ] Stripe keys configured and test-mode verified (if Stripe)
 - [ ] Provider-managed automated backups enabled (point-in-time recovery)

@@ -85,14 +85,20 @@ Restore into a separately specified target database:
 node src/server/database/backup-restore.mjs restore
 ```
 
-with `DATABASE_URL`, `TARGET_DATABASE`, and `BACKUP_PATH`.
+with `DATABASE_URL` (the backup source), `TARGET_DATABASE_URL`
+(a full `postgresql://` connection string for the restore
+destination), and `BACKUP_PATH`.
 
-- The target must be specified explicitly; the tool refuses an
-  ambiguous or missing target.
+- The target must be a full connection string, not a bare
+  database name; the tool refuses an ambiguous or missing target.
+- The source and target are parsed and validated, and restoring a
+  database onto itself (same host, port, and database) is refused.
 - The tool restores with `--clean --if-exists` so a re-restore is
   deterministic.
-- Verification queries run after restoration and report the table
-  count.
+- Verification queries run against the **target** after
+  restoration and report the table count; a target with no
+  application tables fails the restore.
+- Credentials are redacted from every log, error, and JSON result.
 - Never restore over the live production database directly; restore
   into a new database, verify, then repoint the application.
 
@@ -154,6 +160,9 @@ Send `SIGTERM` (or `SIGINT`) to the application process. The server:
 3. closes Fastify and the PostgreSQL pool cleanly,
 4. exits with code `0`.
 
-If the process does not exit within the grace period, it force-exits
-with code `0`. Do not use `SIGKILL` unless the process is unresponsive
-to `SIGTERM`.
+If the process does not exit within the grace period, it
+force-exits with a **non-zero** code so the platform records
+the abnormal termination. An `unhandledRejection` or
+`uncaughtException` triggers an orderly shutdown and exits
+with a non-zero code. Do not use `SIGKILL` unless the
+process is unresponsive to `SIGTERM`.

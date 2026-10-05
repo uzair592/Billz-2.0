@@ -71,6 +71,11 @@ node src/server/bootstrap-first-restaurant.mjs
   and the configured pepper. The hash is stored, never printed.
 - **No secret output.** The CLI logs the restaurant slug, IDs, and
   owner email — never the password or its hash.
+- **Not a self-registration.** Bootstrap writes the owner directly,
+  so it is unaffected by the production self-registration policy
+  (which disables self-registration when no transactional mail
+  provider is configured). See DEPLOYMENT.md, "Registration and
+  transactional mail".
 - **Idempotent.** Re-running with the same identifiers does not create
   duplicates; the restaurant, branch, owner, and membership are
   matched by their natural keys.
