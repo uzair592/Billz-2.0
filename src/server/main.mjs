@@ -7,6 +7,10 @@ import { createAuthService } from "./auth/auth-service.mjs";
 import { createPostgresAuthRepository } from "./auth/postgres-auth-repository.mjs";
 import { createTenantContextService } from "./tenancy/tenant-context-service.mjs";
 import { createLoggingMailer } from "./mail/logging-mailer.mjs";
+import {
+  createPolicyMailer,
+  resolveRegistrationPolicy,
+} from "./mail/mail-policy.mjs";
 import { createOrderRefundService } from "./pos/order-refund-service.mjs";
 import { createSalesReportService } from "./pos/sales-report-service.mjs";
 import {
@@ -76,12 +80,24 @@ export async function createServer({
     trustedOrigins: config.trustedOrigins,
   });
 
+  // Registration and mail policy. Production self-registration is
+  // disabled unless a real transactional mail provider is configured,
+  // so the process can start in production without stranding users.
+  // Bootstrap-created owners are written directly and are unaffected.
+  const registrationPolicy = resolveRegistrationPolicy({
+    nodeEnv: config.nodeEnv,
+    mailProvider: config.mailProvider,
+  });
+
+  const mailer = createPolicyMailer({
+    registrationEnabled: registrationPolicy.registrationEnabled,
+    nodeEnv: config.nodeEnv,
+    log: (payload) => logger.info?.(payload),
+  });
+
   const authService = createAuthService({
     repository: createPostgresAuthRepository(database),
-    mailer: createLoggingMailer({
-      nodeEnv: config.nodeEnv,
-      log: (payload) => logger.info?.(payload),
-    }),
+    mailer,
     passwordPepper: config.pepper,
   });
 
@@ -135,50 +151,79 @@ export async function startServer(options = {}) {
 /**
  * Runs the server as a process with graceful SIGTERM/SIGINT handling.
  *
- * On a termination signal the server stops accepting new connections,
- * gives in-flight requests a grace period, closes Fastify and the
- * PostgreSQL pool cleanly, and exits. Fatal startup errors exit
- * non-zero.
+ * Lifecycle guarantees:
+ *
+ *   * A termination signal stops the server, gives in-flight
+ *     requests a grace period, closes Fastify and the PostgreSQL
+ *     pool cleanly, and exits zero.
+ *   * A startup failure exits non-zero.
+ *   * A forced shutdown after the grace timeout exits non-zero,
+ *     because the process did not shut down cleanly.
+ *   * An unhandled rejection triggers an orderly shutdown and
+ *     exits non-zero, so a latent error never leaves a half-alive
+ *     process behind.
+ *   * Pool and app closure errors are logged without credentials.
+ *   * No timer or connection keeps the process alive after
+ *     shutdown: the force-exit timer is unref'd and cleared, and
+ *     the pool is ended.
  */
 export async function runServer({ env = process.env, logger = console, shutdownGraceMs = 3_000 } = {}) {
   let server = null;
   let shuttingDown = false;
+  let forceExitTimer = null;
 
-  const shutdown = async (signal) => {
+  const shutdown = async (signal, { exitCode = 0 } = {}) => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info?.({ message: "shutdown_initiated", signal });
 
     // Force-exit after the grace period so a lingering keep-alive
-    // connection can never block a deployment from stopping.
-    const forceExit = setTimeout(() => {
+    // connection can never block a deployment from stopping. A
+    // forced shutdown is not a clean shutdown, so it exits
+    // non-zero to signal that the process did not drain in time.
+    forceExitTimer = setTimeout(() => {
       logger.warn?.({ message: "shutdown_forced", signal });
-      process.exit(0);
+      process.exit(exitCode === 0 ? 1 : exitCode);
     }, shutdownGraceMs);
-    forceExit.unref?.();
+    forceExitTimer.unref?.();
 
     if (server) {
       try {
         await server.close();
         logger.info?.({ message: "shutdown_complete" });
       } catch (error) {
+        // Closure errors are logged without credentials. The
+        // error message from Fastify/pg does not include the
+        // connection string, and nothing is added here that does.
         logger.error?.({ message: "shutdown_error", error: error.message });
-        clearTimeout(forceExit);
+        clearTimeout(forceExitTimer);
         process.exit(1);
       }
     }
-    clearTimeout(forceExit);
-    process.exit(0);
+    clearTimeout(forceExitTimer);
+    process.exit(exitCode);
   };
 
   process.on("SIGTERM", () => { void shutdown("SIGTERM"); });
   process.on("SIGINT", () => { void shutdown("SIGINT"); });
 
+  // An unhandled rejection is a latent defect. Shut down
+  // orderly and exit non-zero so the process is not left
+  // half-alive behind a supervisor that only watches signals.
   process.on("unhandledRejection", (reason) => {
     logger.error?.({
       message: "unhandled_rejection",
       error: reason instanceof Error ? reason.message : String(reason),
     });
+    void shutdown("unhandledRejection", { exitCode: 1 });
+  });
+
+  process.on("uncaughtException", (error) => {
+    logger.error?.({
+      message: "uncaught_exception",
+      error: error instanceof Error ? error.message : String(error),
+    });
+    void shutdown("uncaughtException", { exitCode: 1 });
   });
 
   try {

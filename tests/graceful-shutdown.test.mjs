@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { runServer, startServer, createServer } from "../src/server/main.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const databaseUrl = process.env.TEST_DATABASE_ADMIN_URL
   ?? "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test";
@@ -158,6 +162,113 @@ describe("graceful startup and shutdown", () => {
         const { code, signal } = await waitForExit(child);
         assert.equal(signal, null);
         assert.equal(code, 0);
+      } finally {
+        if (child.exitCode === null) child.kill("SIGKILL");
+      }
+    });
+  }
+
+  it("starts a production server with registration disabled", async () => {
+    // Production self-registration is disabled when no mail
+    // provider is configured, but the server must still start so
+    // a pilot can be bootstrapped and operated. Migration
+    // verification is opted out because the shared test database
+    // is provisioned by the CI migration step, not by the
+    // migration runner's history table.
+    const port = 34_800 + Math.floor(Math.random() * 300);
+    const server = await startServer({
+      env: {
+        ...serverEnv,
+        NODE_ENV: "production",
+        TRUSTED_ORIGINS: "https://pos.example.test",
+        MAIL_PROVIDER: "",
+        PORT: String(port),
+      },
+      migrationsDir: null,
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    try {
+      const live = await fetch(`http://127.0.0.1:${port}/health/live`);
+      assert.equal(live.status, 200);
+      const ready = await fetch(`http://127.0.0.1:${port}/health/ready`);
+      assert.equal(ready.status, 200);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects registration in production when disabled", async () => {
+    const port = 34_800 + Math.floor(Math.random() * 300);
+    const server = await startServer({
+      env: {
+        ...serverEnv,
+        NODE_ENV: "production",
+        TRUSTED_ORIGINS: "https://pos.example.test",
+        MAIL_PROVIDER: "",
+        PORT: String(port),
+      },
+      migrationsDir: null,
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://pos.example.test",
+          "sec-fetch-site": "same-origin",
+        },
+        body: JSON.stringify({
+          email: "someone@example.com",
+          password: "long-enough-password",
+          displayName: "Someone",
+          restaurantName: "Restaurant",
+        }),
+      });
+      assert.equal(response.statusCode ?? response.status, 503);
+      const body = await response.json();
+      assert.equal(body.code, "REGISTRATION_DISABLED");
+    } finally {
+      await server.close();
+    }
+  });
+
+  // Deterministic child-process tests for failure and shutdown
+  // behavior. These spawn a tiny harness that imports runServer
+  // and triggers a specific lifecycle event, so the exit code is
+  // observed directly rather than inferred.
+  if (!isWindows) {
+    it("exits non-zero on an unhandled rejection", async () => {
+      const port = 34_800 + Math.floor(Math.random() * 300);
+      const harness = pathToFileURL(
+        path.join(here, "fixtures", "unhandled-rejection-harness.mjs"),
+      ).href;
+      const child = spawn("node", [harness, String(port)], {
+        env: { ...process.env, ...serverEnv, PORT: String(port) },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      try {
+        const { code, signal } = await waitForExit(child);
+        assert.equal(signal, null);
+        assert.notEqual(code, 0);
+      } finally {
+        if (child.exitCode === null) child.kill("SIGKILL");
+      }
+    });
+
+    it("exits non-zero when shutdown is forced after the grace timeout", async () => {
+      const port = 34_800 + Math.floor(Math.random() * 300);
+      const harness = pathToFileURL(
+        path.join(here, "fixtures", "forced-shutdown-harness.mjs"),
+      ).href;
+      const child = spawn("node", [harness, String(port)], {
+        env: { ...process.env, ...serverEnv, PORT: String(port) },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      try {
+        const { code, signal } = await waitForExit(child, 20_000);
+        assert.equal(signal, null);
+        assert.notEqual(code, 0);
       } finally {
         if (child.exitCode === null) child.kill("SIGKILL");
       }

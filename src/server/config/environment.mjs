@@ -180,6 +180,9 @@ export function loadServerConfiguration(env = process.env) {
   const sessionSecret = String(env.SESSION_SECRET ?? "").trim();
   const logLevel = String(env.LOG_LEVEL ?? (nodeEnv === "production" ? "info" : "warn")).trim().toLowerCase();
   const trustProxy = String(env.TRUST_PROXY ?? "false").trim().toLowerCase();
+  // Optional transactional mail provider. When absent in production,
+  // self-registration is disabled so the process can still start.
+  const mailProvider = String(env.MAIL_PROVIDER ?? "").trim();
 
   const missing = [];
   if (!databaseUrl) missing.push("DATABASE_URL");
@@ -238,5 +241,6 @@ export function loadServerConfiguration(env = process.env) {
     secureCookies: trustedOrigins.every((origin) => origin.startsWith("https:")),
     logLevel,
     trustProxy: trustProxyEnabled,
+    mailProvider,
   });
 }
