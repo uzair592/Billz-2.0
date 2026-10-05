@@ -74,14 +74,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run unit tests
+      - name: Run pure unit tests
         shell: bash
         run: |
-          mapfile -t unit_tests < <(find tests -maxdepth 1 -name '*.test.mjs' \
-            ! -name 'billing-postgres.test.mjs' \
-            ! -name 'refund-sales-report-postgres.test.mjs' \
-            ! -name 'server-startup.test.mjs' | sort)
-          node --test "${unit_tests[@]}"
+          # Pure unit tests only. PostgreSQL-dependent suites are
+          # separated into the dedicated postgres step below so they
+          # never run before the database is reachable or with the
+          # wrong connection URL.
+          node tests/run-unit-tests.mjs
 
       - name: Wait for PostgreSQL
         run: |
@@ -105,33 +105,10 @@ jobs:
             psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
           done
 
-      - name: Run migration runner tests
+      - name: Run PostgreSQL-dependent tests
         env:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
-        run: node --test tests/migration-runner.test.mjs
-
-      - name: Run production configuration tests
-        run: node --test tests/production-config.test.mjs
-
-      - name: Run health endpoint tests
-        env:
-          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
-        run: node --test tests/health-endpoints.test.mjs
-
-      - name: Run bootstrap CLI tests
-        env:
-          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
-        run: node --test tests/bootstrap-first-restaurant.test.mjs
-
-      - name: Run graceful shutdown tests
-        env:
-          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
-        run: node --test tests/graceful-shutdown.test.mjs
-
-      - name: Run backup and restore tests
-        env:
-          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
-        run: node --test tests/backup-restore.test.mjs
+        run: node tests/run-postgres-tests.mjs
 
       - name: Run integration tests
         env:
@@ -196,6 +173,13 @@ jobs:
       SMOKE_PEPPER: smoke-pepper-at-least-16-chars
       SMOKE_SESSION: smoke-session-secret-at-least-16
       SMOKE_OWNER_PASSWORD: smoke-password-12345
+      # CI-only Stripe credentials of valid shape. They are never
+      # used to call Stripe: the smoke test only exercises the
+      # webhook signature verification path, which is local HMAC.
+      # They are not placeholders (they are not in the rejected
+      # placeholder set) and they are not real secrets.
+      SMOKE_STRIPE_SECRET_KEY: sk_test_ci_smoke_key_not_a_real_secret
+      SMOKE_STRIPE_WEBHOOK_SECRET: whsec_ci_smoke_webhook_secret_not_real
 
     services:
       postgres:
@@ -276,16 +260,20 @@ jobs:
 
       - name: Start the production container
         env:
-          # The production-built image is exercised here. NODE_ENV is
-          # development for the CI smoke run only, because the runner
-          # has no real HTTPS origin; a real deployment sets
-          # NODE_ENV=production and an HTTPS TRUSTED_ORIGINS value.
-          NODE_ENV: development
+          # The production-built image is exercised in true
+          # production mode: NODE_ENV=production, an HTTPS
+          # trusted origin, and the Stripe adapter configured
+          # with CI-only credentials of valid shape. This
+          # proves the production configuration validation
+          # passes and the server starts under it.
+          NODE_ENV: production
           DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
-          TRUSTED_ORIGINS: http://localhost:3000
+          TRUSTED_ORIGINS: https://pos.example.test
           SESSION_SECRET: ${{ env.SMOKE_SESSION }}
           PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
-          PAYMENT_PROVIDER: manual
+          PAYMENT_PROVIDER: stripe
+          STRIPE_SECRET_KEY: ${{ env.SMOKE_STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
           LOG_LEVEL: info
           PORT: "3000"
           HOST: 0.0.0.0
@@ -297,6 +285,8 @@ jobs:
             -e SESSION_SECRET \
             -e PASSWORD_PEPPER \
             -e PAYMENT_PROVIDER \
+            -e STRIPE_SECRET_KEY \
+            -e STRIPE_WEBHOOK_SECRET \
             -e LOG_LEVEL \
             -e PORT \
             -e HOST \
@@ -342,17 +332,55 @@ jobs:
             exit 1
           fi
 
-      - name: Verify an invalid Stripe webhook is rejected
+      - name: Verify the Stripe webhook path rejects an invalid signature
+        env:
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
         run: |
+          # Exercise the real stripe-signature header and raw-body
+          # verification path. A signature computed with the wrong
+          # key must be rejected with 400, proving the adapter is
+          # wired and verification is enforced.
+          body='{"type":"checkout.session.completed"}'
+          timestamp=$(date +%s)
+          # Compute a signature with a DIFFERENT key so it is invalid.
+          wrong_secret="whsec_wrong_key_for_smoke"
+          payload="${timestamp}.${body}"
+          signature=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$wrong_secret" -hex | sed 's/^.* //')
           status=$(curl -s -o /dev/null -w "%{http_code}" \
             -X POST \
             -H "content-type: application/json" \
-            -H "x-billing-signature: t=1,v1=invalid" \
-            --data '{}' \
+            -H "stripe-signature: t=${timestamp},v1=${signature}" \
+            --data "$body" \
             http://localhost:3000/webhook)
-          echo "Invalid webhook returned $status"
-          if [ "$status" = "200" ]; then
-            echo "An invalid webhook must not be accepted"
+          echo "Invalid stripe-signature returned $status"
+          if [ "$status" != "400" ]; then
+            echo "Expected 400 for an invalid Stripe signature, got $status"
+            exit 1
+          fi
+
+      - name: Verify the Stripe webhook path accepts a valid signature shape
+        env:
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
+        run: |
+          # A correctly signed, well-formed event is accepted (200)
+          # or recorded as processed. The event type below is not a
+          # subscription-moving event, so it is safely ignored after
+          # the signature verifies. This proves the raw-body HMAC
+          # verification succeeds with the configured secret.
+          body='{"id":"evt_smoke","type":"ping","created":'"$(date +%s)"',"data":{"object":{}}}'
+          timestamp=$(date +%s)
+          payload="${timestamp}.${body}"
+          signature=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$STRIPE_WEBHOOK_SECRET" -hex | sed 's/^.* //')
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "content-type: application/json" \
+            -H "stripe-signature: t=${timestamp},v1=${signature}" \
+            --data "$body" \
+            http://localhost:3000/webhook)
+          echo "Valid stripe-signature returned $status"
+          if [ "$status" != "200" ]; then
+            echo "Expected 200 for a validly signed Stripe event, got $status"
+            docker logs pos-smoke
             exit 1
           fi
 
