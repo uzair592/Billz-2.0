@@ -6,6 +6,7 @@ import { bootstrapFirstRestaurant } from "../src/server/bootstrap-first-restaura
 import { hashPassword, verifyPassword } from "../src/server/auth/passwords.mjs";
 import {
   connectAdmin,
+  scratchDatabaseUrl,
 } from "./helpers/postgres.mjs";
 
 const PEPPER = "bootstrap-test-pepper-at-least-16-chars";
@@ -26,7 +27,7 @@ async function dropScratchDatabase(name) {
 
 function scratchPool(databaseName) {
   return new pg.Pool({
-    connectionString: `postgresql://postgres:validation-only@127.0.0.1:55432/${databaseName}`,
+    connectionString: scratchDatabaseUrl(databaseName),
     max: 2,
   });
 }

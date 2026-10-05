@@ -5,10 +5,14 @@ import pg from "pg";
 import { createServer } from "../src/server/main.mjs";
 import {
   connectAdmin,
+  scratchDatabaseUrl,
 } from "./helpers/postgres.mjs";
 
+const adminUrl = process.env.TEST_DATABASE_ADMIN_URL
+  ?? "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test";
+
 const validEnv = {
-  DATABASE_URL: "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test",
+  DATABASE_URL: adminUrl,
   TRUSTED_ORIGINS: "https://pos.example.com",
   PASSWORD_PEPPER: "a-long-enough-pepper-value",
   SESSION_SECRET: "a-different-session-secret",
@@ -63,7 +67,7 @@ describe("health endpoints", () => {
     // schema_migrations history is populated and verification passes.
     const scratchName = await createScratchDatabase();
     const scratchPool = new pg.Pool({
-      connectionString: `postgresql://postgres:validation-only@127.0.0.1:55432/${scratchName}`,
+      connectionString: scratchDatabaseUrl(scratchName),
       max: 2,
     });
     const { runMigrations } = await import("../src/server/database/migration-runner.mjs");
@@ -76,7 +80,7 @@ describe("health endpoints", () => {
 
     const readyEnv = {
       ...validEnv,
-      DATABASE_URL: `postgresql://postgres:validation-only@127.0.0.1:55432/${scratchName}`,
+      DATABASE_URL: scratchDatabaseUrl(scratchName),
     };
     const readyServer = await createServer({
       env: readyEnv,

@@ -15,6 +15,7 @@ import {
   ADMIN_DATABASE_URL,
   connectAdmin,
   provisionIntegrationDatabase,
+  scratchDatabaseUrl,
 } from "./helpers/postgres.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +41,7 @@ async function dropScratchDatabase(name) {
 
 function scratchPool(databaseName) {
   return new pg.Pool({
-    connectionString: `postgresql://postgres:validation-only@127.0.0.1:55432/${databaseName}`,
+    connectionString: scratchDatabaseUrl(databaseName),
     max: 2,
   });
 }

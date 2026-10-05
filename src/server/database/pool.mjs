@@ -13,17 +13,58 @@ import pg from "pg";
  * redacted host/port and the SSL mode are ever reported.
  */
 
-function parseSslConfig(env) {
+/**
+ * Parses DATABASE_SSL_MODE into an explicit, allowlisted SSL
+ * configuration.
+ *
+ * The semantics are deliberately strict so a managed PostgreSQL
+ * connection cannot silently fall back to an insecure mode:
+ *
+ *   * `disable`  -> no `ssl` option at all (plaintext).
+ *   * `require`  -> TLS with `rejectUnauthorized: false`
+ *                   (encrypts but does not verify the chain).
+ *   * `verify-full` -> TLS with `rejectUnauthorized: true`
+ *                   (encrypts and verifies the chain).
+ *   * any other value is rejected.
+ *
+ * `DATABASE_SSL_CA` is only honored for `require` and
+ * `verify-full`; it is ignored for `disable` because there is no
+ * TLS to attach a CA to. The function never returns credentials
+ * or certificate contents — only the pg SSL options.
+ *
+ * @param {object} env - Environment object.
+ * @returns {null|{rejectUnauthorized: boolean, ca?: string}}
+ */
+export function parseSslConfig(env) {
   const mode = String(env.DATABASE_SSL_MODE ?? "").trim().toLowerCase();
   if (!mode) {
-    // Default: managed PostgreSQL requires TLS when a host is remote.
-    // A local socket or localhost connection is left unencrypted.
+    // Default: no explicit SSL mode. The connection is left to
+    // pg's own default (no TLS for a plain connection string).
     return null;
   }
-  const ssl = { rejectUnauthorized: mode !== "disable" };
-  const ca = env.DATABASE_SSL_CA;
-  if (ca) ssl.ca = ca;
-  return ssl;
+  switch (mode) {
+    case "disable":
+      return null;
+    case "require": {
+      const ssl = { rejectUnauthorized: false };
+      const ca = env.DATABASE_SSL_CA;
+      if (ca) ssl.ca = ca;
+      return ssl;
+    }
+    case "verify-full": {
+      const ssl = { rejectUnauthorized: true };
+      const ca = env.DATABASE_SSL_CA;
+      if (ca) ssl.ca = ca;
+      return ssl;
+    }
+    default:
+      throw Object.assign(
+        new Error(
+          `DATABASE_SSL_MODE must be "disable", "require", or "verify-full", not "${mode}".`,
+        ),
+        { code: "CONFIGURATION_INVALID" },
+      );
+  }
 }
 
 function redactUrl(url) {

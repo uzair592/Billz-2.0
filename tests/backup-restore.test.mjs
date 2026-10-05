@@ -9,9 +9,11 @@ import {
   backupDatabase,
   restoreDatabase,
   verifyRestoredDatabase,
+  redactConnectionUrl,
 } from "../src/server/database/backup-restore.mjs";
 import {
   connectAdmin,
+  scratchDatabaseUrl,
 } from "./helpers/postgres.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -46,16 +48,24 @@ async function dropScratchDatabase(name) {
   await admin.end();
 }
 
-function connectionString(databaseName) {
-  return `postgresql://postgres:validation-only@127.0.0.1:55432/${databaseName}`;
+function sourceUrl(databaseName) {
+  return scratchDatabaseUrl(databaseName);
 }
 
-// pg_dump/pg_restore/psql must be available for these tests.
-let toolsAvailable = true;
-try {
-  // eslint-disable-next-line no-empty
-} catch {
-  toolsAvailable = false;
+function targetUrl(databaseName) {
+  return scratchDatabaseUrl(databaseName);
+}
+
+// A capturing logger that records every structured entry so the
+// tests can assert that credentials never appear in any output.
+function capturingLogger() {
+  const entries = [];
+  return {
+    entries,
+    info(entry) { entries.push(JSON.stringify(entry)); },
+    error(entry) { entries.push(JSON.stringify(entry)); },
+    warn(entry) { entries.push(JSON.stringify(entry)); },
+  };
 }
 
 describe("backup and restore", () => {
@@ -72,7 +82,7 @@ describe("backup and restore", () => {
     // content to restore.
     const { runMigrations } = await import("../src/server/database/migration-runner.mjs");
     const pg = (await import("pg")).default;
-    const pool = new pg.Pool({ connectionString: connectionString(sourceName), max: 2 });
+    const pool = new pg.Pool({ connectionString: sourceUrl(sourceName), max: 2 });
     const realDir = path.join(here, "..", "database", "migrations");
     await runMigrations({ pool, migrationsDir: realDir, logger: { info() {} } });
     await pool.end();
@@ -86,7 +96,7 @@ describe("backup and restore", () => {
 
   it("creates a timestamped custom-format backup", { skip: !clientToolsAvailable }, async () => {
     const { backupPath, sizeBytes } = await backupDatabase({
-      databaseUrl: connectionString(sourceName),
+      databaseUrl: sourceUrl(sourceName),
       backupDir,
       logger: { info() {} },
     });
@@ -96,55 +106,180 @@ describe("backup and restore", () => {
     await stat(backupPath);
   });
 
-  it("restores into a separately specified target database", { skip: !clientToolsAvailable }, async () => {
+  it("restores into a separately specified target database and verifies the target", { skip: !clientToolsAvailable }, async () => {
     const { backupPath } = await backupDatabase({
-      databaseUrl: connectionString(sourceName),
+      databaseUrl: sourceUrl(sourceName),
       backupDir,
       logger: { info() {} },
     });
 
-    await restoreDatabase({
-      databaseUrl: connectionString(targetName),
-      targetDatabase: targetName,
+    const logger = capturingLogger();
+    const result = await restoreDatabase({
+      databaseUrl: sourceUrl(sourceName),
+      targetDatabaseUrl: targetUrl(targetName),
       backupPath,
-      logger: { info() {} },
+      logger,
     });
 
-    const verification = await verifyRestoredDatabase({
-      databaseUrl: connectionString(targetName),
-      logger: { info() {} },
-    });
-    assert.equal(verification.ok, true);
-    assert.ok(verification.tableCount > 0);
+    // Verification queried the target and found the restored schema.
+    assert.equal(result.verification.ok, true);
+    assert.ok(result.verification.tableCount > 0);
+    // The result and every log entry are credential-free.
+    const serialized = JSON.stringify(result) + logger.entries.join("\n");
+    assert.ok(!serialized.includes("validation-only"), "password must not appear");
+    assert.ok(!serialized.includes("postgres:validation-only"), "credentialed URL must not appear");
   });
 
-  it("refuses a missing target database", { skip: !clientToolsAvailable }, async () => {
+  it("refuses a missing target connection URL", { skip: !clientToolsAvailable }, async () => {
     const { backupPath } = await backupDatabase({
-      databaseUrl: connectionString(sourceName),
+      databaseUrl: sourceUrl(sourceName),
       backupDir,
       logger: { info() {} },
     });
 
     await assert.rejects(
       () => restoreDatabase({
-        databaseUrl: connectionString(targetName),
-        targetDatabase: "",
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: "",
         backupPath,
         logger: { info() {} },
       }),
-      (error) => error.code === "TARGET_REQUIRED",
+      (error) => error.code === "CONFIGURATION_INVALID",
+    );
+  });
+
+  it("refuses a bare database name as the target", { skip: !clientToolsAvailable }, async () => {
+    const { backupPath } = await backupDatabase({
+      databaseUrl: sourceUrl(sourceName),
+      backupDir,
+      logger: { info() {} },
+    });
+
+    await assert.rejects(
+      () => restoreDatabase({
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: targetName,
+        backupPath,
+        logger: { info() {} },
+      }),
+      (error) => error.code === "CONFIGURATION_INVALID" && /postgresql/.test(error.message),
+    );
+  });
+
+  it("refuses to restore a database onto itself", { skip: !clientToolsAvailable }, async () => {
+    const { backupPath } = await backupDatabase({
+      databaseUrl: sourceUrl(sourceName),
+      backupDir,
+      logger: { info() {} },
+    });
+
+    await assert.rejects(
+      () => restoreDatabase({
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: sourceUrl(sourceName),
+        backupPath,
+        logger: { info() {} },
+      }),
+      (error) => error.code === "SOURCE_EQUALS_TARGET",
+    );
+  });
+
+  it("refuses a source and target that differ only in credentials", { skip: !clientToolsAvailable }, async () => {
+    const { backupPath } = await backupDatabase({
+      databaseUrl: sourceUrl(sourceName),
+      backupDir,
+      logger: { info() {} },
+    });
+
+    // Same host, port, and database, but a different password.
+    const sameDatabaseDifferentPassword = sourceUrl(sourceName).replace(
+      "validation-only",
+      "different-password",
+    );
+
+    await assert.rejects(
+      () => restoreDatabase({
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: sameDatabaseDifferentPassword,
+        backupPath,
+        logger: { info() {} },
+      }),
+      (error) => error.code === "SOURCE_EQUALS_TARGET",
     );
   });
 
   it("refuses a missing backup path", { skip: !clientToolsAvailable }, async () => {
     await assert.rejects(
       () => restoreDatabase({
-        databaseUrl: connectionString(targetName),
-        targetDatabase: targetName,
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: targetUrl(targetName),
         backupPath: "",
         logger: { info() {} },
       }),
       (error) => error.code === "CONFIGURATION_INVALID",
     );
+  });
+
+  it("refuses a backup path that does not exist", { skip: !clientToolsAvailable }, async () => {
+    await assert.rejects(
+      () => restoreDatabase({
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: targetUrl(targetName),
+        backupPath: path.join(backupDir, "does-not-exist.dump"),
+        logger: { info() {} },
+      }),
+      (error) => error.code === "BACKUP_NOT_FOUND",
+    );
+  });
+
+  it("verification fails when the target has no application schema", { skip: !clientToolsAvailable }, async () => {
+    // Create an empty scratch database with no tables.
+    const emptyName = await createScratchDatabase();
+    try {
+      await assert.rejects(
+        () => verifyRestoredDatabase({
+          databaseUrl: targetUrl(emptyName),
+          logger: { info() {} },
+        }),
+        (error) => error.code === "RESTORE_VERIFICATION_FAILED",
+      );
+    } finally {
+      await dropScratchDatabase(emptyName);
+    }
+  });
+
+  it("redacts credentials from a connection URL", () => {
+    const redacted = redactConnectionUrl(
+      "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test",
+    );
+    assert.ok(!redacted.includes("validation-only"));
+    assert.ok(!redacted.includes("postgres:"));
+    assert.ok(redacted.includes("127.0.0.1:55432"));
+    assert.ok(redacted.includes("restaurant_pos_test"));
+  });
+
+  it("redacts credentials from a tool failure message", { skip: !clientToolsAvailable }, async () => {
+    // Force a pg_restore failure against an unreachable target and
+    // confirm the resulting error message carries no credentials.
+    const { backupPath } = await backupDatabase({
+      databaseUrl: sourceUrl(sourceName),
+      backupDir,
+      logger: { info() {} },
+    });
+    const unreachableTarget = "postgresql://postgres:validation-only@127.0.0.1:59999/nonexistent";
+    let message = "";
+    try {
+      await restoreDatabase({
+        databaseUrl: sourceUrl(sourceName),
+        targetDatabaseUrl: unreachableTarget,
+        backupPath,
+        logger: { info() {} },
+      });
+    } catch (error) {
+      message = error.message;
+    }
+    assert.ok(message.length > 0, "a failure message was expected");
+    assert.ok(!message.includes("validation-only"), "password must not appear in the error");
+    assert.ok(!message.includes("postgres:validation-only"), "credentialed URL must not appear");
   });
 });
