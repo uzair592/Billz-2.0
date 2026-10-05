@@ -1,0 +1,5 @@
+# Known non-secret placeholder string in the Milestone 13 commit history.
+# These full fingerprints exempt only the two recorded false positives;
+# all other files, lines, rules, and later commits remain scanned.
+eec1d9299c421721fcbb332f835601110b695173:src/server/config/environment.mjs:stripe-access-token:35
+eec1d9299c421721fcbb332f835601110b695173:tests/production-config.test.mjs:stripe-access-token:140
