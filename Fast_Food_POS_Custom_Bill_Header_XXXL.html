@@ -4878,6 +4878,65 @@
         #history-load-more-btn { width: 100%; }
       }
 
+      /* ── Inventory & Purchases (Milestone 14) ───────────── */
+      #screen-inventory h1, #screen-purchases h1 { font-size: 22px; margin: 0 0 4px; }
+      .inventory-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+      .inventory-header p { margin: 2px 0 0; color: #64748b; font-size: 13px; }
+      .inventory-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+      .inventory-input { display: block; width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; background: #fff; color: #0f172a; }
+      .inventory-input.inventory-search { width: 240px; }
+      .inventory-input:focus { outline: 2px solid #6366f1; outline-offset: 0; border-color: #6366f1; }
+      .inventory-field { margin-bottom: 12px; }
+      .inventory-field label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+      .inventory-field-hint { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+      .inventory-form-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+      .inventory-btn { padding: 8px 14px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #0f172a; font-size: 13px; font-weight: 600; cursor: pointer; }
+      .inventory-btn:hover:not(:disabled) { background: #f1f5f9; }
+      .inventory-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .inventory-btn-primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+      .inventory-btn-primary:hover:not(:disabled) { background: #4338ca; }
+      .inventory-btn-sm { padding: 5px 10px; font-size: 12px; }
+      .inventory-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; font-size: 13px; }
+      .inventory-table th { text-align: left; background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 9px 12px; border-bottom: 1px solid #e2e8f0; }
+      .inventory-table td { padding: 9px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a; vertical-align: middle; }
+      .inventory-table tr:last-child td { border-bottom: none; }
+      .inventory-table tr:hover td { background: #f8fafc; }
+      .inventory-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+      .inventory-pagination { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+      .inventory-empty { padding: 28px 16px; text-align: center; color: #94a3b8; font-size: 14px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px; }
+      .inventory-error { padding: 12px 16px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+      .inventory-loading { padding: 24px; text-align: center; color: #94a3b8; font-size: 13px; }
+      .inventory-low-stock { margin-bottom: 14px; }
+      .inventory-low-stock-list { display: flex; flex-direction: column; gap: 6px; }
+      .inventory-negative { color: #b91c1c; font-weight: 700; }
+      .inventory-history-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin: 18px 0 10px; }
+      .inventory-history-header h2, .inventory-suppliers-header h2 { font-size: 16px; margin: 0; }
+      .inventory-modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; z-index: 10000; padding: 40px 20px; box-sizing: border-box; overflow-y: auto; }
+      .inventory-modal { background: #fff; border-radius: 12px; padding: 20px; width: 100%; max-width: 560px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3); }
+      .inventory-modal-title { font-size: 17px; margin: 0 0 14px; }
+      .inventory-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+      .inventory-modal-item { margin-bottom: 10px; }
+      .inventory-purchase-lines { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+      .inventory-purchase-line { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 8px; align-items: end; }
+      .inventory-purchase-line .inventory-input { margin-bottom: 0; }
+      .inventory-purchase-totals { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; font-size: 13px; margin-top: 12px; }
+      .inventory-purchase-totals dt { color: #64748b; }
+      .inventory-purchase-totals dd { margin: 0; text-align: right; font-weight: 600; color: #0f172a; }
+      .inventory-recipe-rows { display: flex; flex-direction: column; gap: 8px; }
+      .inventory-recipe-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 8px; align-items: end; }
+      .inventory-recipe-unit { font-size: 12px; color: #64748b; padding-bottom: 8px; }
+      .inventory-suppliers { margin-bottom: 20px; }
+      .inventory-suppliers-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+      .inventory-supplier-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .inventory-supplier-row { display: grid; grid-template-columns: 1.4fr 2fr auto; gap: 12px; align-items: center; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 9px 14px; font-size: 13px; }
+      .inventory-supplier-name { font-weight: 600; color: #0f172a; }
+      .inventory-supplier-detail { color: #64748b; font-size: 12px; }
+      .inventory-supplier-status { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #059669; font-weight: 700; }
+      .badge-muted { background: #e2e8f0; color: #475569; }
+      .badge-ok { background: #dcfce7; color: #15803d; }
+      .badge-warning { background: #fef3c7; color: #b45309; }
+      .badge-negative { background: #fee2e2; color: #b91c1c; }
+
 </style>
   </head>
   <body>
@@ -5441,6 +5500,24 @@
           >
             <span class="menu-btn-icon">🥦</span
             ><span class="menu-btn-label">STOCK</span>
+          </button>
+          <button
+            type="button"
+            class="menu-btn"
+            onclick="switchScreen('inventory')"
+            title="Inventory"
+          >
+            <span class="menu-btn-icon">🗄️</span
+            ><span class="menu-btn-label">INVENTORY</span>
+          </button>
+          <button
+            type="button"
+            class="menu-btn"
+            onclick="switchScreen('purchases')"
+            title="Purchases"
+          >
+            <span class="menu-btn-icon">🧾</span
+            ><span class="menu-btn-label">PURCHASES</span>
           </button>
           <button
             type="button"
@@ -12698,6 +12775,14 @@
           </div>
         </section>
 
+        <section id="screen-inventory" class="screen-view hidden">
+          <div id="inventory-screen-container"></div>
+        </section>
+
+        <section id="screen-purchases" class="screen-view hidden">
+          <div id="purchases-screen-container"></div>
+        </section>
+
         
         <div
           id="material-breakdown-modal-overlay"
@@ -15427,6 +15512,18 @@
 
         if (screenId === "billing") {
           globalThis.BiteTechBilling?.renderBilling();
+        }
+
+        if (screenId === "inventory") {
+          globalThis.BiteTechInventory?.mount().catch((error) => {
+            console.warn("Inventory screen failed to load:", error);
+          });
+        }
+
+        if (screenId === "purchases") {
+          globalThis.BiteTechPurchases?.mount().catch((error) => {
+            console.warn("Purchases screen failed to load:", error);
+          });
         }
 
         // ⌨️ Auto-focus the search box on open — one less click before the staff can start typing

@@ -9,6 +9,13 @@ import { createTenantContextService } from "./tenancy/tenant-context-service.mjs
 import { createLoggingMailer } from "./mail/logging-mailer.mjs";
 import { createOrderRefundService } from "./pos/order-refund-service.mjs";
 import { createSalesReportService } from "./pos/sales-report-service.mjs";
+import { createOrderService } from "./pos/order-service.mjs";
+import { createMenuService } from "./pos/menu-service.mjs";
+import { createSupplierService } from "./pos/supplier-service.mjs";
+import { createInventoryService } from "./pos/inventory-service.mjs";
+import { createRecipeService } from "./pos/recipe-service.mjs";
+import { createPurchaseService } from "./pos/purchase-service.mjs";
+import { createInventoryConsumptionService } from "./pos/inventory-consumption-service.mjs";
 import {
   loadBillingConfiguration,
   loadServerConfiguration,
@@ -62,14 +69,39 @@ export async function createServer({
 
   const orderRefundService = createOrderRefundService(database);
   const salesReportService = createSalesReportService(database);
+  // The order service is wired so the real checkout flow
+  // (POST /api/pos/orders, where the legacy POS outbox
+  // delivers every completed order) deducts recipe
+  // ingredients from the inventory domain inside the
+  // authoritative order transaction. The consumption
+  // service is shared so the order service and any direct
+  // caller use one instance.
+  const inventoryConsumptionService = createInventoryConsumptionService(database);
+  const orderService = createOrderService(database, {
+    inventoryConsumption: inventoryConsumptionService,
+  });
+  // The menu service is wired so the recipe editor can list
+  // the restaurant's products. It is a read-only, existing
+  // route (GET /api/pos/menu) guarded by ORDER_CREATE.
+  const menuService = createMenuService(database);
+  const supplierService = createSupplierService(database);
+  const inventoryService = createInventoryService(database);
+  const recipeService = createRecipeService(database);
+  const purchaseService = createPurchaseService(database);
 
   const app = await buildHttpApp({
     authService,
     tenantContextService: createTenantContextService(database),
     subscriptionService,
     billingWebhookService,
+    menuService,
+    orderService,
     orderRefundService,
     salesReportService,
+    supplierService,
+    inventoryService,
+    recipeService,
+    purchaseService,
     trustedOrigin: config.trustedOrigin,
     secureCookies: config.secureCookies,
     logger: { level: config.nodeEnv === "production" ? "info" : "warn" },
