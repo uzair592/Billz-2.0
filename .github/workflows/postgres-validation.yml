@@ -107,11 +107,14 @@ jobs:
 
       - name: Install PostgreSQL 17 client tools
         # The backup/restore tests invoke pg_dump, pg_restore,
-        # and psql. The runner ships PostgreSQL 16 client tools,
-        # but the service container runs PostgreSQL 17, and
-        # pg_dump refuses to run against a newer server. Install
-        # the matching PostgreSQL 17 client tools from the
-        # PostgreSQL Global Development Group apt repository.
+        # and psql. The runner ships PostgreSQL 16 client tools
+        # in /usr/bin, but the service container runs PostgreSQL
+        # 17, and pg_dump refuses to run against a newer server.
+        # Install the matching PostgreSQL 17 client tools from
+        # the PostgreSQL Global Development Group apt repository
+        # and prepend their directory to PATH so the version-17
+        # tools are resolved instead of the runner's version-16
+        # defaults.
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends gnupg curl ca-certificates
@@ -119,16 +122,21 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends postgresql-client-17
-          # Persist the PostgreSQL 17 binaries for subsequent steps, and use them now.
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
-          export PATH="/usr/lib/postgresql/17/bin:$PATH"
-          echo "Installed client tools:"
+
+      - name: Verify PostgreSQL 17 client tool PATH resolution
+        run: |
+          echo "Resolved client tool locations:"
           command -v pg_dump
+          command -v pg_restore
+          command -v psql
+          echo "Client tool versions:"
           pg_dump --version
           pg_restore --version
           psql --version
-          pg_dump --version | grep -Eq '^pg_dump \(PostgreSQL\) 17\.'
-          pg_restore --version | grep -Eq '^pg_restore \(PostgreSQL\) 17\.'
+          pg_dump --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "pg_dump is not PostgreSQL 17"; exit 1; }
+          pg_restore --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "pg_restore is not PostgreSQL 17"; exit 1; }
+          psql --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "psql is not PostgreSQL 17"; exit 1; }
 
       - name: Run PostgreSQL-dependent tests
         env:
