@@ -2,6 +2,9 @@
 
 ## Current milestone
 
+Milestone 14: multi-tenant inventory tracking, recipe-based automatic order stock consumption, supplier management, draft purchases, receiving with weighted average costing (WAC), manual adjustments, waste tracking, and an append-only immutable stock movement ledger are fully integrated into the POS SaaS application.
+
+
 Milestone 12: partial refunds and server-authoritative sales
 reporting are connected to the POS.
 

@@ -14,6 +14,7 @@ It is deliberately being kept operational while domain rules are characterized, 
 
 Implemented foundations:
 
+- Milestone 14: Multi-tenant inventory tracking, recipe-based automatic stock consumption on completed order checkout, supplier management, draft purchasing, receiving with weighted average costing (WAC), manual adjustments, waste tracking, and append-only stock movement ledger.
 - Characterization tests for the existing POS.
 - Reusable money and order-status domain modules with legacy parity tests.
 - PostgreSQL platform schema for users, restaurants, branches, memberships, sessions, devices, plans, subscriptions, billing, webhooks, and audits.
