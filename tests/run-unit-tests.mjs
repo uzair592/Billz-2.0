@@ -7,16 +7,26 @@ import { projectRoot } from "./helpers/legacy-source.mjs";
  * Cross-platform unit test runner.
  *
  * Mirrors the CI unit-test step: every `*.test.mjs` directly under
- * `tests/` runs except the PostgreSQL integration suites and the
- * Linux-only startup test, which need a live database or a server
- * socket and are executed by `npm run test:integration` instead.
+ * `tests/` runs except the PostgreSQL integration suites, the
+ * Linux-only startup test, and the PostgreSQL-dependent Milestone 13
+ * suites, which need a live database and are executed by
+ * `npm run test:postgres` after the database is provisioned.
  * Running the PostgreSQL suites here would make them provision the
- * same schema concurrently and clobber each other.
+ * same schema concurrently and clobber each other, and they would
+ * try to connect before the database is reachable.
  */
 const EXCLUDED = new Set([
   "billing-postgres.test.mjs",
   "refund-sales-report-postgres.test.mjs",
   "server-startup.test.mjs",
+  // PostgreSQL-dependent Milestone 13 suites. They require a live
+  // database and the correct TEST_DATABASE_ADMIN_URL, so they run in
+  // the dedicated postgres step, never in the pure unit step.
+  "migration-runner.test.mjs",
+  "health-endpoints.test.mjs",
+  "bootstrap-first-restaurant.test.mjs",
+  "graceful-shutdown.test.mjs",
+  "backup-restore.test.mjs",
 ]);
 
 const testsDir = path.join(projectRoot, "tests");

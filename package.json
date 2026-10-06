@@ -5,6 +5,7 @@
   "description": "Characterization tests and migration scaffold for the Bite Tech restaurant POS SaaS conversion.",
   "scripts": {
     "test": "node tests/run-unit-tests.mjs",
+    "test:postgres": "node tests/run-postgres-tests.mjs",
     "test:legacy": "node --test tests/legacy-*.test.mjs tests/money-engine.test.mjs tests/order-status.test.mjs",
     "test:integration": "node tests/helpers/check-db.mjs && node --test tests/billing-postgres.test.mjs && node --test tests/refund-sales-report-postgres.test.mjs",
     "validate:compose": "docker compose -f compose.validation.yaml config",
