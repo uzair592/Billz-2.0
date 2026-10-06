@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { MoneyEngine } from "../../domain/money-engine.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError, businessDateInTimezone } from "./business-date.mjs";
+import { createInventoryConsumptionService } from "./inventory-consumption-service.mjs";
 
 function publicOrder(row) {
   return {
@@ -76,7 +77,19 @@ function effectiveItemPrice(item) {
   return { priceMinor: regularPriceMinor, offer: null };
 }
 
-export function createOrderService(pool, { clock = () => new Date() } = {}) {
+export function createOrderService(
+  pool,
+  {
+    clock = () => new Date(),
+    inventoryConsumption = null,
+  } = {},
+) {
+  // The inventory consumption service is shared so the
+  // order service and the HTTP layer use one instance.
+  // It defaults to a pool-backed instance so the order
+  // service also works standalone.
+  const consumeInventory = inventoryConsumption
+    ?? createInventoryConsumptionService(pool, { clock });
   return Object.freeze({
     async create({ tenant, userId, input }) {
       const restaurantId = tenant.restaurant.id;
@@ -87,6 +100,10 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
       if (businessDate > today) {
         throw apiError("Order date cannot be in the future.", "FUTURE_ORDER_DATE");
       }
+
+      // Filled inside the transaction once the order reaches
+      // its authoritative completed state.
+      let inventoryConsumption = null;
 
       return withTenantTransaction(
         pool,
@@ -382,9 +399,9 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
           for (const [stockItemId, required] of stockUsage) {
             await client.query(
               `UPDATE inventory_balances
-                  SET quantity_base_units = quantity_base_units - $4,
-                      version = version + 1, updated_at = $5
-                WHERE restaurant_id = $1 AND branch_id = $2 AND stock_item_id = $3`,
+                   SET quantity_base_units = quantity_base_units - $4,
+                       version = version + 1, updated_at = $5
+                 WHERE restaurant_id = $1 AND branch_id = $2 AND stock_item_id = $3`,
               [restaurantId, branchId, stockItemId, required, now],
             );
             await client.query(
@@ -399,6 +416,30 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
               ],
             );
           }
+
+          // Milestone 14: deduct ingredient stock from the
+          // inventory domain for the completed order. This runs
+          // inside the authoritative order transaction, so the
+          // order, its lines, and the inventory deduction commit
+          // or roll back together — a failure can never leave a
+          // completed order with half-applied stock changes.
+          //
+          // The consumption is exactly once per order: the
+          // inventory_consumptions row is claimed with
+          // ON CONFLICT DO NOTHING, so a replayed checkout
+          // returns the original outcome instead of deducting
+          // twice. Missing recipes and negative balances are
+          // collected as warnings and never block checkout.
+          inventoryConsumption = await consumeInventory.consumeWithinTransaction(
+            client,
+            {
+              restaurantId,
+              orderId,
+              lines: menuLines,
+              userId,
+              now,
+            },
+          );
 
           if (paymentMinor > 0) {
             let accountId = input.payment.financialAccountId ?? null;
@@ -465,7 +506,11 @@ export function createOrderService(pool, { clock = () => new Date() } = {}) {
             }
           }
 
-          return { order: publicOrder(orderResult.rows[0]), replayed: false };
+          return {
+            order: publicOrder(orderResult.rows[0]),
+            replayed: false,
+            inventoryConsumption,
+          };
         },
       );
     },

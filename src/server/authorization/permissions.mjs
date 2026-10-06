@@ -11,6 +11,11 @@ export const PERMISSION = Object.freeze({
   KITCHEN_UPDATE: "kitchen:update",
   MENU_MANAGE: "menu:manage",
   INVENTORY_MANAGE: "inventory:manage",
+  INVENTORY_VIEW: "inventory:view",
+  INVENTORY_ADJUST: "inventory:adjust",
+  PURCHASES_VIEW: "purchases:view",
+  PURCHASES_MANAGE: "purchases:manage",
+  RECIPES_MANAGE: "recipes:manage",
   EXPENSE_MANAGE: "expense:manage",
   FINANCE_MANAGE: "finance:manage",
   REPORT_VIEW: "report:view",
@@ -39,6 +44,11 @@ const ROLE_PERMISSIONS = Object.freeze({
     PERMISSION.KITCHEN_UPDATE,
     PERMISSION.MENU_MANAGE,
     PERMISSION.INVENTORY_MANAGE,
+    PERMISSION.INVENTORY_VIEW,
+    PERMISSION.INVENTORY_ADJUST,
+    PERMISSION.PURCHASES_VIEW,
+    PERMISSION.PURCHASES_MANAGE,
+    PERMISSION.RECIPES_MANAGE,
     PERMISSION.EXPENSE_MANAGE,
     PERMISSION.FINANCE_MANAGE,
     PERMISSION.REPORT_VIEW,
@@ -52,6 +62,7 @@ const ROLE_PERMISSIONS = Object.freeze({
     PERMISSION.PAYMENT_PROCESS,
     PERMISSION.RECEIPT_PRINT,
     PERMISSION.TABLE_VIEW,
+    PERMISSION.INVENTORY_VIEW,
   ]),
   waiter: new Set([
     PERMISSION.ORDER_CREATE,
@@ -63,6 +74,14 @@ const ROLE_PERMISSIONS = Object.freeze({
     PERMISSION.ORDER_VIEW,
     PERMISSION.KITCHEN_VIEW,
     PERMISSION.KITCHEN_UPDATE,
+  ]),
+  // Suggested by the milestone spec: suppliers, purchases, and
+  // inventory viewing. Deliberately read-only so a bookkeeper
+  // can reconcile stock and purchasing without being able to
+  // move stock or edit purchasing documents.
+  accountant: new Set([
+    PERMISSION.INVENTORY_VIEW,
+    PERMISSION.PURCHASES_VIEW,
   ]),
 });
 
