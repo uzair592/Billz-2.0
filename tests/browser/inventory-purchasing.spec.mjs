@@ -149,7 +149,9 @@ test.describe('Milestone 14 - Inventory and Purchasing Browser UI', () => {
     await page.evaluate(() => switchScreen('inventory'));
     const searchInput = page.locator('.inventory-search');
     await searchInput.fill('Espresso');
+    const reqPromise = page.waitForRequest(req => req.url().includes('search=Espresso'));
     await searchInput.press('Enter');
+    await reqPromise;
     expect(queriedSearch).toBe('Espresso');
   });
 
@@ -173,7 +175,10 @@ test.describe('Milestone 14 - Inventory and Purchasing Browser UI', () => {
     const inputs = page.locator('.inventory-modal .inventory-input');
     await inputs.nth(0).fill('Fresh Cream');
     await inputs.nth(1).fill('CREAM-01');
-    await page.locator('.inventory-modal button.inventory-btn-primary').click();
+    await Promise.all([
+      page.waitForResponse((res) => res.url().includes('/api/pos/inventory/items') && res.request().method() === 'POST'),
+      page.locator('.inventory-modal button.inventory-btn-primary').click(),
+    ]);
     expect(postPayload).not.toBeNull();
     expect(postPayload.name).toBe('Fresh Cream');
   });
