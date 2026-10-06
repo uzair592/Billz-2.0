@@ -2,7 +2,7 @@ name: PostgreSQL Validation
 
 on:
   push:
-    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui, feat/milestone-12-refunds-sales-reports, feat/milestone-14-inventory-purchasing]
+    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui, feat/milestone-12-refunds-sales-reports, feat/milestone-13-production-pilot, feat/milestone-14-inventory-purchasing]
   pull_request:
     branches: [main]
 
@@ -74,15 +74,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run unit tests
+      - name: Run pure unit tests
         shell: bash
         run: |
-          mapfile -t unit_tests < <(find tests -maxdepth 1 -name '*.test.mjs' \
-            ! -name 'billing-postgres.test.mjs' \
-            ! -name 'refund-sales-report-postgres.test.mjs' \
-            ! -name 'inventory-purchasing-postgres.test.mjs' \
-            ! -name 'server-startup.test.mjs' | sort)
-          node --test "${unit_tests[@]}"
+          # Pure unit tests only. PostgreSQL-dependent suites are
+          # separated into dedicated steps so they never run before
+          # the database is reachable or with the wrong connection URL.
+          node tests/run-unit-tests.mjs
 
       - name: Wait for PostgreSQL
         run: |
@@ -105,6 +103,44 @@ jobs:
             echo "Applying $migration"
             psql -h localhost -U postgres -d restaurant_pos_test -v ON_ERROR_STOP=1 -f "$migration"
           done
+
+      - name: Install PostgreSQL 17 client tools
+        # The backup/restore tests invoke pg_dump, pg_restore,
+        # and psql. The runner ships PostgreSQL 16 client tools
+        # in /usr/bin, but the service container runs PostgreSQL
+        # 17, and pg_dump refuses to run against a newer server.
+        # Install the matching PostgreSQL 17 client tools from
+        # the PostgreSQL Global Development Group apt repository
+        # and prepend their directory to PATH so the version-17
+        # tools are resolved instead of the runner's version-16
+        # defaults.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends gnupg curl ca-certificates
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/postgresql-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/postgresql-archive-keyring.gpg] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+
+      - name: Verify PostgreSQL 17 client tool PATH resolution
+        run: |
+          echo "Resolved client tool locations:"
+          command -v pg_dump
+          command -v pg_restore
+          command -v psql
+          echo "Client tool versions:"
+          pg_dump --version
+          pg_restore --version
+          psql --version
+          pg_dump --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "pg_dump is not PostgreSQL 17"; exit 1; }
+          pg_restore --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "pg_restore is not PostgreSQL 17"; exit 1; }
+          psql --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "psql is not PostgreSQL 17"; exit 1; }
+
+      - name: Run PostgreSQL-dependent tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node tests/run-postgres-tests.mjs
 
       - name: Run integration tests
         env:
@@ -158,3 +194,246 @@ jobs:
             exit 1
           fi
           echo "Working tree is clean"
+
+  production-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMOKE_DB: restaurant_pos_smoke
+      SMOKE_USER: pos_smoke
+      SMOKE_PASSWORD: smoke-only
+      SMOKE_PEPPER: smoke-pepper-at-least-16-chars
+      SMOKE_SESSION: smoke-session-secret-at-least-16
+      SMOKE_OWNER_PASSWORD: smoke-password-12345
+      # CI-only Stripe credentials of valid shape. They are never
+      # used to call Stripe: the smoke test only exercises the
+      # webhook signature verification path, which is local HMAC.
+      # They are not placeholders (they are not in the rejected
+      # placeholder set) and they are not real secrets.
+      SMOKE_STRIPE_SECRET_KEY: sk_test_ci_smoke_key_not_a_real_secret
+      SMOKE_STRIPE_WEBHOOK_SECRET: whsec_ci_smoke_webhook_secret_not_real
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: restaurant_pos_smoke
+          POSTGRES_USER: pos_smoke
+          POSTGRES_PASSWORD: smoke-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U pos_smoke -d restaurant_pos_smoke"
+          --health-interval=2s
+          --health-timeout=2s
+          --health-retries=20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: bite-tech-pos:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Confirm image runs as non-root
+        run: |
+          docker run --rm --entrypoint sh bite-tech-pos:smoke -c 'id -u' | grep -v '^0$'
+
+      - name: Apply migrations through the runner
+        env:
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          MIGRATIONS_DIR: /app/database/migrations
+        run: |
+          docker run --rm \
+            -e DATABASE_URL \
+            -e MIGRATIONS_DIR \
+            --network host \
+            --entrypoint node \
+            bite-tech-pos:smoke \
+            src/server/database/migration-runner.mjs
+
+      - name: Bootstrap the first restaurant
+        env:
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
+          RESTAURANT_NAME: Pilot Restaurant
+          RESTAURANT_SLUG: pilot-restaurant
+          RESTAURANT_TIMEZONE: Asia/Karachi
+          RESTAURANT_CURRENCY: PKR
+          OWNER_EMAIL: owner@pilot.example
+          OWNER_DISPLAY_NAME: Pilot Owner
+          BOOTSTRAP_OWNER_PASSWORD: ${{ env.SMOKE_OWNER_PASSWORD }}
+          SUBSCRIPTION_STATUS: trial
+        run: |
+          docker run --rm \
+            -e DATABASE_URL \
+            -e PASSWORD_PEPPER \
+            -e RESTAURANT_NAME \
+            -e RESTAURANT_SLUG \
+            -e RESTAURANT_TIMEZONE \
+            -e RESTAURANT_CURRENCY \
+            -e OWNER_EMAIL \
+            -e OWNER_DISPLAY_NAME \
+            -e BOOTSTRAP_OWNER_PASSWORD \
+            -e SUBSCRIPTION_STATUS \
+            --network host \
+            --entrypoint node \
+            bite-tech-pos:smoke \
+            src/server/bootstrap-first-restaurant.mjs
+
+      - name: Start the production container
+        env:
+          # The production-built image is exercised in true
+          # production mode: NODE_ENV=production, an HTTPS
+          # trusted origin, and the Stripe adapter configured
+          # with CI-only credentials of valid shape. This
+          # proves the production configuration validation
+          # passes and the server starts under it.
+          NODE_ENV: production
+          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          TRUSTED_ORIGINS: https://pos.example.test
+          SESSION_SECRET: ${{ env.SMOKE_SESSION }}
+          PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
+          PAYMENT_PROVIDER: stripe
+          STRIPE_SECRET_KEY: ${{ env.SMOKE_STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
+          LOG_LEVEL: info
+          PORT: "3000"
+          HOST: 0.0.0.0
+        run: |
+          docker run -d --name pos-smoke \
+            -e NODE_ENV \
+            -e DATABASE_URL \
+            -e TRUSTED_ORIGINS \
+            -e SESSION_SECRET \
+            -e PASSWORD_PEPPER \
+            -e PAYMENT_PROVIDER \
+            -e STRIPE_SECRET_KEY \
+            -e STRIPE_WEBHOOK_SECRET \
+            -e LOG_LEVEL \
+            -e PORT \
+            -e HOST \
+            -p 3000:3000 \
+            --network host \
+            bite-tech-pos:smoke
+
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health/ready; then
+              echo "Application is ready"
+              exit 0
+            fi
+            echo "Waiting for readiness (attempt $attempt/30)..."
+            sleep 2
+          done
+          echo "Application did not become ready"
+          docker logs pos-smoke
+          exit 1
+
+      - name: Verify liveness and readiness
+        run: |
+          echo "Liveness:"
+          curl -fsS http://localhost:3000/health/live
+          echo ""
+          echo "Readiness:"
+          curl -fsS http://localhost:3000/health/ready
+          echo ""
+
+      - name: Load the POS page
+        run: |
+          curl -fsS http://localhost:3000/ | grep -q "Fast Food POS\|bite\|POS" || \
+            curl -fsS http://localhost:3000/ | head -c 200
+
+      - name: Verify an unauthenticated protected endpoint is rejected
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            http://localhost:3000/api/auth/me)
+          echo "Unauthenticated /api/auth/me returned $status"
+          if [ "$status" != "401" ]; then
+            echo "Expected 401 for an unauthenticated protected endpoint, got $status"
+            exit 1
+          fi
+
+      - name: Verify the Stripe webhook path rejects an invalid signature
+        env:
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
+        run: |
+          # Exercise the real stripe-signature header and raw-body
+          # verification path. A signature computed with the wrong
+          # key must be rejected with 400, proving the adapter is
+          # wired and verification is enforced.
+          body='{"type":"checkout.session.completed"}'
+          timestamp=$(date +%s)
+          # Compute a signature with a DIFFERENT key so it is invalid.
+          wrong_secret="whsec_wrong_key_for_smoke"
+          payload="${timestamp}.${body}"
+          signature=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$wrong_secret" -hex | sed 's/^.* //')
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "content-type: application/json" \
+            -H "stripe-signature: t=${timestamp},v1=${signature}" \
+            --data "$body" \
+            http://localhost:3000/webhook)
+          echo "Invalid stripe-signature returned $status"
+          if [ "$status" != "400" ]; then
+            echo "Expected 400 for an invalid Stripe signature, got $status"
+            exit 1
+          fi
+
+      - name: Verify the Stripe webhook path accepts a valid signature shape
+        env:
+          STRIPE_WEBHOOK_SECRET: ${{ env.SMOKE_STRIPE_WEBHOOK_SECRET }}
+        run: |
+          # A correctly signed, well-formed event is accepted (200)
+          # or recorded as processed. The event type below is not a
+          # subscription-moving event, so it is safely ignored after
+          # the signature verifies. This proves the raw-body HMAC
+          # verification succeeds with the configured secret.
+          body='{"id":"evt_smoke","type":"ping","created":'"$(date +%s)"',"data":{"object":{}}}'
+          timestamp=$(date +%s)
+          payload="${timestamp}.${body}"
+          signature=$(printf '%s' "$payload" | openssl dgst -sha256 -hmac "$STRIPE_WEBHOOK_SECRET" -hex | sed 's/^.* //')
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "content-type: application/json" \
+            -H "stripe-signature: t=${timestamp},v1=${signature}" \
+            --data "$body" \
+            http://localhost:3000/webhook)
+          echo "Valid stripe-signature returned $status"
+          if [ "$status" != "200" ]; then
+            echo "Expected 200 for a validly signed Stripe event, got $status"
+            docker logs pos-smoke
+            exit 1
+          fi
+
+      - name: Send SIGTERM
+        run: |
+          docker kill --signal=SIGTERM pos-smoke
+
+      - name: Confirm clean shutdown
+        run: |
+          for attempt in $(seq 1 15); do
+            if ! docker ps --format '{{.Names}}' | grep -q '^pos-smoke$'; then
+              echo "Container exited cleanly after $attempt checks"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Container did not stop after SIGTERM"
+          docker logs pos-smoke
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f pos-smoke || true

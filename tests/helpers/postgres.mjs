@@ -11,6 +11,19 @@ export const ADMIN_DATABASE_URL =
 export const APP_ROLE = "pos_integration_app";
 
 /**
+ * Builds a connection string for a scratch database that lives on the
+ * same PostgreSQL instance as the admin database. The host, port, user
+ * and password are taken from TEST_DATABASE_ADMIN_URL so the tests run
+ * against the CI service (port 5432) and a local validation container
+ * (port 55432) without editing the test files.
+ */
+export function scratchDatabaseUrl(databaseName) {
+  const parsed = new URL(ADMIN_DATABASE_URL);
+  parsed.pathname = `/${databaseName.replace(/^\//, "")}`;
+  return parsed.toString();
+}
+
+/**
  * The application role used by the services under test.
  *
  * It is deliberately NOT the owner and NOT a superuser. Every billing table

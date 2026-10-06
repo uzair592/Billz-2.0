@@ -388,18 +388,64 @@ The current template defines:
 
 | Variable | Purpose |
 |---|---|
-| `NODE_ENV` | Runtime environment |
-| `TRUSTED_ORIGIN` | Only trusted browser origin |
+| `NODE_ENV` | Runtime environment (`development`, `test`, or `production`) |
+| `TRUSTED_ORIGINS` | Comma-separated exact HTTPS origins allowed to call the API (no wildcards) |
+| `TRUSTED_ORIGIN` | Single-origin shorthand for `TRUSTED_ORIGINS` (backward compatible) |
 | `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_SSL_MODE` | `disable`, `require`, or `verify-full` (see below) |
+| `DATABASE_SSL_CA` | PEM CA certificate for `require`/`verify-full` |
+| `DATABASE_POOL_MAX` | Connection pool size (default 10) |
 | `SESSION_SECRET` | Session-related server secret |
 | `PASSWORD_PEPPER` | Secret appended before Argon2id hashing |
-| `PAYMENT_PROVIDER` | Selected billing adapter |
+| `MAIL_PROVIDER` | Transactional mail provider name; when absent in production, self-registration is disabled |
+| `PAYMENT_PROVIDER` | Selected billing adapter (`stripe` or `manual`) |
 | `STRIPE_SECRET_KEY` | Server-only Stripe credential |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |
 | `STRIPE_PUBLISHABLE_KEY` | Browser-safe Stripe key |
 | `OBJECT_STORAGE_*` | Tenant file-storage configuration |
 
 Payment keys and object-storage credentials must never be exposed to browser JavaScript.
+
+### Database SSL modes
+
+`DATABASE_SSL_MODE` is an explicit allowlist:
+
+- `disable` — no TLS (plaintext).
+- `require` — TLS with `rejectUnauthorized: false` (encrypted, chain not verified).
+- `verify-full` — TLS with `rejectUnauthorized: true` (encrypted and verified).
+
+Any other value is rejected at startup. `DATABASE_SSL_CA` is only
+honored for `require` and `verify-full`.
+
+### Production registration and mail policy
+
+Transactional email is not implemented. In production, self-registration
+is therefore **disabled by default** unless a real transactional mail
+provider is configured (`MAIL_PROVIDER` set to a real provider name).
+This lets the production server start without stranding users: a
+verification mail that is never delivered would lock a restaurant out
+of its own account.
+
+- The server starts in production with registration disabled.
+- A registration attempt while disabled fails with `503`
+  `REGISTRATION_DISABLED` and never creates a pending user.
+- The production mailer never logs verification tokens or passwords.
+- Bootstrap-created owners are written directly by the bootstrap CLI
+  and are not self-registrations, so they are unaffected.
+- Development keeps the existing logging mailer behavior.
+
+### Backup and restore
+
+The backup/restore tooling (`src/server/database/backup-restore.mjs`)
+uses `pg_dump`/`pg_restore`/`psql`. Restore requires a full
+`TARGET_DATABASE_URL` connection string, not a bare database name. The
+source and target are parsed and validated, and restoring a database
+onto itself (same host, port, and database) is refused. Credentials are
+redacted from every log, error, and JSON result. Restore is a
+destructive operation (`--clean --if-exists`): it drops existing
+objects in the target before recreating them. Never restore over a live
+production database directly; restore into a new database, verify, then
+repoint the application.
 
 ## Authentication security
 

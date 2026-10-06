@@ -45,6 +45,22 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
 
   return Object.freeze({
     async register({ email, password, displayName, restaurantName }) {
+      // Self-registration is gated by the mail policy. In
+      // production without a transactional mail provider it is
+      // disabled, and the attempt must fail clearly before any
+      // pending user is created. Bootstrap-created owners are
+      // written directly by the bootstrap CLI and are not
+      // affected by this gate.
+      if (mailer.registrationEnabled === false) {
+        const error = new Error(
+          "Self-registration is disabled. Contact the platform "
+          + "operator to provision an account.",
+        );
+        error.code = "REGISTRATION_DISABLED";
+        error.statusCode = 503;
+        throw error;
+      }
+
       const normalizedEmail = normalizeEmail(email);
       const passwordHash = await hashPassword(password, passwordPepper);
       const verification = createTokenPair();

@@ -8,3 +8,10 @@ coverage/
 Thumbs.db
 test-results/
 playwright-report/
+
+# Backups are never committed.
+backups/
+*.dump
+
+# Local smoke-test overrides.
+.env.smoke

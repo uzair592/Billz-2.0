@@ -1,0 +1,48 @@
+# Version control
+.git
+.gitignore
+.github
+.kilo
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+
+# Dependencies (installed fresh in the image)
+node_modules
+npm-debug.log*
+
+# Tests and test tooling
+tests
+test-results
+playwright-report
+playwright.config.mjs
+coverage
+
+# Development / validation infrastructure
+compose.test-database.yaml
+compose.validation.yaml
+compose.production-smoke.yaml
+
+# Local databases and logs
+*.log
+*.db
+*.sqlite
+backups
+
+# Documentation (not needed in the runtime image)
+docs
+README.md
+*.md
+!package.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Docker build context noise
+Dockerfile
+.dockerignore
