@@ -18,7 +18,7 @@ function publicUser(user) {
 }
 
 function authenticationError() {
-  const error = new Error("Invalid email or password.");
+  const error = new Error("Invalid restaurant code, username or password.");
   error.code = "INVALID_CREDENTIALS";
   error.statusCode = 401;
   return error;
@@ -111,12 +111,44 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       return createSessionForUser(user, { ipAddress, userAgent, now });
     },
 
-    async login({ email, password, ipAddress = null, userAgent = null }) {
+    async login({ restaurantCode, username, email, password, ipAddress = null, userAgent = null }) {
+      if (restaurantCode && username) {
+        if (typeof repository.findUserByRestaurantAndUsername !== "function") {
+          throw authenticationError();
+        }
+        const { restaurant, user } = await repository.findUserByRestaurantAndUsername({
+          restaurantCode,
+          username,
+        });
+
+        if (!restaurant || !user || !(await verifyPassword(user.passwordHash, password, passwordPepper))) {
+          throw authenticationError();
+        }
+
+        if (restaurant.status === "suspended") {
+          const error = new Error("This restaurant subscription is currently suspended.");
+          error.code = "RESTAURANT_SUSPENDED";
+          error.statusCode = 403;
+          error.restaurant = restaurant;
+          error.user = publicUser(user);
+          throw error;
+        }
+
+        if (user.status === "disabled" || user.status === "suspended") {
+          const error = new Error("This user account is disabled.");
+          error.code = "USER_DISABLED";
+          error.statusCode = 403;
+          throw error;
+        }
+
+        return createSessionForUser(user, { ipAddress, userAgent, now: clock() });
+      }
+
       const user = await repository.findUserByEmail(normalizeEmail(email));
       if (!user || !(await verifyPassword(user.passwordHash, password, passwordPepper))) {
         throw authenticationError();
       }
-      if (user.status !== "active" || !user.emailVerifiedAt) {
+      if (user.status !== "active" || (user.email && !user.emailVerifiedAt)) {
         const error = new Error("Verify your email before signing in.");
         error.code = "EMAIL_VERIFICATION_REQUIRED";
         error.statusCode = 403;

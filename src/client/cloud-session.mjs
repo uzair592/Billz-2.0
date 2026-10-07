@@ -96,10 +96,21 @@ export function createCloudSessionClient({
       return { ...account, ...session };
     },
 
-    async signIn({ email, password }) {
+    async signIn(credentials) {
+      const body = credentials.restaurantCode && credentials.username
+        ? {
+            restaurantCode: String(credentials.restaurantCode ?? "").trim(),
+            username: String(credentials.username ?? "").trim(),
+            password: String(credentials.password ?? ""),
+          }
+        : {
+            email: String(credentials.email ?? "").trim(),
+            password: String(credentials.password ?? ""),
+          };
+
       await call("/api/auth/login", {
         method: "POST",
-        body: { email: String(email ?? "").trim(), password: String(password ?? "") },
+        body,
       });
       const account = await loadAccount();
       const restaurants = account?.restaurants ?? [];

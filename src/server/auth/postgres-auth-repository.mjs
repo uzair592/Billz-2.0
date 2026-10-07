@@ -17,6 +17,8 @@ function mapUser(row) {
   return {
     id: row.id,
     email: row.email,
+    username: row.username,
+    restaurantId: row.restaurant_id,
     displayName: row.display_name,
     platformRole: row.platform_role,
     status: row.status,
@@ -206,6 +208,83 @@ export function createPostgresAuthRepository(pool) {
       );
     },
 
+    async findUserByRestaurantAndUsername({ restaurantCode, username }) {
+      const normCode = String(restaurantCode ?? "").trim().toLowerCase();
+      const normUsername = String(username ?? "").trim().toLowerCase();
+
+      const restResult = await pool.query(
+        `SELECT id, name, code, status FROM restaurants WHERE code = $1 OR slug = $1`,
+        [normCode],
+      );
+      const restaurant = restResult.rows[0];
+      if (!restaurant) return { restaurant: null, user: null };
+
+      const userResult = await pool.query(
+        `SELECT id, email, username, restaurant_id, display_name, platform_role, status,
+                email_verified_at, password_hash
+           FROM users
+          WHERE restaurant_id = $1 AND normalized_username = $2`,
+        [restaurant.id, normUsername],
+      );
+      const user = userResult.rows[0];
+      return {
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          code: restaurant.code,
+          status: restaurant.status,
+        },
+        user: mapUser(user),
+      };
+    },
+
+    async createTenantUser({ restaurantId, username, passwordHash, displayName, role = "cashier" }) {
+      const client = await pool.connect();
+      const userId = randomUUID();
+      const normUsername = String(username ?? "").trim().toLowerCase();
+
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.restaurant_id', $1, true)", [restaurantId]);
+
+        const branchResult = await client.query(
+          `SELECT id FROM branches WHERE restaurant_id = $1 AND is_default = true LIMIT 1`,
+          [restaurantId],
+        );
+        const branchId = branchResult.rows[0]?.id;
+
+        const userResult = await client.query(
+          `INSERT INTO users (
+             id, restaurant_id, username, normalized_username, password_hash, display_name,
+             platform_role, status, email_verified_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, 'user', 'active', now())
+           RETURNING id, email, username, restaurant_id, display_name, platform_role, status,
+                     email_verified_at, password_hash`,
+          [userId, restaurantId, String(username).trim(), normUsername, passwordHash, String(displayName).trim()],
+        );
+
+        await client.query(
+          `INSERT INTO restaurant_memberships (
+             restaurant_id, user_id, default_branch_id, role, status, joined_at
+           ) VALUES ($1, $2, $3, $4, 'active', now())`,
+          [restaurantId, userId, branchId, role],
+        );
+
+        await client.query("COMMIT");
+        return mapUser(userResult.rows[0]);
+      } catch (error) {
+        await rollback(client, error);
+        if (error.code === "23505" && /username/i.test(error.constraint ?? "")) {
+          const duplicate = new Error("Username already exists in this restaurant.");
+          duplicate.code = "USERNAME_EXISTS";
+          throw duplicate;
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
     /**
      * Lists only the restaurants this user is an active member of. The query
      * runs without a tenant context, so row-level security restricts it to the
@@ -229,7 +308,7 @@ export function createPostgresAuthRepository(pool) {
           status: row.restaurant_status,
           currencyCode: row.currency_code,
           role: row.role,
-          defaultBranchId: row.default_branch_id,
+          defaultBranchId: row.defaultBranch_id ?? row.default_branch_id,
         }));
       });
     },
