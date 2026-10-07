@@ -8,6 +8,7 @@ coverage/
 Thumbs.db
 test-results/
 playwright-report/
+tests/browser/screenshots/
 
 # Backups are never committed.
 backups/
