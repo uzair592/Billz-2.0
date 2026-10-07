@@ -148,8 +148,8 @@ test.describe('Milestone 14 - Inventory and Purchasing Browser UI', () => {
 
     await page.evaluate(() => switchScreen('inventory'));
     const searchInput = page.locator('.inventory-search');
-    await searchInput.fill('Espresso');
     const reqPromise = page.waitForRequest(req => req.url().includes('search=Espresso'));
+    await searchInput.fill('Espresso');
     await searchInput.press('Enter');
     await reqPromise;
     expect(queriedSearch).toBe('Espresso');

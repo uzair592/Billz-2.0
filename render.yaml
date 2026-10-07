@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: billz-pos-pilot
+    env: docker
+    dockerfilePath: Dockerfile
+    plan: starter
+    healthCheckPath: /health/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: billz-postgres-pilot
+          property: connectionString
+      - key: DATABASE_SSL_MODE
+        value: require
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PASSWORD_PEPPER
+        generateValue: true
+      - key: TRUSTED_ORIGINS
+        sync: false
+      - key: PAYMENT_PROVIDER
+        value: stripe
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+
+databases:
+  - name: billz-postgres-pilot
+    databaseName: billz_pos_pilot
+    user: billz_admin
+    plan: starter
+    postgresMajorVersion: "17"
