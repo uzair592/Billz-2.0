@@ -2036,6 +2036,14 @@
         }
       }
 
+      /* 📱 Mobile Drawer & Topbar Toggle Baseline */
+      .mobile-menu-toggle {
+        display: none !important;
+      }
+      .sidebar-drawer-overlay {
+        display: none;
+      }
+
       @media screen and (max-width: 1180px) {
         .sidebar {
           width: 218px;
@@ -2060,10 +2068,14 @@
       }
 
       @media screen and (max-width: 920px) {
+        html, body {
+          overflow-x: hidden;
+          width: 100%;
+        }
+
         body {
           height: auto;
           min-height: 100vh;
-          overflow: auto;
         }
 
         .app-container {
@@ -2071,33 +2083,92 @@
           height: auto;
         }
 
-        .sidebar:not(.collapsed) {
-          width: 82px;
+        .mobile-menu-toggle {
+          display: inline-flex !important;
+          align-items: center;
+          gap: 6px;
+          background: rgba(30, 41, 59, 0.08);
+          border: 1px solid rgba(30, 41, 59, 0.18);
+          color: #1e293b;
+          padding: 8px 12px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 650;
+          cursor: pointer;
+          min-height: 44px;
+          min-width: 44px;
+          margin-right: 8px;
         }
 
-        .sidebar:not(.collapsed) .logo-text-block,
-        .sidebar:not(.collapsed) .menu-btn-label,
-        .sidebar:not(.collapsed) .status-badge {
-          display: none;
+        .mobile-menu-toggle:hover {
+          background: rgba(30, 41, 59, 0.15);
         }
 
-        .sidebar:not(.collapsed) .logo-area,
-        .sidebar:not(.collapsed) .menu-btn {
-          justify-content: center;
+        .sidebar-drawer-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.55);
+          backdrop-filter: blur(2px);
+          z-index: 9998;
+          display: block;
         }
 
-        .sidebar:not(.collapsed) .menu-btn {
-          padding-left: 0;
-          padding-right: 0;
+        .sidebar-drawer-overlay.hidden {
+          display: none !important;
         }
 
-        .sidebar-footer button {
-          overflow: hidden;
-          font-size: 0 !important;
+        .sidebar,
+        .sidebar:not(.collapsed),
+        .sidebar.collapsed {
+          position: fixed !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          left: -290px !important;
+          width: 280px !important;
+          height: 100vh !important;
+          max-height: 100vh !important;
+          z-index: 9999 !important;
+          transition: left 0.25s ease !important;
+          box-shadow: 4px 0 24px rgba(0,0,0,0.3) !important;
+          display: flex !important;
+          flex-direction: column !important;
+          overflow-y: auto !important;
+          padding: 20px 0 !important;
         }
 
-        .sidebar-footer button::first-letter {
-          font-size: 15px;
+        .sidebar.mobile-open {
+          left: 0 !important;
+        }
+
+        .sidebar.mobile-open .logo-text-block,
+        .sidebar.mobile-open .menu-btn-label,
+        .sidebar.mobile-open .status-badge {
+          display: block !important;
+        }
+
+        .sidebar.mobile-open .logo-area,
+        .sidebar.mobile-open .menu-btn {
+          justify-content: flex-start !important;
+        }
+
+        .sidebar.mobile-open .menu-btn {
+          padding-left: 20px !important;
+          padding-right: 20px !important;
+        }
+
+        .sidebar.mobile-open .sidebar-footer {
+          display: block !important;
+        }
+
+        .sidebar.mobile-open .sidebar-footer button {
+          font-size: 14px !important;
+        }
+
+        .content-area {
+          width: 100% !important;
+          max-width: 100vw !important;
+          padding: 14px !important;
+          overflow-x: hidden !important;
         }
 
         #screen-new-order.screen-view {
@@ -2105,34 +2176,47 @@
         }
 
         .pos-layout {
-          display: grid;
-          grid-template-columns: 1fr;
-          height: auto;
+          display: flex !important;
+          flex-direction: column !important;
+          gap: 16px !important;
+          height: auto !important;
         }
 
         .menu-selection-box,
         .cart-box {
-          height: auto;
-          min-height: 620px;
-        }
-
-        .cart-box {
-          min-height: 560px;
+          width: 100% !important;
+          height: auto !important;
+          min-height: auto !important;
         }
 
         .food-grid {
-          min-height: 360px;
-          max-height: 520px;
+          grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)) !important;
+          max-height: 480px !important;
+          overflow-y: auto !important;
         }
 
         .history-table-container,
-        .management-table-container {
-          max-height: none;
-          overflow-x: auto;
+        .management-table-container,
+        .inventory-table-container,
+        .purchases-table-container,
+        .billing-table-container,
+        .reports-table-container,
+        .table-responsive {
+          width: 100% !important;
+          max-width: 100% !important;
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch !important;
         }
 
-        .history-table {
-          min-width: 880px;
+        input[type="text"],
+        input[type="number"],
+        input[type="email"],
+        input[type="password"],
+        input[type="search"],
+        input[type="date"],
+        select,
+        textarea {
+          font-size: 16px !important;
         }
       }
 
@@ -5436,6 +5520,7 @@
     </div>
 
     <div class="app-container hidden">
+      <div id="sidebar-drawer-overlay" class="sidebar-drawer-overlay hidden" onclick="closeMobileDrawer()"></div>
       <aside class="sidebar" id="app-sidebar">
         <div class="logo-area">
           <div class="brand-mark" aria-hidden="true">BT</div>
@@ -5623,6 +5708,17 @@
           <div class="app-topbar-context">
             <span class="app-topbar-eyebrow">Business workspace</span>
             <div class="app-topbar-title-row">
+              <button
+                type="button"
+                id="mobile-menu-toggle"
+                class="mobile-menu-toggle"
+                onclick="toggleMobileDrawer()"
+                aria-label="Toggle navigation menu"
+                title="Navigation Menu"
+              >
+                <span>☰</span>
+                <span>Menu</span>
+              </button>
               <h1 id="app-screen-title">Dashboard</h1>
               <span id="app-screen-status" class="app-screen-status">Live</span>
             </div>
@@ -15341,6 +15437,16 @@
           subtitle: "Subscription plan, payments and checkout",
           keywords: "billing subscription plan payment checkout stripe invoice",
         },
+        inventory: {
+          title: "Inventory",
+          subtitle: "Manage stock items, ingredients, units and low stock warnings",
+          keywords: "inventory stock items ingredients unit adjustment waste recipe",
+        },
+        purchases: {
+          title: "Purchases",
+          subtitle: "Manage suppliers, purchase orders and stock receiving",
+          keywords: "purchases suppliers purchase orders receiving vendor",
+        },
       };
 
       function updateProfessionalAppHeader(screenId) {
@@ -15481,6 +15587,7 @@
 
       function switchScreen(screenId) {
         if (window.event) window.event.preventDefault();
+        closeMobileDrawer();
         AppState.session.currentScreen = screenId;
         updateProfessionalAppHeader(screenId);
 
@@ -19063,6 +19170,24 @@
       }
 
       // 📌 Sidebar collapse/expand — remembers the user's preference across reloads (simple UI preference, not business data)
+      function toggleMobileDrawer() {
+        const sidebar = document.getElementById("app-sidebar");
+        const overlay = document.getElementById("sidebar-drawer-overlay");
+        if (!sidebar) return;
+        const isOpen = sidebar.classList.toggle("mobile-open");
+        if (overlay) {
+          if (isOpen) overlay.classList.remove("hidden");
+          else overlay.classList.add("hidden");
+        }
+      }
+
+      function closeMobileDrawer() {
+        const sidebar = document.getElementById("app-sidebar");
+        const overlay = document.getElementById("sidebar-drawer-overlay");
+        if (sidebar) sidebar.classList.remove("mobile-open");
+        if (overlay) overlay.classList.add("hidden");
+      }
+
       function toggleSidebarCollapse() {
         const sidebar = document.getElementById("app-sidebar");
         if (!sidebar) return;
