@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -60,12 +60,32 @@ export async function provisionIntegrationDatabase() {
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
     await admin.query("GRANT ALL ON SCHEMA public TO public;");
 
+    await admin.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version integer PRIMARY KEY,
+        name text NOT NULL,
+        checksum text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
     const files = (await readdir(MIGRATIONS_DIR))
       .filter((file) => file.endsWith(".sql"))
       .sort();
     for (const file of files) {
       const sql = await readFile(path.join(MIGRATIONS_DIR, file), "utf8");
       await admin.query(sql);
+      const match = /^(\d+)_(.+)\.sql$/.exec(file);
+      if (match) {
+        const version = Number(match[1]);
+        const name = match[2];
+        const hash = createHash("sha256").update(sql, "utf8").digest("hex");
+        await admin.query(
+          `INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)
+           ON CONFLICT (version) DO UPDATE SET checksum = EXCLUDED.checksum`,
+          [version, name, hash],
+        );
+      }
     }
 
     await admin.query(`
