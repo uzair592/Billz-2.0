@@ -9,6 +9,7 @@ import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
 import { createStaticFileHandler } from "./static-files.mjs";
+import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
@@ -17,10 +18,17 @@ const registrationSchema = z.object({
   restaurantName: z.string().trim().min(1).max(160),
 });
 
-const loginSchema = z.object({
-  email: z.email().max(320),
-  password: z.string().min(1).max(200),
-});
+const loginSchema = z.union([
+  z.object({
+    restaurantCode: z.string().trim().min(1).max(64),
+    username: z.string().trim().min(1).max(64),
+    password: z.string().min(1).max(200),
+  }),
+  z.object({
+    email: z.string().trim().email().max(320),
+    password: z.string().min(1).max(200),
+  }),
+]);
 
 const verificationSchema = z.object({
   token: z.string().min(32).max(200),
@@ -369,6 +377,10 @@ function resolveIdempotencyKey(request, body) {
 
 export async function buildHttpApp({
   authService,
+  platformAdminService = null,
+  platformAdminPortalService = null,
+  entitlementService = null,
+  storageService = null,
   tenantContextService = null,
   menuService = null,
   businessSettingsService = null,
@@ -409,7 +421,8 @@ export async function buildHttpApp({
   });
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
-  await app.register(rateLimit, { global: true, max: 120, timeWindow: "1 minute" });
+  const rateLimitMax = (nodeEnv === "test" || process.env.DISABLE_RATE_LIMIT === "true") ? 100_000 : 120;
+  await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute" });
 
   // Security headers that do not depend on helmet's CSP. The legacy POS
   // uses inline event handlers and inline scripts, so a restrictive CSP
@@ -508,7 +521,17 @@ export async function buildHttpApp({
     const serveStatic = createStaticFileHandler();
     app.get("/", { config: { subscriptionExempt: true } }, serveStatic);
     app.get("/src/client/*", { config: { subscriptionExempt: true } }, serveStatic);
+    app.get("/platform-admin", { config: { subscriptionExempt: true } }, serveStatic);
+    app.get("/platform-admin/*", { config: { subscriptionExempt: true } }, serveStatic);
     app.get(`/${"Fast_Food_POS_Custom_Bill_Header_XXXL.html"}`, { config: { subscriptionExempt: true } }, serveStatic);
+  }
+
+  if (platformAdminService && platformAdminPortalService) {
+    await registerPlatformAdminRoutes(app, {
+      platformAdminService,
+      platformAdminPortalService,
+      secureCookies,
+    });
   }
 
   if (billingWebhookService) {
@@ -579,12 +602,35 @@ export async function buildHttpApp({
     { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
     async (request, reply) => {
       const input = loginSchema.parse(request.body);
-      const session = await authService.login({
-        ...input,
-        ...requestMetadata(request),
-      });
-      setSessionCookie(reply, session, secureCookies);
-      return { user: session.user };
+      try {
+        const session = await authService.login({
+          ...input,
+          ...requestMetadata(request),
+        });
+        setSessionCookie(reply, session, secureCookies);
+        return { user: session.user };
+      } catch (err) {
+        if (err.code === "RESTAURANT_SUSPENDED") {
+          return reply.code(403).send({
+            error: err.message,
+            code: "RESTAURANT_SUSPENDED",
+            restaurant: err.restaurant,
+          });
+        }
+        if (err.code === "USER_DISABLED") {
+          return reply.code(403).send({
+            error: err.message,
+            code: "USER_DISABLED",
+          });
+        }
+        if (err.code === "INVALID_CREDENTIALS") {
+          return reply.code(401).send({
+            error: err.message,
+            code: "INVALID_CREDENTIALS",
+          });
+        }
+        throw err;
+      }
     },
   );
 
@@ -1317,6 +1363,61 @@ export async function buildHttpApp({
           tenant: request.tenant,
           limit: request.query?.limit,
         }),
+      );
+    }
+
+    if (entitlementService) {
+      app.get(
+        "/api/pos/entitlement",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.ORDER_CREATE),
+          ],
+        },
+        async (request) => {
+          const deviceId = request.headers["x-device-id"] || request.query?.deviceId || "POS-Till-01";
+          return entitlementService.issueToken({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            deviceId: String(deviceId),
+            permissions: ["ORDER_CREATE", "ORDER_VIEW"],
+            subscriptionState: request.tenant.subscriptionAccess?.status ?? "active",
+          });
+        },
+      );
+    }
+
+    if (storageService) {
+      app.get(
+        "/api/pos/storage/usage",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.SETTINGS_MANAGE),
+          ],
+        },
+        async (request) => storageService.getStorageUsage(request.tenant.restaurant.id),
+      );
+
+      app.post(
+        "/api/pos/storage/upload",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.SETTINGS_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const body = request.body || {};
+          const result = await storageService.reserveAndStoreAsset({
+            restaurantId: request.tenant.restaurant.id,
+            fileName: body.fileName,
+            mimeType: body.mimeType,
+            buffer: Buffer.from(body.contentBase64 || "", "base64"),
+          });
+          return reply.code(201).send(result);
+        },
       );
     }
   }

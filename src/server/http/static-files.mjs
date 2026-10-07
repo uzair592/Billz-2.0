@@ -49,12 +49,15 @@ export function createStaticFileHandler({ root = appRoot() } = {}) {
     if (pathname === "/" || pathname === "") {
       pathname = `/${CLIENT_ENTRY}`;
     }
+    if (pathname === "/platform-admin" || pathname === "/platform-admin/") {
+      pathname = "/platform-admin/index.html";
+    }
 
-    // Only the POS entry page and client modules are served. Anything
-    // else is left to the API routes (which 404).
+    // Only POS entry page, platform-admin portal, and client modules are served.
     const isClientModule = pathname.startsWith("/src/client/");
+    const isPlatformAdmin = pathname.startsWith("/platform-admin/");
     const isEntry = pathname === `/${CLIENT_ENTRY}`;
-    if (!isClientModule && !isEntry) {
+    if (!isClientModule && !isPlatformAdmin && !isEntry) {
       return reply.code(404).send({ error: "Not found." });
     }
 

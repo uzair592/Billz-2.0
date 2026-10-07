@@ -29,6 +29,11 @@ import {
   closeDatabasePool,
   createDatabasePool,
 } from "./database/pool.mjs";
+import { createPlatformAdminRepository } from "./auth/platform-admin-repository.mjs";
+import { createPlatformAdminService } from "./auth/platform-admin-service.mjs";
+import { createPlatformAdminPortalService } from "./subscriptions/platform-admin-portal-service.mjs";
+import { createEntitlementService } from "./auth/entitlement-service.mjs";
+import { createStorageService } from "./storage/storage-service.mjs";
 import { verifyMigrationsCurrent } from "./database/migration-runner.mjs";
 
 /**
@@ -108,22 +113,24 @@ export async function createServer({
     passwordPepper: config.pepper,
   });
 
+  const platformAdminRepository = createPlatformAdminRepository(database);
+  const platformAdminService = createPlatformAdminService({
+    repository: platformAdminRepository,
+    passwordPepper: config.pepper,
+  });
+  const platformAdminPortalService = createPlatformAdminPortalService({
+    pool: database,
+    passwordPepper: config.pepper,
+  });
+  const entitlementService = createEntitlementService();
+  const storageService = createStorageService({ pool: database });
+
   const orderRefundService = createOrderRefundService(database);
   const salesReportService = createSalesReportService(database);
-  // The order service is wired so the real checkout flow
-  // (POST /api/pos/orders, where the legacy POS outbox
-  // delivers every completed order) deducts recipe
-  // ingredients from the inventory domain inside the
-  // authoritative order transaction. The consumption
-  // service is shared so the order service and any direct
-  // caller use one instance.
   const inventoryConsumptionService = createInventoryConsumptionService(database);
   const orderService = createOrderService(database, {
     inventoryConsumption: inventoryConsumptionService,
   });
-  // The menu service is wired so the recipe editor can list
-  // the restaurant's products. It is a read-only, existing
-  // route (GET /api/pos/menu) guarded by ORDER_CREATE.
   const menuService = createMenuService(database);
   const supplierService = createSupplierService(database);
   const inventoryService = createInventoryService(database);
@@ -132,6 +139,10 @@ export async function createServer({
 
   const app = await buildHttpApp({
     authService,
+    platformAdminService,
+    platformAdminPortalService,
+    entitlementService,
+    storageService,
     tenantContextService: createTenantContextService(database),
     subscriptionService,
     billingWebhookService,
