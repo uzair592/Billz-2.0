@@ -10,6 +10,8 @@ import { createOrderCancellationUI } from "./order-cancellation-ui.mjs";
 import { createOrderRefundUI } from "./order-refund-ui.mjs";
 import { createSalesReportUI } from "./sales-report-ui.mjs";
 import { createBillingUI } from "./billing-ui.mjs";
+import { createInventoryUI } from "./inventory-ui.mjs";
+import { createPurchasesUI } from "./purchases-ui.mjs";
 import { createCloudStatus } from "./cloud-status.mjs";
 
 const storage = createBrowserIndexedDbStorage();
@@ -103,6 +105,27 @@ function showLocalReports() {
 window.showCloudSalesReport = showCloudSalesReport;
 window.showLocalReports = showLocalReports;
 
+// Inventory screen — stock items with weighted-average
+// costing, the immutable movement ledger, adjustments,
+// waste, low-stock warnings, and product recipes.
+const inventoryContainer = document.getElementById(
+  "inventory-screen-container",
+);
+const inventoryUI = createInventoryUI({
+  containerEl: inventoryContainer ?? undefined,
+});
+globalThis.BiteTechInventory = inventoryUI;
+
+// Purchases screen — suppliers, draft purchasing
+// documents, and receiving with stock receipt.
+const purchasesContainer = document.getElementById(
+  "purchases-screen-container",
+);
+const purchasesUI = createPurchasesUI({
+  containerEl: purchasesContainer ?? undefined,
+});
+globalThis.BiteTechPurchases = purchasesUI;
+
 globalThis.addEventListener("online", () => {
   adapter.flush().catch((error) => console.warn("Cloud order retry failed:", error));
   cloudStatus.refresh();
@@ -117,4 +140,6 @@ export {
   orderRefund,
   billingUI,
   salesReportUI,
+  inventoryUI,
+  purchasesUI,
 };

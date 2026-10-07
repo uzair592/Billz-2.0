@@ -137,6 +137,124 @@ const cancelSubscriptionSchema = z.object({
   cancelAtPeriodEnd: z.boolean().default(true),
 }).strict();
 
+const supplierSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  contactPerson: z.string().trim().min(1).max(200).nullable().optional(),
+  phone: z.string().trim().min(1).max(40).nullable().optional(),
+  email: z.string().trim().min(1).max(320).nullable().optional(),
+  address: z.string().trim().min(1).max(500).nullable().optional(),
+  notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const supplierUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  contactPerson: z.string().trim().min(1).max(200).nullable().optional(),
+  phone: z.string().trim().min(1).max(40).nullable().optional(),
+  email: z.string().trim().min(1).max(320).nullable().optional(),
+  address: z.string().trim().min(1).max(500).nullable().optional(),
+  notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const supplierParamsSchema = z.object({ supplierId: z.uuid() }).strict();
+
+const inventoryItemSchema = z.object({
+  idempotencyKey: z.uuid(),
+  name: z.string().trim().min(1).max(200),
+  sku: z.string().trim().min(1).max(64).nullable().optional(),
+  baseUnit: z.enum(["piece", "gram", "kilogram", "millilitre", "litre"]),
+  openingQuantity: z.number().finite().min(0).max(999_999_999).optional(),
+  reorderLevel: z.number().finite().min(0).max(999_999_999).optional(),
+  averageCostMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+}).strict();
+
+const inventoryItemUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  sku: z.string().trim().min(1).max(64).nullable().optional(),
+  reorderLevel: z.number().finite().min(0).max(999_999_999).optional(),
+  averageCostMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+const inventoryItemParamsSchema = z.object({ itemId: z.uuid() }).strict();
+
+const inventoryListQuerySchema = z.object({
+  search: z.string().trim().max(160).optional(),
+  isActive: z.enum(["true", "false"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().trim().max(500).optional(),
+}).strict();
+
+const inventoryMovementsQuerySchema = z.object({
+  itemId: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().trim().max(500).optional(),
+}).strict();
+
+const inventoryAdjustmentSchema = z.object({
+  idempotencyKey: z.uuid(),
+  itemId: z.uuid(),
+  direction: z.enum(["increase", "decrease"]),
+  quantity: z.number().finite().min(0).max(999_999_999),
+  reason: z.string().trim().min(1).max(2000),
+}).strict();
+
+const inventoryWasteSchema = z.object({
+  idempotencyKey: z.uuid(),
+  itemId: z.uuid(),
+  quantity: z.number().finite().min(0).max(999_999_999),
+  reason: z.string().trim().min(1).max(2000),
+}).strict();
+
+const recipeReplaceSchema = z.object({
+  items: z.array(z.object({
+    inventoryItemId: z.uuid(),
+    quantityRequired: z.number().finite().min(0).max(999_999_999),
+  }).strict()).max(100),
+}).strict();
+
+const recipeParamsSchema = z.object({ productId: z.uuid() }).strict();
+
+const purchaseLineSchema = z.object({
+  inventoryItemId: z.uuid(),
+  quantity: z.number().finite().min(0).max(999_999_999),
+  unitCostMinor: z.number().int().min(0).max(999_999_999_999),
+}).strict();
+
+const purchaseSchema = z.object({
+  idempotencyKey: z.uuid(),
+  supplierId: z.uuid(),
+  supplierInvoiceNumber: z.string().trim().min(1).max(100).nullable().optional(),
+  purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  discountMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+  taxMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+  notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  items: z.array(purchaseLineSchema).min(1).max(100),
+}).strict();
+
+const purchaseUpdateSchema = z.object({
+  supplierId: z.uuid().optional(),
+  supplierInvoiceNumber: z.string().trim().min(1).max(100).nullable().optional(),
+  purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  discountMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+  taxMinor: z.number().int().min(0).max(999_999_999_999).optional(),
+  notes: z.string().trim().min(1).max(2000).nullable().optional(),
+  items: z.array(purchaseLineSchema).min(1).max(100).optional(),
+}).strict();
+
+const purchaseReceiveSchema = z.object({
+  idempotencyKey: z.uuid().optional(),
+}).strict();
+
+const purchaseParamsSchema = z.object({ purchaseId: z.uuid() }).strict();
+
+const purchaseListQuerySchema = z.object({
+  status: z.enum(["draft", "received", "cancelled"]).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  cursor: z.string().trim().max(500).optional(),
+}).strict();
+
 const legacyDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
 const legacyCategoryOfferSchema = z.object({
   active: z.boolean(),
@@ -231,6 +349,24 @@ function requestMetadata(request) {
   };
 }
 
+const IDEMPOTENCY_KEY_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolves the idempotency key for a mutating request from
+ * the Idempotency-Key header, falling back to a body field.
+ * Returns null when no valid key is present so the caller can
+ * answer 400 MISSING_IDEMPOTENCY_KEY.
+ */
+function resolveIdempotencyKey(request, body) {
+  const fromHeader = request.headers["idempotency-key"];
+  const candidate = fromHeader || body?.idempotencyKey;
+  if (typeof candidate !== "string" || !IDEMPOTENCY_KEY_PATTERN.test(candidate)) {
+    return null;
+  }
+  return candidate;
+}
+
 export async function buildHttpApp({
   authService,
   tenantContextService = null,
@@ -241,6 +377,10 @@ export async function buildHttpApp({
   orderCancellationService = null,
   orderRefundService = null,
   salesReportService = null,
+  supplierService = null,
+  inventoryService = null,
+  recipeService = null,
+  purchaseService = null,
   catalogImportService = null,
   subscriptionService = null,
   billingWebhookService = null,
@@ -484,7 +624,9 @@ export async function buildHttpApp({
   if (tenantContextService
       && (menuService || businessSettingsService || orderService
         || orderHistoryService || orderCancellationService || orderRefundService
-        || salesReportService || catalogImportService || subscriptionService)) {
+        || salesReportService || supplierService || inventoryService
+        || recipeService || purchaseService || catalogImportService
+        || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
 
     if (menuService) {
@@ -724,6 +866,362 @@ export async function buildHttpApp({
           reply.header("Content-Type", "text/csv; charset=utf-8");
           reply.header("Content-Disposition", `attachment; filename="${filename}"`);
           return reply.send(csvData);
+        },
+      );
+    }
+
+    if (supplierService) {
+      app.get(
+        "/api/pos/suppliers",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_VIEW),
+          ],
+        },
+        async (request) => {
+          const isActive = request.query?.isActive === undefined
+            ? null
+            : request.query.isActive === "true";
+          return supplierService.list({
+            restaurantId: request.tenant.restaurant.id,
+            isActive,
+          });
+        },
+      );
+
+      app.post(
+        "/api/pos/suppliers",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const result = await supplierService.create({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            input: supplierSchema.parse(request.body ?? {}),
+          });
+          return reply.code(201).send(result);
+        },
+      );
+
+      app.patch(
+        "/api/pos/suppliers/:supplierId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const { supplierId } = supplierParamsSchema.parse(request.params);
+          const result = await supplierService.update({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            supplierId,
+            changes: supplierUpdateSchema.parse(request.body ?? {}),
+          });
+          return reply.send(result);
+        },
+      );
+    }
+
+    if (inventoryService) {
+      app.get(
+        "/api/pos/inventory/items",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_VIEW),
+          ],
+        },
+        async (request) => {
+          const filters = inventoryListQuerySchema.parse(request.query ?? {});
+          return inventoryService.list({
+            restaurantId: request.tenant.restaurant.id,
+            search: filters.search ?? null,
+            isActive: filters.isActive === undefined
+              ? null
+              : filters.isActive === "true",
+            limit: filters.limit,
+            cursor: filters.cursor,
+          });
+        },
+      );
+
+      app.post(
+        "/api/pos/inventory/items",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const result = await inventoryService.create({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            input: inventoryItemSchema.parse(request.body ?? {}),
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      app.get(
+        "/api/pos/inventory/items/:itemId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_VIEW),
+          ],
+        },
+        async (request) => {
+          const { itemId } = inventoryItemParamsSchema.parse(request.params);
+          return inventoryService.get({
+            restaurantId: request.tenant.restaurant.id,
+            itemId,
+          });
+        },
+      );
+
+      app.patch(
+        "/api/pos/inventory/items/:itemId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const { itemId } = inventoryItemParamsSchema.parse(request.params);
+          const result = await inventoryService.update({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            itemId,
+            changes: inventoryItemUpdateSchema.parse(request.body ?? {}),
+          });
+          return reply.send(result);
+        },
+      );
+
+      app.get(
+        "/api/pos/inventory/low-stock",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_VIEW),
+          ],
+        },
+        async (request) => {
+          const filters = inventoryListQuerySchema.parse(request.query ?? {});
+          return inventoryService.lowStock({
+            restaurantId: request.tenant.restaurant.id,
+            limit: filters.limit,
+          });
+        },
+      );
+
+      app.get(
+        "/api/pos/inventory/movements",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_VIEW),
+          ],
+        },
+        async (request) => {
+          const filters = inventoryMovementsQuerySchema.parse(request.query ?? {});
+          return inventoryService.movements({
+            restaurantId: request.tenant.restaurant.id,
+            itemId: filters.itemId ?? null,
+            limit: filters.limit,
+            cursor: filters.cursor,
+          });
+        },
+      );
+
+      app.post(
+        "/api/pos/inventory/adjustments",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_ADJUST),
+          ],
+        },
+        async (request, reply) => {
+          const body = inventoryAdjustmentSchema.parse(request.body ?? {});
+          const result = await inventoryService.adjust({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            input: body,
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      app.post(
+        "/api/pos/inventory/waste",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_ADJUST),
+          ],
+        },
+        async (request, reply) => {
+          const body = inventoryWasteSchema.parse(request.body ?? {});
+          const result = await inventoryService.waste({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            input: body,
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+    }
+
+    if (recipeService) {
+      app.get(
+        "/api/pos/products/:productId/recipe",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.INVENTORY_VIEW),
+          ],
+        },
+        async (request) => {
+          const { productId } = recipeParamsSchema.parse(request.params);
+          return recipeService.get({
+            restaurantId: request.tenant.restaurant.id,
+            productId,
+          });
+        },
+      );
+
+      app.put(
+        "/api/pos/products/:productId/recipe",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.RECIPES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const { productId } = recipeParamsSchema.parse(request.params);
+          const body = recipeReplaceSchema.parse(request.body ?? {});
+          const result = await recipeService.replace({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            productId,
+            items: body.items,
+          });
+          return reply.send(result);
+        },
+      );
+    }
+
+    if (purchaseService) {
+      app.get(
+        "/api/pos/purchases",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_VIEW),
+          ],
+        },
+        async (request) => {
+          const filters = purchaseListQuerySchema.parse(request.query ?? {});
+          return purchaseService.list({
+            restaurantId: request.tenant.restaurant.id,
+            status: filters.status ?? null,
+            limit: filters.limit,
+            cursor: filters.cursor,
+          });
+        },
+      );
+
+      app.post(
+        "/api/pos/purchases",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const result = await purchaseService.create({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            input: purchaseSchema.parse(request.body ?? {}),
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      app.get(
+        "/api/pos/purchases/:purchaseId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_VIEW),
+          ],
+        },
+        async (request) => {
+          const { purchaseId } = purchaseParamsSchema.parse(request.params);
+          return purchaseService.get({
+            restaurantId: request.tenant.restaurant.id,
+            purchaseId,
+          });
+        },
+      );
+
+      app.patch(
+        "/api/pos/purchases/:purchaseId",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const { purchaseId } = purchaseParamsSchema.parse(request.params);
+          const result = await purchaseService.update({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            purchaseId,
+            changes: purchaseUpdateSchema.parse(request.body ?? {}),
+          });
+          return reply.send(result);
+        },
+      );
+
+      app.post(
+        "/api/pos/purchases/:purchaseId/receive",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PURCHASES_MANAGE),
+          ],
+        },
+        async (request, reply) => {
+          const { purchaseId } = purchaseParamsSchema.parse(request.params);
+          const body = purchaseReceiveSchema.parse(request.body ?? {});
+          const idempotencyKey = resolveIdempotencyKey(request, body);
+          if (!idempotencyKey) {
+            return reply.code(400).send({
+              error: "A valid Idempotency-Key header is required.",
+              code: "MISSING_IDEMPOTENCY_KEY",
+            });
+          }
+          const result = await purchaseService.receive({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            purchaseId,
+            idempotencyKey,
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
         },
       );
     }

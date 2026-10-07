@@ -2,7 +2,7 @@ name: PostgreSQL Validation
 
 on:
   push:
-    branches: [main, feat/milestone-13-production-pilot]
+    branches: [main, feat/milestone-10-billing, feat/milestone-11-pos-operations-ui, feat/milestone-12-refunds-sales-reports, feat/milestone-13-production-pilot, feat/milestone-14-inventory-purchasing]
   pull_request:
     branches: [main]
 
@@ -78,9 +78,8 @@ jobs:
         shell: bash
         run: |
           # Pure unit tests only. PostgreSQL-dependent suites are
-          # separated into the dedicated postgres step below so they
-          # never run before the database is reachable or with the
-          # wrong connection URL.
+          # separated into dedicated steps so they never run before
+          # the database is reachable or with the wrong connection URL.
           node tests/run-unit-tests.mjs
 
       - name: Wait for PostgreSQL
@@ -98,7 +97,7 @@ jobs:
 
       - name: Apply migrations
         run: |
-          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 11
+          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 12
           export PGPASSWORD=validation-only
           for migration in database/migrations/*.sql; do
             echo "Applying $migration"

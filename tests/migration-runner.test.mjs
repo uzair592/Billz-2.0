@@ -60,21 +60,21 @@ describe("migration runner", () => {
     await dropScratchDatabase(databaseName);
   });
 
-  it("applies all 11 migrations to a clean database", async () => {
+  it("applies all 12 migrations to a clean database", async () => {
     const result = await runMigrations({ pool, migrationsDir: REAL_MIGRATIONS_DIR, logger: silentLogger });
-    assert.equal(result.applied, 11);
+    assert.equal(result.applied, 12);
     assert.equal(result.alreadyApplied, 0);
 
     const applied = await getAppliedMigrations(pool);
-    assert.equal(applied.size, 11);
+    assert.equal(applied.size, 12);
     // The highest version is the partial-refunds migration.
-    assert.ok(applied.has(11));
+    assert.ok(applied.has(12));
   });
 
   it("is idempotent on a repeated run", async () => {
     const result = await runMigrations({ pool, migrationsDir: REAL_MIGRATIONS_DIR, logger: silentLogger });
     assert.equal(result.applied, 0);
-    assert.equal(result.alreadyApplied, 11);
+    assert.equal(result.alreadyApplied, 12);
   });
 
   it("detects a changed checksum and refuses to continue", async () => {

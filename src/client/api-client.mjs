@@ -420,7 +420,168 @@ export const salesReportApi = {
   },
 };
 
+function buildQuery(params, keys) {
+  const query = new URLSearchParams();
+  for (const key of keys) {
+    const value = params[key];
+    if (value === undefined || value === null || value === "") continue;
+    query.set(key, String(value));
+  }
+  const queryString = query.toString();
+  return queryString ? `?${queryString}` : "";
+}
+
+// Menu — GET /api/pos/menu, used by the recipe
+// editor to list the restaurant's products.
+export const menuApi = {
+  async list() {
+    return apiRequest("/pos/menu");
+  },
+};
+
+// Suppliers — GET/POST /api/pos/suppliers, PATCH /api/pos/suppliers/:supplierId
+export const supplierApi = {
+  async list({ isActive } = {}) {
+    const query = new URLSearchParams();
+    if (isActive !== undefined && isActive !== null) {
+      query.set("isActive", String(isActive));
+    }
+    const queryString = query.toString();
+    return apiRequest(`/pos/suppliers${queryString ? `?${queryString}` : ""}`);
+  },
+
+  async create(payload) {
+    return apiRequest("/pos/suppliers", {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async update(supplierId, payload) {
+    return apiRequest(`/pos/suppliers/${encodeURIComponent(supplierId)}`, {
+      method: "PATCH",
+      body: payload,
+    });
+  },
+};
+
+// Inventory — items, low-stock warnings, the immutable
+// movement ledger, adjustments, and waste.
+export const inventoryApi = {
+  async list({ search, isActive, limit, cursor } = {}) {
+    const query = new URLSearchParams();
+    if (search) query.set("search", search);
+    if (isActive !== undefined && isActive !== null) {
+      query.set("isActive", String(isActive));
+    }
+    if (limit) query.set("limit", String(limit));
+    if (cursor) query.set("cursor", cursor);
+    const queryString = query.toString();
+    return apiRequest(`/pos/inventory/items${queryString ? `?${queryString}` : ""}`);
+  },
+
+  async create(payload) {
+    return apiRequest("/pos/inventory/items", {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async get(itemId) {
+    return apiRequest(`/pos/inventory/items/${encodeURIComponent(itemId)}`);
+  },
+
+  async update(itemId, payload) {
+    return apiRequest(`/pos/inventory/items/${encodeURIComponent(itemId)}`, {
+      method: "PATCH",
+      body: payload,
+    });
+  },
+
+  async lowStock({ limit } = {}) {
+    const query = new URLSearchParams();
+    if (limit) query.set("limit", String(limit));
+    const queryString = query.toString();
+    return apiRequest(`/pos/inventory/low-stock${queryString ? `?${queryString}` : ""}`);
+  },
+
+  async movements({ itemId, limit, cursor } = {}) {
+    const query = new URLSearchParams();
+    if (itemId) query.set("itemId", itemId);
+    if (limit) query.set("limit", String(limit));
+    if (cursor) query.set("cursor", cursor);
+    const queryString = query.toString();
+    return apiRequest(`/pos/inventory/movements${queryString ? `?${queryString}` : ""}`);
+  },
+
+  async adjust(payload) {
+    return apiRequest("/pos/inventory/adjustments", {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async waste(payload) {
+    return apiRequest("/pos/inventory/waste", {
+      method: "POST",
+      body: payload,
+    });
+  },
+};
+
+// Recipes — GET/PUT /api/pos/products/:productId/recipe
+export const recipeApi = {
+  async get(productId) {
+    return apiRequest(`/pos/products/${encodeURIComponent(productId)}/recipe`);
+  },
+
+  async replace(productId, items) {
+    return apiRequest(`/pos/products/${encodeURIComponent(productId)}/recipe`, {
+      method: "PUT",
+      body: { items },
+    });
+  },
+};
+
+// Purchases — draft purchasing documents and receiving.
+export const purchaseApi = {
+  async list({ status, limit, cursor } = {}) {
+    const queryString = buildQuery({ status, limit, cursor }, ["status", "limit", "cursor"]);
+    return apiRequest(`/pos/purchases${queryString}`);
+  },
+
+  async create(payload) {
+    return apiRequest("/pos/purchases", {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async get(purchaseId) {
+    return apiRequest(`/pos/purchases/${encodeURIComponent(purchaseId)}`);
+  },
+
+  async update(purchaseId, payload) {
+    return apiRequest(`/pos/purchases/${encodeURIComponent(purchaseId)}`, {
+      method: "PATCH",
+      body: payload,
+    });
+  },
+
+  async receive(purchaseId, idempotencyKey) {
+    const key = idempotencyKey || generateIdempotencyKey();
+    return apiRequest(`/pos/purchases/${encodeURIComponent(purchaseId)}/receive`, {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": key,
+      },
+      body: { idempotencyKey: key },
+    });
+  },
+};
+
 export const api = {
+  menu: menuApi,
   orders: orderHistoryApi,
   orderCancellation: orderCancellationApi,
   refunds: orderRefundApi,
@@ -429,6 +590,10 @@ export const api = {
   billing: billingApi,
   cloud: cloudSessionApi,
   sync: cloudSyncApi,
+  suppliers: supplierApi,
+  inventory: inventoryApi,
+  recipes: recipeApi,
+  purchases: purchaseApi,
 };
 
 export default api;
