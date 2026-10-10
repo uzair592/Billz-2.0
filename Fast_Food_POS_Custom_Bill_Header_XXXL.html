@@ -13564,9 +13564,8 @@
         </button>
         <h2 style="margin: 0 0 4px; font-size: 20px; color: #0f172a">☁️ Cloud sync</h2>
         <p style="margin: 0 0 18px; font-size: 13px; color: #64748b; line-height: 1.5">
-          This till keeps working offline exactly as it does now. Signing in adds a
-          secure cloud copy of the same restaurant and keeps your menu, tables,
-          stock and sales in step across devices.
+          Sign in with the restaurant code and username supplied by your administrator.
+          Cloud checkout requires a connection. Existing saved data is preserved when access expires.
         </p>
 
         <div
@@ -13585,15 +13584,14 @@
         </div>
 
         <div id="cloud-signin-panel">
-          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-email">
-            Email
+          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-restaurant-code">
+            Restaurant code
           </label>
-          <input
-            id="cloud-email"
-            type="email"
-            autocomplete="username"
-            style="width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px"
-          />
+          <input id="cloud-restaurant-code" type="text" autocomplete="organization" required
+            style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" />
+          <label for="cloud-username" style="display:block;margin:12px 0 5px;font-size:12px;font-weight:700">Username</label>
+          <input id="cloud-username" type="text" autocomplete="username" required
+            style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" />
           <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin: 12px 0 5px" for="cloud-password">
             Password
           </label>
@@ -13681,6 +13679,7 @@
       }
 
       function closeCloudAccountModal() {
+        if (window.BILLZ_MANAGED && !window.BILLZ_TENANT_ID) return;
         document.getElementById("cloud-account-modal-overlay")?.classList.add("hidden");
       }
 
@@ -13735,7 +13734,7 @@
           cloudRenderState(account);
           cloudSetStatus(
             account.restaurantId
-              ? `Signed in as ${account.user.email}. This till is linked to ${
+              ? `Signed in as ${account.user.username || account.user.displayName || account.user.email}. This till is linked to ${
                   cloudRestaurants.find((r) => r.restaurantId === account.restaurantId)?.name
                   ?? "your restaurant"
                 }.`
@@ -13752,16 +13751,18 @@
         const sessionClient = window.BiteTechCloudSession;
         if (!sessionClient) return;
         const button = document.getElementById("cloud-signin-button");
-        const email = document.getElementById("cloud-email")?.value ?? "";
+        const restaurantCode = document.getElementById("cloud-restaurant-code")?.value.trim() ?? "";
+        const username = document.getElementById("cloud-username")?.value.trim() ?? "";
         const password = document.getElementById("cloud-password")?.value ?? "";
-        if (!email || !password) {
-          cloudSetStatus("Enter your email address and password.", "error");
+        if (!restaurantCode || !username || !password) {
+          cloudSetStatus("Enter restaurant code, username and password.", "error");
           return;
         }
         if (button) button.disabled = true;
         cloudSetStatus("Signing in…");
         try {
-          await sessionClient.signIn({ email, password });
+          await sessionClient.signIn({ restaurantCode, username, password });
+          if (window.BILLZ_MANAGED) { location.reload(); return; }
           document.getElementById("cloud-password").value = "";
           await openCloudAccountModal();
         } catch (error) {
@@ -13778,6 +13779,7 @@
         cloudSetStatus("Linking this till…");
         try {
           await sessionClient.selectRestaurant(selected);
+          if (window.BILLZ_MANAGED) { location.reload(); return; }
           await openCloudAccountModal();
         } catch (error) {
           cloudSetStatus(error.message || "That restaurant could not be selected.", "error");
@@ -13811,6 +13813,7 @@
         cloudSetStatus("Signing out…");
         try {
           await sessionClient.signOut({ forgetRestaurant: true });
+          if (window.BILLZ_MANAGED) { location.reload(); return; }
           cloudRestaurants = [];
           await openCloudAccountModal();
         } catch (error) {
@@ -14318,7 +14321,15 @@
         return _idbConnection;
       }
 
+      function tenantStorageKey(key) {
+        if (!window.BILLZ_MANAGED || key === "pos_cloud_session_v1") return key;
+        if (!window.BILLZ_TENANT_ID) throw new Error("No authenticated tenant selected.");
+        return `tenant:${window.BILLZ_TENANT_ID}:${key}`;
+      }
+      let restoreWriteBuffer = null;
       function idbGet(key) {
+        if (restoreWriteBuffer?.has(key)) return Promise.resolve(restoreWriteBuffer.get(key));
+        key = tenantStorageKey(key);
         return getIndexedDBConnection().then(
           (db) =>
             new Promise((resolve, reject) => {
@@ -14331,25 +14342,30 @@
       }
 
       function idbSet(key, value) {
+        if (restoreWriteBuffer) { restoreWriteBuffer.set(key, value); return Promise.resolve(); }
+        key = tenantStorageKey(key);
         return getIndexedDBConnection().then(
           (db) =>
             new Promise((resolve, reject) => {
               const tx = db.transaction(IDB_STORE_NAME, "readwrite");
               const req = tx.objectStore(IDB_STORE_NAME).put(value, key);
-              req.onsuccess = () => resolve();
-              req.onerror = () => reject(req.error);
+              tx.oncomplete = () => resolve();
+              tx.onabort = () => reject(tx.error || new Error("Storage transaction aborted."));
+              tx.onerror = () => reject(tx.error);
             }),
         );
       }
 
       function idbDelete(key) {
+        key = tenantStorageKey(key);
         return getIndexedDBConnection().then(
           (db) =>
             new Promise((resolve, reject) => {
               const tx = db.transaction(IDB_STORE_NAME, "readwrite");
               const req = tx.objectStore(IDB_STORE_NAME).delete(key);
-              req.onsuccess = () => resolve();
-              req.onerror = () => reject(req.error);
+              tx.oncomplete = () => resolve();
+              tx.onabort = () => reject(tx.error || new Error("Storage transaction aborted."));
+              tx.onerror = () => reject(tx.error);
             }),
         );
       }
@@ -14447,12 +14463,13 @@
           const entries = Array.isArray(records)
             ? records
             : Object.entries(records);
+          if (restoreWriteBuffer) { entries.forEach(([key, value]) => restoreWriteBuffer.set(key, value)); return; }
           if (entries.length === 0) return;
           const db = await getIndexedDBConnection();
           return new Promise((resolve, reject) => {
             const tx = db.transaction(IDB_STORE_NAME, "readwrite");
             const store = tx.objectStore(IDB_STORE_NAME);
-            entries.forEach(([key, value]) => store.put(value, key));
+            entries.forEach(([key, value]) => store.put(value, tenantStorageKey(key)));
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
             tx.onabort = () => reject(tx.error || new Error("Storage transaction aborted."));
@@ -14471,7 +14488,7 @@
             const tx = db.transaction(IDB_STORE_NAME, "readwrite");
             const store = tx.objectStore(IDB_STORE_NAME);
             pending.forEach((value, key) =>
-              value === undefined ? store.delete(key) : store.put(value, key),
+              value === undefined ? store.delete(tenantStorageKey(key)) : store.put(value, tenantStorageKey(key)),
             );
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
@@ -14603,11 +14620,13 @@
           if (Number(data.schemaVersion) > APP_SCHEMA_VERSION)
             errors.push("This backup was created by a newer, unsupported app version.");
           if (Array.isArray(data.pos_orders)) {
-            data.pos_orders.slice(0, 1000).forEach((order, index) => {
+            data.pos_orders.forEach((order, index) => {
               if (!ValidationEngine.isPlainObject(order))
                 errors.push(`Order ${index + 1} is invalid.`);
-              else if (order.totalBill !== undefined && !Number.isFinite(Number(order.totalBill)))
-                errors.push(`Order ${index + 1} has an invalid total.`);
+              else {
+                if (!Number.isFinite(Number(order.totalBill)) || Number(order.totalBill) < 0) errors.push(`Order ${index + 1} has an invalid total.`);
+                if (!Array.isArray(order.items) || order.items.some(item => !ValidationEngine.isPlainObject(item) || typeof item.name !== "string" || !Number.isFinite(Number(item.qty)) || Number(item.qty) <= 0 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) errors.push(`Order ${index + 1} has invalid items.`);
+              }
             });
           }
           if (ValidationEngine.isPlainObject(data.pos_subcategories)) {
@@ -14626,6 +14645,12 @@
             if (!ValidationEngine.isPlainObject(field) || typeof field.key !== "string" || typeof field.label !== "string")
               errors.push(`Expense category ${index + 1} is invalid.`);
           });
+          for (const key of ["pos_menu_images", "pos_expense_receipts"]) {
+            if (data[key] !== undefined && !ValidationEngine.isPlainObject(data[key])) errors.push(`${key} must be an object.`);
+            else for (const image of Object.values(data[key] || {})) {
+              if (typeof image !== "string" || image.length > 14 * 1024 * 1024 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) errors.push(`Invalid or oversized image in ${escapeHtmlForExport(key)}.`);
+            }
+          }
           return { valid: errors.length === 0, errors };
         },
         preview(data) {
@@ -14662,6 +14687,7 @@
       const memoryStorageFallback = {};
 
       function safeStorageGet(key, useSession) {
+        if (window.BILLZ_MANAGED) key = `tenant:${window.BILLZ_TENANT_ID || "signed-out"}:${key}`;
         try {
           const store = useSession
             ? window.sessionStorage
@@ -14674,6 +14700,7 @@
       }
 
       function safeStorageSet(key, value, useSession) {
+        if (window.BILLZ_MANAGED) key = `tenant:${window.BILLZ_TENANT_ID || "signed-out"}:${key}`;
         memoryStorageFallback[key] = String(value);
         try {
           const store = useSession
@@ -14700,6 +14727,7 @@
       // 🔄 ONE-TIME MIGRATION: if this laptop/browser still has the old localStorage data and IndexedDB
       // hasn't been populated yet, copy it over automatically so existing client data is never lost.
       async function migrateOldLocalStorageDataIfNeeded() {
+        if (window.BILLZ_MANAGED) return; // Unowned historical device data stays quarantined.
         const alreadyMigrated = await idbGet("__migrated_from_localStorage__");
         if (alreadyMigrated) return;
 
@@ -15173,7 +15201,7 @@
         const sourceKey = `refund:${order.id}`;
         if ([...cashTransactions, ...bankTransactions].some((row) => row.sourceKey === sourceKey || (row.source === "refund" && String(row.orderId) === String(order.id)))) return;
         const original = [...cashTransactions, ...bankTransactions].find((row) =>
-          row.moneyIn > 0 && (row.sourceKey === `sale:${order.id}` || (row.source === "sale" && String(row.orderId) === String(order.id))));
+          row.moneyIn > 0 && (row.sourceKey === `sale:${escapeHtmlForExport(order.id)}` || (row.source === "sale" && String(row.orderId) === String(order.id))));
         if (!original) return;
         const row = makeLedgerRow({ date: getLocalDateString(), description: `Refund / Cancelled Invoice #${order.id}`, type: "out", amount: original.moneyIn, source: "refund", orderId: order.id, accountId: original.accountId, destinationType: original.destinationType });
         row.sourceKey = sourceKey; addLedgerRow(row);
@@ -16336,7 +16364,7 @@
                             <span class="offer-price-strike">Rs. ${item.originalPrice * item.qty}</span>
                             <strong class="${priceClass}">Rs. ${item.price * item.qty}</strong>
                         </div>
-                        <div class="offer-note-line ${noteClass}">${item.offerLabel}</div>
+                        <div class="offer-note-line ${noteClass}">${escapeHtmlForExport(item.offerLabel)}</div>
                     `;
           }
 
@@ -16346,7 +16374,7 @@
             .map((extra, idx) => {
               const def = stockItemDefs[extra.key];
               const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<span class="cart-extra-tag">➕ ${def ? def.label : extra.key} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromCartItem(${idArg}, ${idx})" title="Remove">✕</button></span>`;
+              return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromCartItem(${idArg}, ${idx})" title="Remove">✕</button></span>`;
             })
             .join("");
           const nameCell = `<span class="cart-item-name">${escapeHtmlForExport(item.name)}</span><br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openCartExtrasModal(${idArg})">➕ Add Extra</span>`;
@@ -16469,7 +16497,7 @@
         select.innerHTML = Object.keys(stockItemDefs)
           .map((key) => {
             const def = stockItemDefs[key];
-            return `<option value="${key}">${def.icon} ${def.label}</option>`;
+            return `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</option>`;
           })
           .join("");
         onCartExtraIngredientChange();
@@ -16611,7 +16639,7 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${def ? def.icon : ""} ${def ? def.label : extra.key} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${def ? def.icon : ""} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
                             <button type="button" onclick="startEditExtraInCartItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
                             <button type="button" onclick="removeExtraFromCartItem(${cartExtrasModalTargetId}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
@@ -17811,7 +17839,7 @@
             if (
               usage[key] === 0 &&
               isStockItemUnmeasurable(key) &&
-              (parseFloat(menuItem[`recipe${key}`]) || 0) > 0
+              (parseFloat(menuItem[`recipe${escapeHtmlForExport(key)}`]) || 0) > 0
             ) {
               console.warn(
                 `⚠️ "${menuItem.name}" uses ${stockItemDefs[key].label}, but no average weight per piece is set for it — nothing could be deducted from stock. Set it in 📦 Manage Stock Items.`,
@@ -18318,7 +18346,7 @@
                         <div class="cancel-restock-item-row" data-type="icecream" data-key="${ic.key}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                🍦 ${name} ${flavor} <span style="color:#94a3b8; font-weight:400;">${size}g</span>
+                                🍦 ${escapeHtmlForExport(name)} ${flavor} <span style="color:#94a3b8; font-weight:400;">${size}g</span>
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
                                 <input type="number" class="cancel-restock-amount" min="0" max="${ic.servings}" step="1" value="${ic.servings}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
@@ -18346,7 +18374,7 @@
           .join("");
 
         document.getElementById("cancel-order-modal-content").innerHTML = `
-                <h2 style="margin: 0 0 4px 0; color: #dc2626;">❌ Cancel Order #${order.id}</h2>
+                <h2 style="margin: 0 0 4px 0; color: #dc2626;">❌ Cancel Order #${escapeHtmlForExport(order.id)}</h2>
                 <p style="font-size: 13px; color: #64748b; margin: 0 0 16px 0;">
                     Pick which ingredients genuinely go back on the shelf. Uncheck (or set to 0) anything already prepared/consumed — the amount for each is editable too.
                 </p>
@@ -18369,7 +18397,7 @@
 
                 <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
                     <button type="button" class="clear-dates-btn" onclick="closeCancelOrderModal()" style="margin: 0; padding: 8px 20px; background: #94a3b8; color: white;">✕ Go Back</button>
-                    <button type="button" class="clear-dates-btn" onclick="confirmCancelOrderWithRestock(${order.id})" style="margin: 0; padding: 8px 20px; background: #dc2626; color: white;">✅ Confirm Cancel</button>
+                    <button type="button" class="clear-dates-btn" onclick="confirmCancelOrderWithRestock(${htmlJsValue(order.id)})" style="margin: 0; padding: 8px 20px; background: #dc2626; color: white;">✅ Confirm Cancel</button>
                 </div>
             `;
 
@@ -18551,6 +18579,7 @@
       let orderSubmitSaving = false;
       async function submitOrder(shouldPrint = true) {
         if (orderSubmitSaving) return;
+        if (window.BILLZ_MANAGED && (!window.BILLZ_TENANT_ID || window.BILLZ_ACCESS_BLOCKED)) return alert("Sign in with active restaurant access before taking a payment.");
         if (cart.length === 0) {
           alert("The cart is empty! Add food items first.");
           return;
@@ -18624,7 +18653,7 @@
         const currentTemplateDate =
           (orderDateInputEl && orderDateInputEl.value) || getLocalDateString();
         const uniqueOrderId =
-          orders.length > 0 ? Math.max(...orders.map((o) => o.id)) + 1 : 1;
+          orders.length > 0 ? Math.max(0, ...orders.map((o) => Number(o.localOrderId ?? o.id) || 0)) + 1 : 1;
 
         // 💵 Partial-payment tracking — only relevant for Unpaid orders (assume Paid orders are paid in full).
         // Left blank/0 skips the Received/Remaining Due lines on the receipt.
@@ -18682,7 +18711,22 @@
         // Future purchase-price changes must not alter this transaction's profit.
         ProfitEngine.stampOrder(finalOrder);
 
-        // 1. Commit order, payment ledger and stock in the same database transaction.
+        // In managed mode the server authorizes and persists the sale before a receipt.
+        if (window.BILLZ_MANAGED) {
+          orderSubmitSaving = true;
+          try {
+            const accepted = await window.BiteTechCloudSync.checkoutOnline(finalOrder);
+            finalOrder.localOrderId = finalOrder.id;
+            finalOrder.id = accepted.order.id;
+            finalOrder.orderNumber = accepted.order.orderNumber;
+            finalOrder.cloudOrder = true;
+            if (accepted.order.costOfGoodsMinor != null) finalOrder.costOfGoods = accepted.order.costOfGoodsMinor / 100;
+          } catch (error) {
+            alert(error.message || "Cloud checkout could not be confirmed. Keep the cart and retry after reconnecting.");
+            return;
+          } finally { orderSubmitSaving = false; }
+        }
+        // Commit the local cache, payment ledger and stock in one database transaction.
         orderSubmitSaving = true;
         document.querySelector("#screen-new-order .pos-layout").inert = true;
         const previousOrders = orders.slice();
@@ -18702,7 +18746,9 @@
           cashTransactions = previousCash;
           bankTransactions = previousBank;
           applyOrderStockUsage(finalOrder.stockUsage, 1);
-          alert("The order could not be saved. No payment or stock change was kept.");
+          alert(window.BILLZ_MANAGED
+            ? `Cloud bill #${finalOrder.orderNumber} was saved, but this device's cache failed. Open cloud history to reprint it. Retrying this cart uses the same operation ID.`
+            : "The order could not be saved. No payment or stock change was kept.");
           return;
         } finally {
           orderSubmitSaving = false;
@@ -18711,11 +18757,13 @@
 
         // Cloud sync activates only after a successful authenticated catalog import.
         // The durable local transaction above never waits for network availability.
-        if (window.BiteTechCloudSync) {
+        if (!window.BILLZ_MANAGED && window.BiteTechCloudSync) {
           window.BiteTechCloudSync.enqueueLegacyOrder(finalOrder).catch((error) => {
             console.warn("Order saved locally but cloud queueing failed:", error);
           });
         }
+
+        if (window.BILLZ_MANAGED) await idbDelete("pos_checkout_attempt");
 
         // 2. 🖨️ Populate the print slip template and launch the print dialog (shared helper — also reused for reprints)
         //    — skipped entirely for Ctrl+S (shouldPrint === false): the order is still saved to history either way.
@@ -18845,6 +18893,7 @@
       }
 
       function attemptUnlock() {
+        if (window.BILLZ_MANAGED) return;
         if (pinInputBuffer.length === 0) return;
 
         if (pinInputBuffer === systemPinCode) {
@@ -19284,6 +19333,7 @@
       }
 
       async function seedLocalAccessCredentials() {
+        if (window.BILLZ_MANAGED) return;
         const setupDone = await idbGet("pos_setup_done");
         if (!setupDone) {
           systemPinCode = LOCAL_SEED_PIN;
@@ -19865,6 +19915,31 @@
       }
 
       async function runBootSequence() {
+        if (window.BILLZ_MANAGED) {
+          let account;
+          try {
+            const response = await fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" });
+            if (!response.ok) throw new Error("Sign in to open your restaurant.");
+            account = await response.json();
+            const stored = await idbGet("pos_cloud_session_v1");
+            const allowed = (account.restaurants || []).find(r => r.restaurantId === stored?.restaurantId)
+              || (account.restaurants?.length === 1 ? account.restaurants[0] : null);
+            if (!allowed) throw new Error("Choose a restaurant to continue.");
+            window.BILLZ_TENANT_ID = allowed.restaurantId;
+            await idbSet("pos_cloud_session_v1", { user: account.user, restaurantId: allowed.restaurantId });
+            const responseMenu = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": allowed.restaurantId } });
+            if (!responseMenu.ok) {
+              window.BILLZ_ACCESS_BLOCKED = true;
+              throw new Error(responseMenu.status === 402 ? "Subscription access has expired or is suspended. Contact your administrator for renewal." : "This account cannot open the till.");
+            }
+          } catch (error) {
+            hideBootSplash();
+            document.getElementById("cloud-account-modal-overlay").classList.remove("hidden");
+            cloudSetStatus(error.message, "error");
+            if (account) { cloudRestaurants = account.restaurants || []; cloudRenderState({ ...account, restaurantId: window.BILLZ_TENANT_ID }); }
+            return;
+          }
+        }
         // 📌 Restore the sidebar's collapsed/expanded state from last time
         bootStep(1, "reading settings");
         applySavedSidebarCollapseState();
@@ -19900,6 +19975,11 @@
         // been activated, or whose licence has been revoked, gets the activation screen
 
         bootStep(5, "checking licence");
+        if (window.BILLZ_MANAGED) {
+          hideBootSplash();
+          showAppAfterUnlock();
+          return;
+        }
         await loadLicenseState();
         await seedLocalAccessCredentials();
         renderLicenseSettingsPanel();
@@ -20489,7 +20569,7 @@
           (key) =>
             !stockItemDefs[key].deleted &&
             (enabled[key] || item.recipeActiveKeys?.includes(key)) &&
-            (parseFloat(item[`recipe${key}`]) || 0) > 0,
+            (parseFloat(item[`recipe${escapeHtmlForExport(key)}`]) || 0) > 0,
         );
       }
 
@@ -20916,9 +20996,9 @@
           const actionCellHtml = isLinkedDrink
             ? `<small style="color:#94a3b8;">🥤 Manage in Soft Drinks Stock</small>`
             : isOrphanDrink
-              ? `<button type="button" class="delete-item-btn" onclick="event.stopPropagation(); deleteCustomMenuItem(${item.id})">🗑️ Remove (unlinked)</button>`
-              : `<button type="button" class="edit-item-btn" onclick="event.stopPropagation(); startEditMenuItem(${item.id})">✏️ Edit</button>
-                       <button type="button" class="delete-item-btn" onclick="event.stopPropagation(); deleteCustomMenuItem(${item.id})">🗑️ Remove</button>`;
+              ? `<button type="button" class="delete-item-btn" onclick="event.stopPropagation(); deleteCustomMenuItem(${htmlJsValue(item.id)})">🗑️ Remove (unlinked)</button>`
+              : `<button type="button" class="edit-item-btn" onclick="event.stopPropagation(); startEditMenuItem(${htmlJsValue(item.id)})">✏️ Edit</button>
+                       <button type="button" class="delete-item-btn" onclick="event.stopPropagation(); deleteCustomMenuItem(${htmlJsValue(item.id)})">🗑️ Remove</button>`;
 
           const mgmtImgElId = `mgmt-img-${item.id}`;
           const mgmtImageHtml = item.hasImage
@@ -21051,7 +21131,7 @@
           .map((comp) => {
             const item = menuItems.find((m) => m.id === comp.itemId);
             if (!item) return null;
-            return comp.qty > 1 ? `${comp.qty}× ${item.name}` : item.name;
+            return comp.qty > 1 ? `${comp.qty}× ${escapeHtmlForExport(item.name)}` : item.name;
           })
           .filter(Boolean)
           .join(" + ");
@@ -21241,7 +21321,7 @@
                     <div class="deal-component-option" onmousedown="chooseDealComponentItem(${m.id})"
                          style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9;"
                          onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
-                        <strong>#${m.itemNumber ?? m.id}</strong> — ${m.name} <span style="color:#94a3b8;">(Rs. ${m.price})</span>
+                        <strong>#${m.itemNumber ?? m.id}</strong> — ${escapeHtmlForExport(m.name)} <span style="color:#94a3b8;">(Rs. ${m.price})</span>
                     </div>`,
                 )
                 .join("")
@@ -21330,7 +21410,7 @@
             const name = item ? item.name : "(deleted item)";
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px;">
-                        <span style="font-size:13px; font-weight:600;">${comp.qty} × ${name}</span>
+                        <span style="font-size:13px; font-weight:600;">${comp.qty} × ${escapeHtmlForExport(name)}</span>
                         <button type="button" onclick="removeDealComponent(${comp.itemId})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-weight:700; font-size:14px;">✕</button>
                     </div>
                 `;
@@ -21373,9 +21453,9 @@
             : `<option value="pcs">pcs</option>`;
           return `
                     <div class="form-group" style="flex: 1; margin-bottom: 10px;">
-                        <label style="font-size: 12px;">${def.icon} ${def.label} (${unitLabel}) <span class="custom-recipe-hint" data-key="${key}" style="color: #94a3b8; font-weight: 400;"></span></label>
-                        <div style="display:flex; gap:5px;"><input type="number" class="custom-recipe-input" data-key="${key}" min="0" step="any" value="0" oninput="updateCostPricePreview()" style="min-width:0; flex:1;">
-                        <select class="custom-recipe-unit" data-key="${key}" data-previous-unit="${unitLabel}" onchange="changeRecipeInputUnit(this)" style="width:58px;">${unitOptions}</select></div>
+                        <label style="font-size: 12px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)} (${unitLabel}) <span class="custom-recipe-hint" data-key="${escapeHtmlForExport(key)}" style="color: #94a3b8; font-weight: 400;"></span></label>
+                        <div style="display:flex; gap:5px;"><input type="number" class="custom-recipe-input" data-key="${escapeHtmlForExport(key)}" min="0" step="any" value="0" oninput="updateCostPricePreview()" style="min-width:0; flex:1;">
+                        <select class="custom-recipe-unit" data-key="${escapeHtmlForExport(key)}" data-previous-unit="${unitLabel}" onchange="changeRecipeInputUnit(this)" style="width:58px;">${unitOptions}</select></div>
                     </div>`;
         });
         cells.push(`<div id="others-slot-manual" style="flex: 1;"></div>`);
@@ -21560,8 +21640,8 @@
             const checked = config[key] ? "checked" : "";
             return `
                     <label style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-                        <input type="checkbox" class="cost-field-checkbox" data-key="${key}" ${checked} style="width: 16px; height: 16px;">
-                        <span style="font-weight: 600;">${def.icon} ${def.label}</span>
+                        <input type="checkbox" class="cost-field-checkbox" data-key="${escapeHtmlForExport(key)}" ${checked} style="width: 16px; height: 16px;">
+                        <span style="font-weight: 600;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                         <span style="font-size: 11px; color: #94a3b8; margin-left: auto;">${def.sellUnit === "kg" ? "grams" : "pieces"}</span>
                     </label>
                 `;
@@ -22350,7 +22430,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; background: ${isOut ? "#fef2f2" : "#fffbeb"}; border-left: 4px solid ${isOut ? "#dc2626" : "#d97706"}; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 20px;">🍦</span>
-                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${name} ${flavor} (${size}g) ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
+                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(name)} ${flavor} (${size}g) ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
                         <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${Math.round(displayGrams).toLocaleString()}g left <span style="font-weight: 500; color: #94a3b8;">(min ${Math.round(threshold).toLocaleString()}g)</span></span>
                     </div>
@@ -22590,7 +22670,7 @@
                 : `<div style="font-size: 12px; color: #64748b;">${showWeightFirst ? piecesText : weightText}</div>`;
               toggleBtnHtml = piecesUnreliable
                 ? ""
-                : `<button type="button" onclick="toggleCardDisplayMode('${key}')" title="Switch between pieces and weight view" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">🔁</button>`;
+                : `<button type="button" onclick="toggleCardDisplayMode(${htmlJsValue(key)})" title="Switch between pieces and weight view" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">🔁</button>`;
               if (piecesUnreliable) {
                 unreliablePiecesNoteHtml = `<div style="font-size: 11px; color: #d97706; font-weight: 600; margin-top: 4px;">⚠ Piece count unavailable — log a purchase with "Total Number of Pieces" filled in to enable it</div>`;
               }
@@ -22609,18 +22689,18 @@
 
             const closeBtnHtml = def.isCore
               ? ""
-              : `<button type="button" onclick="hideIngredientCard('${key}')" title="Hide this card (bring it back anytime via Manage Stock Items)" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #94a3b8;">✕</button>`;
+              : `<button type="button" onclick="hideIngredientCard(${htmlJsValue(key)})" title="Hide this card (bring it back anytime via Manage Stock Items)" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #94a3b8;">✕</button>`;
 
             return `
                     <div class="ingredient-card" style="border-left-color: ${def.color};">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <span style="font-weight: 700; font-size: 15px;">${def.icon} ${def.label}</span>
+                            <span style="font-weight: 700; font-size: 15px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                             <div style="display: flex; gap: 4px;">
                                 ${toggleBtnHtml}
                                 ${closeBtnHtml}
                             </div>
                         </div>
-                        <div id="stock-display-${key}">
+                        <div id="stock-display-${escapeHtmlForExport(key)}">
                             <div style="font-size: 24px; font-weight: 800; color: ${stockColor}; margin-top: 8px;">${mainDisplay}</div>
                             ${secondaryHtml}
                             ${avgWeightHtml}
@@ -22712,15 +22792,15 @@
           return `
                     <div style="display: flex; flex-direction: column; gap: 8px; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${def.color};">
                         <div style="display: flex; align-items: center; justify-content: space-between;">
-                            <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${def.icon} ${def.label}</span>
-                            <select id="threshold-mode-${key}" onchange="onThresholdModeChange('${key}')" style="font-size: 12px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569;">
+                            <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
+                            <select id="threshold-mode-${escapeHtmlForExport(key)}" onchange="onThresholdModeChange('${escapeHtmlForExport(key)}')" style="font-size: 12px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569;">
                                 <option value="weight" ${mode === "weight" ? "selected" : ""}>⚖️ Alert by Weight</option>
                                 <option value="pieces" ${mode === "pieces" ? "selected" : ""}>🔢 Alert by Pieces</option>
                             </select>
                         </div>
                         <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px;">
-                            <input type="number" id="threshold-input-${key}" value="${inputValue}" min="0" step="${step}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
-                            <span id="threshold-unit-${key}" style="font-size: 13px; color: #64748b; font-weight: 600;">${unitLabel}</span>
+                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${inputValue}" min="0" step="${step}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
+                            <span id="threshold-unit-${escapeHtmlForExport(key)}" style="font-size: 13px; color: #64748b; font-weight: 600;">${unitLabel}</span>
                         </div>
                     </div>
                 `;
@@ -22740,9 +22820,9 @@
             : stock.minThresholdGrams / 1000;
           return `
                     <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${def.color};">
-                        <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${def.icon} ${def.label}</span>
+                        <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <input type="number" id="threshold-input-${key}" value="${thresholdValue}" min="0" step="${isNumberBased ? 1 : 0.1}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
+                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${thresholdValue}" min="0" step="${isNumberBased ? 1 : 0.1}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
                             <span style="font-size: 13px; color: #64748b; font-weight: 600;">${isNumberBased ? "Units" : "Kg"}</span>
                         </div>
                     </div>
@@ -22983,7 +23063,7 @@
         select.innerHTML = getStockItemKeysForGroup(group)
           .map((key) => {
             const def = stockItemDefs[key];
-            return `<option value="${key}">${def.icon} ${def.label}</option>`;
+            return `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</option>`;
           })
           .join("");
         // Keep the same ingredient selected across a re-populate if it still exists, for fast repeat entries
@@ -23483,8 +23563,8 @@
 
           const actionCell = isDeleted
             ? `<span style="font-size:11px; color:#94a3b8; font-style:italic;">Discontinued</span>`
-            : `<button type="button" class="edit-item-btn" onclick="startEditStockPurchase(${p.id})">✏️ Edit</button>
-                       <button type="button" class="delete-item-btn" onclick="deleteStockPurchase(${p.id})">🗑️ Delete</button>`;
+            : `<button type="button" class="edit-item-btn" onclick="startEditStockPurchase(${htmlJsValue(p.id)})">✏️ Edit</button>
+                       <button type="button" class="delete-item-btn" onclick="deleteStockPurchase(${htmlJsValue(p.id)})">🗑️ Delete</button>`;
           if (isDeleted) {
             tr.style.opacity = "0.5";
             tr.title = `${def.label} was deleted from Manage Stock Items — this record is kept for history but can no longer be edited.`;
@@ -23545,7 +23625,7 @@
                 : "";
               return `
                         <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; font-weight:${isChecked ? "700" : "500"};">
-                            <input type="checkbox" onchange="toggleStockHistoryIngredientFilter('${key}', this.checked, '${group}')" ${isChecked ? "checked" : ""} style="width:15px; height:15px;">
+                            <input type="checkbox" onchange="toggleStockHistoryIngredientFilter('${escapeHtmlForExport(key)}', this.checked, '${group}')" ${isChecked ? "checked" : ""} style="width:15px; height:15px;">
                             ${def.icon || "📦"} ${def.label || key}${discontinuedTag}
                         </label>
                     `;
@@ -23921,8 +24001,8 @@
 
             const actionCell = def.isCore
               ? `<button type="button" disabled title="Core items are managed by the system and can't be edited here" style="background:#f1f5f9; color:#94a3b8; border:none; padding:5px 10px; border-radius:5px; cursor:not-allowed;">🔒 Locked</button>`
-              : `<button type="button" onclick="event.stopPropagation(); startEditStockItem('${key}')" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
-                       <button type="button" onclick="event.stopPropagation(); deleteStockItemDef('${key}')" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>`;
+              : `<button type="button" onclick="event.stopPropagation(); startEditStockItem(${htmlJsValue(key)})" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
+                       <button type="button" onclick="event.stopPropagation(); deleteStockItemDef(${htmlJsValue(key)})" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>`;
             const learnedWeight = ingredientStock[key]
               ? ingredientStock[key].avgUnitWeightGrams
               : 0;
@@ -23933,8 +24013,8 @@
                   : ` <small style="color:#94a3b8;">(not learned yet)</small>`
                 : "";
             return `
-                    <tr style="cursor:pointer; ${isEditing ? "background:#fef9c3;" : ""}" onclick="startEditStockItem('${key}')">
-                        <td><strong>${def.icon} ${def.label}</strong>${coreBadge}</td>
+                    <tr style="cursor:pointer; ${isEditing ? "background:#fef9c3;" : ""}" onclick="startEditStockItem(${htmlJsValue(key)})">
+                        <td><strong>${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</strong>${coreBadge}</td>
                         <td>${unitLabel(def.buyUnit)}</td>
                         <td>${unitLabel(def.sellUnit)}${weightNote}</td>
                         <td style="text-align:center; white-space:nowrap;">${actionCell}</td>
@@ -24787,8 +24867,8 @@
                         <td>Rs. ${p.amountPaid}</td>
                         <td>Rs. ${p.costPerUnit.toFixed(2)}</td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" class="edit-item-btn" onclick="startEditSoftDrinkPurchase(${p.id})">✏️ Edit</button>
-                            <button type="button" class="delete-item-btn" onclick="deleteSoftDrinkPurchase(${p.id})">🗑️ Delete</button>
+                            <button type="button" class="edit-item-btn" onclick="startEditSoftDrinkPurchase(${htmlJsValue(p.id)})">✏️ Edit</button>
+                            <button type="button" class="delete-item-btn" onclick="deleteSoftDrinkPurchase(${htmlJsValue(p.id)})">🗑️ Delete</button>
                         </td>
                     </tr>
                 `;
@@ -25142,13 +25222,13 @@
             const isEditing = name === editingName;
             const safeName = name.replace(/'/g, "\\'");
             return `
-                    <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditIceCreamName('${safeName}')">
-                        <td><strong>${name}</strong></td>
+                    <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditIceCreamName(${htmlJsValue(name)})">
+                        <td><strong>${escapeHtmlForExport(name)}</strong></td>
                         <td>${data.flavors.length > 0 ? data.flavors.join(", ") : '<span style="color:#94a3b8;">— none —</span>'}</td>
                         <td>${data.sizes.map((s) => s + "g").join(", ")}</td>
                         <td style="text-align: center; white-space: nowrap;">
-                            <button type="button" onclick="event.stopPropagation(); startEditIceCreamName('${safeName}')" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
-                            <button type="button" onclick="event.stopPropagation(); deleteIceCreamName('${safeName}')" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>
+                            <button type="button" onclick="event.stopPropagation(); startEditIceCreamName(${htmlJsValue(name)})" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
+                            <button type="button" onclick="event.stopPropagation(); deleteIceCreamName(${htmlJsValue(name)})" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>
                         </td>
                     </tr>
                 `;
@@ -25574,7 +25654,7 @@
 
             return `
                     <tr>
-                        <td><strong>${name}</strong> — ${flavor}<br><small style="color:gray;">${size}g / serving</small></td>
+                        <td><strong>${escapeHtmlForExport(name)}</strong> — ${flavor}<br><small style="color:gray;">${size}g / serving</small></td>
                         <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${stockDisplay}</td>
                         <td>Rs. ${ic.avgCostPerGram.toFixed(3)}/g</td>
                         <td>
@@ -25658,8 +25738,8 @@
                         <td>Rs. ${p.amountPaid}</td>
                         <td>Rs. ${p.costPerGram.toFixed(3)}</td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" class="edit-item-btn" onclick="startEditIceCreamPurchase(${p.id})">✏️ Edit</button>
-                            <button type="button" class="delete-item-btn" onclick="deleteIceCreamPurchase(${p.id})">🗑️ Delete</button>
+                            <button type="button" class="edit-item-btn" onclick="startEditIceCreamPurchase(${htmlJsValue(p.id)})">✏️ Edit</button>
+                            <button type="button" class="delete-item-btn" onclick="deleteIceCreamPurchase(${htmlJsValue(p.id)})">🗑️ Delete</button>
                         </td>
                     </tr>
                 `;
@@ -25924,14 +26004,14 @@
             const isEditing = field.key === highlightKey;
             return `
                     <tr style="${isEditing ? "background:#fef9c3;" : ""}">
-                        <td><strong>${field.label}</strong></td>
+                        <td><strong>${escapeHtmlForExport(field.label)}</strong></td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" onclick="moveExpenseField('${field.key}','up')" ${idx === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ""} title="Move up" style="background:#f1f5f9; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">⬆️</button>
-                            <button type="button" onclick="moveExpenseField('${field.key}','down')" ${idx === activeFields.length - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ""} title="Move down" style="background:#f1f5f9; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">⬇️</button>
+                            <button type="button" onclick="moveExpenseField(${htmlJsValue(field.key)},'up')" ${idx === 0 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ""} title="Move up" style="background:#f1f5f9; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">⬆️</button>
+                            <button type="button" onclick="moveExpenseField(${htmlJsValue(field.key)},'down')" ${idx === activeFields.length - 1 ? 'disabled style="opacity:0.3; cursor:not-allowed;"' : ""} title="Move down" style="background:#f1f5f9; border:none; padding:4px 8px; border-radius:4px; cursor:pointer;">⬇️</button>
                         </td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" class="edit-item-btn" onclick="startEditExpenseField('${field.key}')">✏️ Edit</button>
-                            <button type="button" class="delete-item-btn" onclick="deleteExpenseField('${field.key}')">🗑️ Delete</button>
+                            <button type="button" class="edit-item-btn" onclick="startEditExpenseField(${htmlJsValue(field.key)})">✏️ Edit</button>
+                            <button type="button" class="delete-item-btn" onclick="deleteExpenseField(${htmlJsValue(field.key)})">🗑️ Delete</button>
                         </td>
                     </tr>
                 `;
@@ -26627,15 +26707,15 @@
             const label = field ? field.label : e.fieldKey;
             const actionCell = isDeleted
               ? `<span style="font-size:11px; color:#94a3b8; font-style:italic;">Discontinued</span>`
-              : `<button type="button" class="edit-item-btn" onclick="startEditExpenseEntry(${e.id})">✏️ Edit</button>
-                       <button type="button" class="delete-item-btn" onclick="deleteExpenseEntry(${e.id})">🗑️ Delete</button>`;
+              : `<button type="button" class="edit-item-btn" onclick="startEditExpenseEntry(${htmlJsValue(e.id)})">✏️ Edit</button>
+                       <button type="button" class="delete-item-btn" onclick="deleteExpenseEntry(${htmlJsValue(e.id)})">🗑️ Delete</button>`;
             const rowStyle = isDeleted
               ? 'style="opacity:0.5;" title="This field was deleted — this record is kept for history but can no longer be edited."'
               : "";
             // 🧾 The photo itself is never loaded to draw this row — just whether one exists. It's only
             // fetched from IndexedDB if the owner actually clicks to view it (see openExpenseReceiptModal).
             const receiptCell = e.hasReceipt
-              ? `<button type="button" onclick="openExpenseReceiptModal(${e.id})" title="View receipt photo" style="background:#eff6ff; color:#1d4ed8; border:none; padding:4px 10px; border-radius:5px; cursor:pointer; font-weight:700; font-size:12px;">🧾 View</button>`
+              ? `<button type="button" onclick="openExpenseReceiptModal(${htmlJsValue(e.id)})" title="View receipt photo" style="background:#eff6ff; color:#1d4ed8; border:none; padding:4px 10px; border-radius:5px; cursor:pointer; font-weight:700; font-size:12px;">🧾 View</button>`
               : `<span style="color:#cbd5e1; font-size:12px;">—</span>`;
             return `
                     <tr ${rowStyle}>
@@ -26818,7 +26898,7 @@
             const totalQty = computeTotalSoldQtyForItem(m.id, scopedOrders);
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#f8fafc; border-radius:8px; margin-bottom:6px;">
-                        <span style="font-weight:600;">#${m.itemNumber ?? m.id} — ${m.name} <span style="font-weight:400; color:#94a3b8; font-size:12px;">(${m.category})</span></span>
+                        <span style="font-weight:600;">#${m.itemNumber ?? m.id} — ${escapeHtmlForExport(m.name)} <span style="font-weight:400; color:#94a3b8; font-size:12px;">(${m.category})</span></span>
                         <span style="font-weight:800; color:#16a34a; font-size:16px; white-space:nowrap;">${totalQty} sold</span>
                     </div>
                 `;
@@ -28179,7 +28259,7 @@
           sortedItems.slice(0, 5).forEach((item) => {
             // Render Tabular view row
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${item.name}</td><td style="text-align:center; font-weight:bold;">${item.qty}</td>`;
+            tr.innerHTML = `<td>${escapeHtmlForExport(item.name)}</td><td style="text-align:center; font-weight:bold;">${item.qty}</td>`;
             topItemsTbody.appendChild(tr);
 
             // Render Graphical view bar
@@ -28187,7 +28267,7 @@
             const barRow = document.createElement("div");
             barRow.className = "custom-chart-bar-row";
             barRow.innerHTML = `
-                        <div class="chart-label-container"><span>${item.name}</span><span>${item.qty} pcs</span></div>
+                        <div class="chart-label-container"><span>${escapeHtmlForExport(item.name)}</span><span>${item.qty} pcs</span></div>
                         <div class="chart-track-bg"><div class="chart-fill-color" style="width: ${pct}%; background: var(--accent-amber);"></div></div>
                     `;
             topItemsGraphBox.appendChild(barRow);
@@ -29327,6 +29407,7 @@
               );
             }
             if (!confirm(BackupService.preview(parsedBackupData))) return;
+            restoreWriteBuffer = new Map();
 
             // 1. Verify file content profile metrics before overriding storage blocks
             if (parsedBackupData.pos_orders || parsedBackupData.pos_menu) {
@@ -29506,6 +29587,9 @@
 
               // 3. Commit the newly loaded backup data into IndexedDB
               await saveToStorage();
+              const staged = Object.fromEntries(restoreWriteBuffer);
+              restoreWriteBuffer = null;
+              await Storage.setMany(staged);
 
 
 
@@ -29522,11 +29606,15 @@
               );
             }
           } catch (err) {
+            restoreWriteBuffer = null;
+            await initSystemData();
+            rebuildEntireUIAfterRestore();
             alert(
               `❌ Restore could not be completed.\n\n${err && err.message ? err.message : "Make sure you selected a valid .json backup file."}`,
             );
             console.error(err);
           } finally {
+            restoreWriteBuffer = null;
             // Always clear the picker, so selecting the very same file again still fires onchange
             if (event && event.target) event.target.value = "";
           }
@@ -30238,13 +30326,18 @@
         return String(str ?? "")
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
 
 
 
 
+      function htmlJsValue(value) {
+        return escapeHtmlForExport(JSON.stringify(value ?? null));
+      }
       function exportOrdersHistoryToExcel() {
         const filtered = getFilteredOrdersHistoryList();
         if (filtered.length === 0) {
@@ -30532,7 +30625,7 @@
 
           // 1. Get ALL items listed dynamically (plain text for the tooltip; a styled pill flags any discount/override)
           const itemsSummaryString = order.items
-            ? order.items.map((item) => `${item.qty}x ${item.name}`).join(", ")
+            ? order.items.map((item) => `${item.qty}x ${escapeHtmlForExport(item.name)}`).join(", ")
             : "";
 
 
@@ -30598,13 +30691,13 @@
 
           // 🎯 PERFECTLY ALIGNED COLUMNS:
           tr.innerHTML = `
-                    <td><strong>#${order.id}</strong></td>
-                    <td>${order.date} <span style="color:#94a3b8; font-size:12px; margin-left:4px;">${order.time || ""}</span></td>
-                    <td><strong>${order.customerName || "Walk-In Customer"}</strong></td>
-                    <td><span class="badge ${order.orderType === "Dine-In" ? "badge-dinein" : order.orderType === "Delivery" ? "badge-delivery" : "badge-takeaway"}">${order.orderType}</span>${order.orderType === "Dine-In" && order.tableNumber ? ` <span class="badge" style="background:#e0e7ff; color:#3730a3;">🪑 #${order.tableNumber}</span>` : ""}</td>
-                    <td style="max-width: 250px; color: #475569;" title="${itemsSummaryString}">
+                    <td><strong>#${escapeHtmlForExport(order.id)}</strong></td>
+                    <td>${escapeHtmlForExport(order.date)} <span style="color:#94a3b8; font-size:12px; margin-left:4px;">${escapeHtmlForExport(order.time || "")}</span></td>
+                    <td><strong>${escapeHtmlForExport(order.customerName || "Walk-In Customer")}</strong></td>
+                    <td><span class="badge ${order.orderType === "Dine-In" ? "badge-dinein" : order.orderType === "Delivery" ? "badge-delivery" : "badge-takeaway"}">${escapeHtmlForExport(order.orderType)}</span>${order.orderType === "Dine-In" && order.tableNumber ? ` <span class="badge" style="background:#e0e7ff; color:#3730a3;">🪑 #${escapeHtmlForExport(order.tableNumber)}</span>` : ""}</td>
+                    <td style="max-width: 250px; color: #475569;" title="${escapeHtmlForExport(itemsSummaryString)}">
                         <div style="display:flex; align-items:center; gap:6px;">
-                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${itemsSummaryString}</span>
+                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${escapeHtmlForExport(itemsSummaryString)}</span>
                             ${orderHasRealOffer ? `<span class="offer-pill offer-pill-category" style="flex-shrink:0; font-size:9px; padding:1px 6px;">🏷️ Offer</span>` : ""}
                             ${orderHasCustomPrice ? `<span class="offer-pill offer-pill-manual" style="flex-shrink:0; font-size:9px; padding:1px 6px;">✏️ Custom Price</span>` : ""}
                         </div>
@@ -30614,9 +30707,9 @@
                     <td>${billProfitCell}</td>
                     <td style="text-align:center;">${statusBadge}</td>
                     <td style="text-align:center; white-space:nowrap;">
-                        <button type="button" class="edit-item-btn" style="margin:0; background:#0ea5e9; padding: 4px 10px;" onclick="event.stopPropagation(); reprintOrderReceipt(${order.id});">🖨️ Print</button>
-                        <button type="button" class="delete-item-btn" style="margin:0 0 0 4px; padding:4px 10px;" onclick="event.stopPropagation(); deleteBill(${order.id});">🗑️ Delete</button>
-                        ${editCount > 0 ? `<button type="button" class="edit-item-btn" style="margin:0 0 0 4px; background:#7c3aed; padding: 4px 10px;" onclick="event.stopPropagation(); openEditHistoryModal(${order.id});" title="This order has been changed ${editCount} time${editCount === 1 ? "" : "s"} since it was placed — click to see exactly what changed">📝 ${editCount}</button>` : ""}
+                        <button type="button" class="edit-item-btn" style="margin:0; background:#0ea5e9; padding: 4px 10px;" onclick="event.stopPropagation(); reprintOrderReceipt(${htmlJsValue(order.id)});">🖨️ Print</button>
+                        <button type="button" class="delete-item-btn" style="margin:0 0 0 4px; padding:4px 10px;" onclick="event.stopPropagation(); deleteBill(${htmlJsValue(order.id)});">🗑️ Delete</button>
+                        ${editCount > 0 ? `<button type="button" class="edit-item-btn" style="margin:0 0 0 4px; background:#7c3aed; padding: 4px 10px;" onclick="event.stopPropagation(); openEditHistoryModal(${htmlJsValue(order.id)});" title="This order has been changed ${editCount} time${editCount === 1 ? "" : "s"} since it was placed — click to see exactly what changed">📝 ${editCount}</button>` : ""}
                     </td>
                 `;
           tbody.appendChild(tr);
@@ -30625,6 +30718,7 @@
 
       // 🎯 NEW: Toggle action function utility to mask/unmask sales values safely
       async function deleteBill(orderId) {
+        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
         const order = orders.find((item) => item.id === orderId);
         if (!order) return;
         const confirmed = confirm(`Delete invoice #${order.id}?\n\nThis removes the bill from order history, reverses its Cash/Bank payment, and restores stock for a completed bill. This cannot be undone.`);
@@ -30694,7 +30788,7 @@
 
         // Cloud orders use UUID string ids; quote them so inline handlers receive
         // the id as a string instead of an arithmetic expression.
-        const orderIdLiteral = typeof order.id === "string" ? `'${order.id}'` : String(order.id);
+        const orderIdLiteral = htmlJsValue(order.id);
 
         const modalOverlay = document.getElementById("invoice-modal-overlay");
         const modalContent = document.getElementById("invoice-modal-content");
@@ -30713,7 +30807,7 @@
               : "offer-pill-item";
           const offerNoteHtml = item.offerLabel
             ? `<div style="margin-top:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                           <span class="offer-pill ${pillClass}">${item.offerLabel}</span>
+                           <span class="offer-pill ${pillClass}">${escapeHtmlForExport(item.offerLabel)}</span>
                            <span class="offer-price-strike" style="font-size:12px;">was Rs. ${item.originalPrice}</span>
                        </div>`
             : "";
@@ -30722,12 +30816,12 @@
             .map((extra) => {
               const def = stockItemDefs[extra.key];
               const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<span class="cart-extra-tag" style="margin-top:3px;">➕ ${def ? def.label : extra.key} ${extra.qty}${unitLabel}</span>`;
+              return `<span class="cart-extra-tag" style="margin-top:3px;">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}</span>`;
             })
             .join("");
           itemsRowsHtml += `
                     <div style="display: flex; justify-content: space-between; align-items:flex-start; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px;">
-                        <span><strong style="color: var(--accent-amber);">${item.qty}x</strong> ${item.name}${offerNoteHtml}${extrasNoteHtml}</span>
+                        <span><strong style="color: var(--accent-amber);">${item.qty}x</strong> ${escapeHtmlForExport(item.name)}${offerNoteHtml}${extrasNoteHtml}</span>
                         <span style="font-weight: 600; color: #1e293b; white-space:nowrap; margin-left:10px;">Rs. ${item.price * item.qty}</span>
                     </div>
                 `;
@@ -30740,8 +30834,8 @@
           orderStatus === "Cancelled"
             ? `
                 <div style="background: #fee2e2; border-left: 4px solid #dc2626; color: #991b1b; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 13px;">
-                    <strong>❌ This order was Cancelled</strong>${order.statusReason ? ` — "${order.statusReason}"` : ""}. It does not count toward revenue.
-                    ${order.restockSummary ? `<div style="margin-top: 4px; font-weight: 600;">Restocked: ${order.restockSummary}</div>` : ""}
+                    <strong>❌ This order was Cancelled</strong>${order.statusReason ? ` — "${escapeHtmlForExport(order.statusReason)}"` : ""}. It does not count toward revenue.
+                    ${order.restockSummary ? `<div style="margin-top: 4px; font-weight: 600;">Restocked: ${escapeHtmlForExport(order.restockSummary)}</div>` : ""}
                 </div>`
             : "";
 
@@ -30749,9 +30843,9 @@
                 ${statusBannerHtml}
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 18px;">
                     <div>
-                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">📄 Invoice Receipt #${order.id}</h2>
-                        <span style="font-size: 13px; color: #64748b;">Issued on: <strong>${order.date}</strong> at <strong>${order.time || "N/A"}</strong></span>
-                        ${order.lastEditedDate ? `<div style="font-size: 12px; color: #e67e22; font-weight: 600; margin-top: 2px;">✏️ Updated on ${order.lastEditedDate} at ${order.lastEditedTime}</div>` : ""}
+                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">📄 Invoice Receipt #${escapeHtmlForExport(order.id)}</h2>
+                        <span style="font-size: 13px; color: #64748b;">Issued on: <strong>${escapeHtmlForExport(order.date)}</strong> at <strong>${escapeHtmlForExport(order.time || "N/A")}</strong></span>
+                        ${order.lastEditedDate ? `<div style="font-size: 12px; color: #e67e22; font-weight: 600; margin-top: 2px;">✏️ Updated on ${escapeHtmlForExport(order.lastEditedDate)} at ${escapeHtmlForExport(order.lastEditedTime)}</div>` : ""}
                     </div>
                     <button type="button" onclick="closeInvoiceModal()" style="background: #f1f5f9; border: none; font-size: 18px; font-weight: bold; color: #64748b; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s;">✕</button>
                 </div>
@@ -30760,10 +30854,10 @@
                     <!-- Customer Details Segment -->
                     <div style="background: #f8fafc; padding: 12px 15px; border-radius: 8px; border: 1px solid #e2e8f0;">
                         <small style="color: #64748b; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;">Customer Profile</small>
-                        <div style="font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 2px;">${order.customerName || "Walk-In Customer"}</div>
+                        <div style="font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 2px;">${escapeHtmlForExport(order.customerName || "Walk-In Customer")}</div>
                         ${receiptCustomerPhone(order) ? `<div style="margin-top:4px; overflow-wrap:anywhere;">Phone: ${escapeHtmlForExport(receiptCustomerPhone(order))}</div>` : ""}
                         ${receiptRiderName(order) ? `<div style="margin-top:4px; overflow-wrap:anywhere;">Rider: ${escapeHtmlForExport(receiptRiderName(order))}</div>` : ""}
-                        <div style="margin-top: 6px;"><span class="badge" style="margin: 0;">Type: ${order.orderType}</span> ${order.orderType === "Dine-In" && order.tableNumber ? `<span class="badge" style="margin: 0; background:#e0e7ff; color:#3730a3;">🪑 Table ${order.tableNumber}</span> ` : ""}${order.orderType === "Dine-In" && order.hall ? `<span class="badge" style="margin: 0; background:#ecfccb; color:#3f6212;">🏛️ ${escapeHtmlForExport(order.hall)}</span> ` : ""}<span class="badge ${(order.paymentStatus || "Paid") === "Unpaid" ? "badge-unpaid" : "badge-paid"}" style="margin: 0;">${(order.paymentStatus || "Paid") === "Unpaid" ? "❌ Unpaid" : "✅ Paid"}</span> ${(order.paymentStatus || "Paid") === "Unpaid" ? "" : `<span class="badge" style="margin: 0; background: #e0e7ff; color: #3730a3;">💳 ${order.paymentMethod || "Cash"}</span>`}</div>
+                        <div style="margin-top: 6px;"><span class="badge" style="margin: 0;">Type: ${escapeHtmlForExport(order.orderType)}</span> ${order.orderType === "Dine-In" && order.tableNumber ? `<span class="badge" style="margin: 0; background:#e0e7ff; color:#3730a3;">🪑 Table ${escapeHtmlForExport(order.tableNumber)}</span> ` : ""}${order.orderType === "Dine-In" && order.hall ? `<span class="badge" style="margin: 0; background:#ecfccb; color:#3f6212;">🏛️ ${escapeHtmlForExport(order.hall)}</span> ` : ""}<span class="badge ${(order.paymentStatus || "Paid") === "Unpaid" ? "badge-unpaid" : "badge-paid"}" style="margin: 0;">${(order.paymentStatus || "Paid") === "Unpaid" ? "❌ Unpaid" : "✅ Paid"}</span> ${(order.paymentStatus || "Paid") === "Unpaid" ? "" : `<span class="badge" style="margin: 0; background: #e0e7ff; color: #3730a3;">💳 ${escapeHtmlForExport(order.paymentMethod || "Cash")}</span>`}</div>
                     </div>
 
                     <!-- Ordered Basket Breakdown -->
@@ -30890,6 +30984,7 @@
       // 💾 Commit an edited "Remaining Due" figure typed into the View Bill modal — recomputes amountReceived
       // from it, and auto-flips the order to Paid the instant the remaining due reaches zero.
       function updateOrderRemainingDue(orderId) {
+        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
         if (getOrderStatus(order) !== "Completed") return alert("Cancelled bills cannot accept payments.");
@@ -30950,6 +31045,7 @@
 
       // ✅❌ Manual payment-status toggle inside the View Bill modal — mirrors the New Order screen's Paid/Unpaid buttons
       function setInvoiceOrderPaymentStatus(orderId, status) {
+        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
         if (getOrderStatus(order) !== "Completed") return alert("Cancelled bills cannot accept payments.");
@@ -31036,7 +31132,7 @@
         const before = Array.isArray(beforeItems) ? beforeItems : [];
         const after = Array.isArray(afterItems) ? afterItems : [];
 
-        const describe = (item) => `${item.qty}x ${item.name}`;
+        const describe = (item) => `${item.qty}x ${escapeHtmlForExport(item.name)}`;
 
         after.forEach((a) => {
           const b = before.find((x) => x.id === a.id);
@@ -31410,10 +31506,10 @@
         modalContent.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 18px;">
                     <div>
-                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">✏️ Edit Order #${order.id}</h2>
+                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">✏️ Edit Order #${escapeHtmlForExport(order.id)}</h2>
                         <span style="font-size: 13px; color: #64748b;">Order ID is fixed — everything else can be updated</span>
                     </div>
-                    <button type="button" onclick="cancelEditOrder(${order.id})" style="background: #f1f5f9; border: none; font-size: 18px; font-weight: bold; color: #64748b; padding: 4px 10px; border-radius: 6px; cursor: pointer;">✕</button>
+                    <button type="button" onclick="cancelEditOrder(${htmlJsValue(order.id)})" style="background: #f1f5f9; border: none; font-size: 18px; font-weight: bold; color: #64748b; padding: 4px 10px; border-radius: 6px; cursor: pointer;">✕</button>
                 </div>
 
                 <div style="display: flex; flex-direction: column; gap: 14px; max-height: 65vh; overflow-y: auto; padding-right: 4px;">
@@ -31479,11 +31575,11 @@
                     <div style="display: flex; gap: 12px;">
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>📅 Order Date</label>
-                            <input type="date" id="edit-order-date" value="${order.date || getLocalDateString()}">
+                            <input type="date" id="edit-order-date" value="${escapeHtmlForExport(order.date || getLocalDateString())}">
                         </div>
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>🕒 Order Time</label>
-                            <input type="time" id="edit-order-time" step="1" value="${order.time || "00:00:00"}">
+                            <input type="time" id="edit-order-time" step="1" value="${escapeHtmlForExport(order.time || "00:00:00")}">
                         </div>
                     </div>
                     <div style="font-size: 12px; color: #94a3b8; margin-top: -8px;">
@@ -31558,8 +31654,8 @@
                 </div>
 
                 <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
-                    <button type="button" class="clear-dates-btn" onclick="cancelEditOrder(${order.id})" style="margin: 0; padding: 8px 20px; background: #64748b; color: white;">Cancel</button>
-                    <button type="button" class="clear-dates-btn" onclick="saveOrderEdits(${order.id})" style="margin: 0; padding: 8px 20px; background: #27ae60; color: white;">💾 Save Changes</button>
+                    <button type="button" class="clear-dates-btn" onclick="cancelEditOrder(${htmlJsValue(order.id)})" style="margin: 0; padding: 8px 20px; background: #64748b; color: white;">Cancel</button>
+                    <button type="button" class="clear-dates-btn" onclick="saveOrderEdits(${htmlJsValue(order.id)})" style="margin: 0; padding: 8px 20px; background: #27ae60; color: white;">💾 Save Changes</button>
                 </div>
             `;
 
@@ -31623,13 +31719,13 @@
                 const def = stockItemDefs[extra.key];
                 const unitLabel =
                   def && def.sellUnit === "number" ? "pcs" : "g";
-                return `<span class="cart-extra-tag">➕ ${def ? def.label : extra.key} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromDraftItem(${idx}, ${exIdx})" title="Remove">✕</button></span>`;
+                return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromDraftItem(${idx}, ${exIdx})" title="Remove">✕</button></span>`;
               })
               .join("");
             return `
                 <div style="display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;">
                     <span style="flex: 2; font-size: 13px; color: #1e293b; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        ${item.name}<br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openEditOrderExtrasModal(${idx})">➕ Add Extra</span>
+                        ${escapeHtmlForExport(item.name)}<br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openEditOrderExtrasModal(${idx})">➕ Add Extra</span>
                     </span>
                     <span style="width: 70px; font-size: 12px; color: #64748b; text-align: right;">Rs. ${item.price}</span>
                     <input type="number" min="1" value="${item.qty}" oninput="updateDraftItemQty(${idx}, this.value)" style="width: 60px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;" title="Quantity">
@@ -31695,14 +31791,14 @@
             const rows = itemsInCat
               .map(
                 (m) => `
-                    <div class="edit-add-item-option" onclick="selectEditAddItem(${m.id}, '${m.name.replace(/'/g, "\\'")}')" style="padding: 8px 12px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; gap: 10px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><strong style="color:#94a3b8;">#${m.itemNumber ?? m.id}</strong> ${m.name}</span>
+                    <div class="edit-add-item-option" onclick="selectEditAddItem(${htmlJsValue(m.id)}, ${htmlJsValue(m.name)})" style="padding: 8px 12px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; gap: 10px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><strong style="color:#94a3b8;">#${m.itemNumber ?? m.id}</strong> ${escapeHtmlForExport(m.name)}</span>
                         <span style="color:#64748b; flex-shrink:0;">Rs. ${m.price}</span>
                     </div>
                 `,
               )
               .join("");
-            return `<div style="padding: 6px 12px 2px; font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px;">${cat}</div>${rows}`;
+            return `<div style="padding: 6px 12px 2px; font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.4px;">${escapeHtmlForExport(cat)}</div>${rows}`;
           })
           .join("");
 
@@ -31821,7 +31917,7 @@
         select.innerHTML = Object.keys(stockItemDefs)
           .map((key) => {
             const def = stockItemDefs[key];
-            return `<option value="${key}">${def.icon} ${def.label}</option>`;
+            return `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</option>`;
           })
           .join("");
         onEditOrderExtraIngredientChange();
@@ -31973,7 +32069,7 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${def ? def.icon : ""} ${def ? def.label : extra.key} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${def ? def.icon : ""} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
                             <button type="button" onclick="startEditExtraInDraftItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
                             <button type="button" onclick="removeExtraFromDraftItem(${editOrderExtrasTargetIdx}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
@@ -32122,6 +32218,7 @@
       // 💾 Commit all edits back onto the real order record and persist them (Order ID is never touched)
       let orderEditSaving = false;
       async function saveOrderEdits(orderId) {
+        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
         if (orderEditSaving) return;
         const order = orders.find((o) => o.id === orderId);
         if (!order || !editDraftOrder) return;

@@ -164,6 +164,10 @@ export function createLegacyCloudAdapter({
       if (!context?.restaurantId || !context?.mappings) {
         return { status: "not_configured" };
       }
+      if (session) {
+        const authorized = await session.status();
+        if (!authorized.user || authorized.restaurantId !== context.restaurantId) throw new OrderSyncError("Catalog belongs to a different or signed-out restaurant.", { code: "CLOUD_TENANT_MISMATCH" });
+      }
       const record = await outbox.enqueue({
         localOrderId: order.id,
         restaurantId: context.restaurantId,
@@ -178,6 +182,25 @@ export function createLegacyCloudAdapter({
       };
     },
 
+    async checkoutOnline(order) {
+      const current = await session.currentUser();
+      const context = await storage.get(CLOUD_CONTEXT_KEY);
+      if (!current.user || !context || context.restaurantId !== current.restaurantId) throw new Error("Import this restaurant's catalog before checkout.");
+      if (order.items.some(item => (item.extras || []).length)) throw new Error("Cloud checkout does not yet support ingredient extras. Remove extras before taking payment.");
+      const payload = buildCloudOrderPayload(order, context.mappings);
+      payload.expectedTotalMinor = minor(order.totalBill);
+      const fingerprint = JSON.stringify(payload);
+      let attempt = await storage.get("pos_checkout_attempt");
+      if (attempt && attempt.fingerprint !== fingerprint) throw new Error("A previous checkout is unconfirmed. Retry its original cart or reconcile it in cloud history before changing the bill.");
+      if (!attempt) { attempt = { fingerprint, idempotencyKey: crypto.randomUUID() }; await storage.set("pos_checkout_attempt", attempt); }
+      payload.idempotencyKey = attempt.idempotencyKey;
+      try {
+        return await createHttpOrderTransport({ fetchImpl }).send({ restaurantId: current.restaurantId, payload });
+      } catch (error) {
+        if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) await storage.set("pos_checkout_attempt", null);
+        throw error;
+      }
+    },
     flush: () => outbox.flush(),
   });
 }
@@ -202,18 +225,26 @@ export function createBrowserIndexedDbStorage({
     });
     return connection;
   }
+  function scopedKey(key) {
+    if (!globalThis.BILLZ_MANAGED || key === "pos_cloud_session_v1") return key;
+    if (!globalThis.BILLZ_TENANT_ID) throw new Error("No authenticated tenant selected.");
+    return `tenant:${globalThis.BILLZ_TENANT_ID}:${key}`;
+  }
   async function request(mode, action) {
     const db = await database();
     return new Promise((resolve, reject) => {
       const transaction = db.transaction(storeName, mode);
       const operation = action(transaction.objectStore(storeName));
-      operation.onsuccess = () => resolve(operation.result);
+      let value;
+      operation.onsuccess = () => { value = operation.result; };
+      transaction.oncomplete = () => resolve(value);
+      transaction.onabort = () => reject(transaction.error || new Error("Storage transaction aborted."));
       operation.onerror = () => reject(operation.error);
     });
   }
   return Object.freeze({
-    get: (key) => request("readonly", (store) => store.get(key)),
-    set: (key, value) => request("readwrite", (store) => store.put(value, key)),
+    get: (key) => request("readonly", (store) => store.get(scopedKey(key))),
+    set: (key, value) => request("readwrite", (store) => store.put(value, scopedKey(key))),
   });
 }
 
@@ -224,7 +255,13 @@ export function createBrowserOutbox({ storage, navigatorImpl = globalThis.naviga
   return createOrderOutbox({
     storage,
     storageKey: CLOUD_OUTBOX_KEY,
-    transport: createHttpOrderTransport(),
+    transport: {
+      async send(record) {
+        const account = await storage.get("pos_cloud_session_v1");
+        if (!account?.user || account.restaurantId !== record.restaurantId) throw new OrderSyncError("Sign in to the original restaurant to synchronize this order.", { status: 401, code: "CLOUD_TENANT_MISMATCH" });
+        return createHttpOrderTransport().send(record);
+      },
+    },
     withLock,
   });
 }

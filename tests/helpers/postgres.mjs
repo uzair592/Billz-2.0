@@ -32,7 +32,7 @@ export function scratchDatabaseUrl(databaseName) {
  */
 export const APP_DATABASE_URL =
   process.env.TEST_DATABASE_URL
-  ?? `postgresql://${APP_ROLE}:integration-only@127.0.0.1:55432/restaurant_pos_test`;
+  ?? (() => { const url = new URL(ADMIN_DATABASE_URL); url.username = APP_ROLE; url.password = "integration-only"; return url.toString(); })();
 
 const MIGRATIONS_DIR = path.join(projectRoot, "database", "migrations");
 
@@ -97,6 +97,14 @@ export async function provisionIntegrationDatabase() {
       END
       $$;
     `);
+    await admin.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pos_control_test') THEN
+        CREATE ROLE pos_control_test LOGIN PASSWORD 'control-test-only' NOSUPERUSER BYPASSRLS;
+      END IF;
+    END $$;`);
+    await admin.query(`GRANT USAGE ON SCHEMA public TO pos_control_test;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_control_test;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pos_control_test;`);
     await admin.query(`
       DO $$
       DECLARE
@@ -225,4 +233,14 @@ export async function resetBillingState(admin) {
              subscriptions, billing_customers
     RESTART IDENTITY CASCADE
   `);
+}
+export function controlDatabaseUrl() {
+  const url = new URL(ADMIN_DATABASE_URL);
+  url.username = "pos_control_test"; url.password = "control-test-only";
+  return url.toString();
+}
+export async function createControlPool() {
+  const pool = new pg.Pool({ connectionString: controlDatabaseUrl(), max: 5 });
+  await pool.query("SELECT 1");
+  return pool;
 }

@@ -1,3 +1,9 @@
+function publicUser(user) {
+  if (!user) return null;
+  return { id: user.id, email: user.email, username: user.username,
+    displayName: user.displayName, status: user.status };
+}
+
 import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -60,6 +66,7 @@ const percentChargeSchema = z.object({
 
 const orderSchema = z.object({
   idempotencyKey: z.uuid(),
+  expectedTotalMinor: z.number().int().min(0).optional(),
   businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   orderType: z.enum(["dine_in", "takeaway", "delivery"]),
   tableId: z.uuid().nullable().optional(),
@@ -405,6 +412,7 @@ export async function buildHttpApp({
   verifyMigrationsCurrent = null,
   serveClient = true,
   nodeEnv = "development",
+  trustProxy = false,
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
@@ -413,7 +421,7 @@ export async function buildHttpApp({
 
   const app = Fastify({
     logger,
-    trustProxy: true,
+    trustProxy,
     bodyLimit: 64 * 1024,
     genReqId: (request) =>
       request.headers["x-request-id"]
@@ -593,13 +601,25 @@ export async function buildHttpApp({
         ...requestMetadata(request),
       });
       setSessionCookie(reply, session, secureCookies);
-      return { user: session.user };
+      return { user: publicUser(session.user) };
     },
   );
 
+  const accountAttempts = new Map();
   app.post(
     "/api/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
+      preHandler: async (request, reply) => {
+        const b = request.body || {};
+        const key = b.email ? String(b.email).trim().toLowerCase()
+          : String(b.restaurantCode || "").trim().toLowerCase() + ":" + String(b.username || "").trim().toLowerCase();
+        const now = Date.now();
+        const attempt = accountAttempts.get(key);
+        if (attempt && attempt.until > now && attempt.count >= 10) return reply.code(429).send({ error: "Too many sign-in attempts. Try again later.", code: "LOGIN_RATE_LIMITED" });
+        for (const [k, value] of accountAttempts) if (value.until <= now) accountAttempts.delete(k);
+        if (accountAttempts.size >= 10000 && !accountAttempts.has(key)) accountAttempts.delete(accountAttempts.keys().next().value);
+        accountAttempts.set(key, { until: attempt?.until > now ? attempt.until : now + 900000, count: attempt?.until > now ? attempt.count + 1 : 1 });
+      } },
     async (request, reply) => {
       const input = loginSchema.parse(request.body);
       try {
@@ -608,7 +628,7 @@ export async function buildHttpApp({
           ...requestMetadata(request),
         });
         setSessionCookie(reply, session, secureCookies);
-        return { user: session.user };
+        return { user: publicUser(session.user) };
       } catch (err) {
         if (err.code === "RESTAURANT_SUSPENDED") {
           return reply.code(403).send({
@@ -664,7 +684,7 @@ export async function buildHttpApp({
     const restaurants = typeof authService.restaurantsForUser === "function"
       ? await authService.restaurantsForUser(session.user.id)
       : [];
-    return { user: session.user, expiresAt: session.expiresAt, restaurants };
+    return { user: publicUser(session.user), expiresAt: session.expiresAt, restaurants };
   });
 
   if (tenantContextService
@@ -1382,13 +1402,26 @@ export async function buildHttpApp({
             userId: request.auth.user.id,
             deviceId: String(deviceId),
             permissions: ["ORDER_CREATE", "ORDER_VIEW"],
-            subscriptionState: request.tenant.subscriptionAccess?.status ?? "active",
+            subscriptionState: request.tenant.subscription.status,
+            validUntil: request.tenant.subscription.status === "trialing" ? request.tenant.subscription.trialEndsAt
+              : request.tenant.subscription.status === "past_due" ? request.tenant.subscription.graceEndsAt
+              : request.tenant.subscription.currentPeriodEnd,
           });
         },
       );
     }
 
     if (storageService) {
+      const fileGuards = [guards.authenticate, guards.tenant(PERMISSION.SETTINGS_MANAGE)];
+      app.get("/api/pos/storage/assets/:assetId", { preHandler: fileGuards }, async (request, reply) => {
+        const assetId = z.uuid().parse(request.params.assetId);
+        const asset = await storageService.readAsset({ restaurantId: request.tenant.restaurant.id, assetId });
+        return reply.header("Content-Type", asset.mimeType).header("Cache-Control", "private, no-store")
+          .header("Content-Disposition", "attachment; filename*=UTF-8''" + encodeURIComponent(asset.fileName))
+          .header("X-Content-SHA256", asset.sha256).send(asset.buffer);
+      });
+      app.delete("/api/pos/storage/assets/:assetId", { preHandler: fileGuards }, request =>
+        storageService.deleteAsset({ restaurantId: request.tenant.restaurant.id, assetId: z.uuid().parse(request.params.assetId) }));
       app.get(
         "/api/pos/storage/usage",
         {
@@ -1403,13 +1436,15 @@ export async function buildHttpApp({
       app.post(
         "/api/pos/storage/upload",
         {
+          bodyLimit: 14 * 1024 * 1024,
           preHandler: [
             guards.authenticate,
             guards.tenant(PERMISSION.SETTINGS_MANAGE),
           ],
         },
         async (request, reply) => {
-          const body = request.body || {};
+          const body = z.object({ fileName: z.string().trim().min(1).max(255), mimeType: z.string().min(1),
+            contentBase64: z.string().min(4).max(14 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/) }).parse(request.body);
           const result = await storageService.reserveAndStoreAsset({
             restaurantId: request.tenant.restaurant.id,
             fileName: body.fileName,

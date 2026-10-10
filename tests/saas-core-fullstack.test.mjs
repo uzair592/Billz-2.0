@@ -1,6 +1,7 @@
+import { createServer } from "../src/server/main.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAppPool, provisionIntegrationDatabase, seedPlan } from "./helpers/postgres.mjs";
+import { createAppPool, createControlPool, provisionIntegrationDatabase, seedPlan } from "./helpers/postgres.mjs";
 
 import { buildHttpApp } from "../src/server/http/app.mjs";
 import { createPostgresAuthRepository } from "../src/server/auth/postgres-auth-repository.mjs";
@@ -16,56 +17,27 @@ const pepper = "test-pepper-for-development-only";
 
 async function setupTestApp() {
   await provisionIntegrationDatabase();
-  const pool = await createAppPool();
+  const appPool = await createAppPool();
+  const pool = await createControlPool();
   await seedPlan(pool, { code: "GROWTH", provider: "manual" });
+  const server = await createServer({ pool: appPool, controlPool: pool, env: {
+    NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test", PASSWORD_PEPPER: pepper,
+    SESSION_SECRET: "test-session-secret-at-least-32-chars", TRUSTED_ORIGIN: "http://127.0.0.1:3000",
+    OFFLINE_ENTITLEMENT_SECRET: "fixture-entitlement-signing-key-32-chars", PAYMENT_PROVIDER: "manual",
+  } });
   const authRepo = createPostgresAuthRepository(pool);
-  const authService = createAuthService({
-    repository: authRepo,
-    mailer: { registrationEnabled: true, sendVerification: async () => {} },
-    passwordPepper: pepper,
-  });
+  const platformAdminService = createPlatformAdminService({ repository: createPlatformAdminRepository(pool), passwordPepper: pepper });
+  const platformAdminPortalService = createPlatformAdminPortalService({ pool, passwordPepper: pepper });
+  const entitlementService = createEntitlementService({ secret: "fixture-entitlement-signing-key-32-chars" });
+  const storageService = createStorageService({ pool: appPool });
+  return { app: server.app, pool, appPool, authRepo, platformAdminService, platformAdminPortalService, entitlementService, storageService };
 
-  const platformAdminRepo = createPlatformAdminRepository(pool);
-  const platformAdminService = createPlatformAdminService({
-    repository: platformAdminRepo,
-    passwordPepper: pepper,
-  });
-
-  const platformAdminPortalService = createPlatformAdminPortalService({
-    pool,
-    passwordPepper: pepper,
-  });
-
-  const entitlementService = createEntitlementService();
-  const storageService = createStorageService({ pool });
-  const tenantContextService = createTenantContextService(pool);
-
-  const app = await buildHttpApp({
-    authService,
-    platformAdminService,
-    platformAdminPortalService,
-    entitlementService,
-    storageService,
-    tenantContextService,
-    trustedOrigin: "http://127.0.0.1:3000",
-    databasePool: pool,
-    serveClient: false,
-  });
-
-  return {
-    app,
-    pool,
-    authRepo,
-    authService,
-    platformAdminService,
-    platformAdminPortalService,
-    entitlementService,
-    storageService,
-  };
 }
 
 test("SaaS Core Fullstack Suite", async (t) => {
-  const { app, pool, authRepo, platformAdminService, platformAdminPortalService, entitlementService, storageService } = await setupTestApp();
+  const { app, pool, appPool, authRepo, platformAdminService, platformAdminPortalService, entitlementService, storageService } = await setupTestApp();
+
+  t.after(async () => { await app.close(); await pool.end(); await appPool.end(); });
 
   // Bootstrap platform administrator
   const adminResult = await platformAdminService.bootstrapAdmin({
@@ -254,6 +226,7 @@ test("SaaS Core Fullstack Suite", async (t) => {
       permissions: ["ORDER_CREATE"],
       subscriptionState: "active",
       ttlMs: 24 * 60 * 60 * 1000,
+      validUntil: new Date(Date.now() + 86400000).toISOString(),
     });
     assert.ok(tokenObj.token);
 
@@ -298,7 +271,7 @@ test("SaaS Core Fullstack Suite", async (t) => {
     assert.equal(uploadRes.byteSize, sampleBuffer.length);
 
     // 3. Over-limit upload rejected
-    const customStorage = createStorageService({ pool });
+    const customStorage = createStorageService({ pool: appPool });
     await pool.query(
       `INSERT INTO tenant_storage_allowances (restaurant_id, max_storage_bytes, used_storage_bytes)
        VALUES ($1, 100, 90)
@@ -319,5 +292,4 @@ test("SaaS Core Fullstack Suite", async (t) => {
     );
   });
 
-  await app.close();
 });

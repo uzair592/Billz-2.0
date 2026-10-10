@@ -420,10 +420,12 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           throw err;
         }
 
+        // Serialize every subscription change on the tenant, including different payment rows.
+        await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [payment.restaurant_id]);
         if (payment.status === "approved") {
           // Idempotent return: already approved
           const subResult = await client.query(
-            `SELECT id, status, current_period_start, current_period_end FROM subscriptions WHERE restaurant_id = $1 LIMIT 1`,
+            `SELECT id, status, current_period_start, current_period_end FROM subscriptions WHERE restaurant_id = $1 AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 1`,
             [payment.restaurant_id],
           );
           await client.query("COMMIT");
@@ -437,11 +439,15 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           throw err;
         }
 
+        const duplicates = await client.query(`SELECT id FROM manual_payments
+          WHERE id <> $1 AND lower(btrim(external_reference)) =
+          (SELECT lower(btrim(external_reference)) FROM manual_payments WHERE id = $1) AND status = 'approved'`, [paymentId]);
+        if (duplicates.rows.length) throw Object.assign(new Error("This payment reference was already approved."), { code: "DUPLICATE_PAYMENT_REFERENCE", statusCode: 409 });
         const now = clock();
 
         // Lock existing subscription FOR UPDATE
         const subResult = await client.query(
-          `SELECT id, current_period_end, status FROM subscriptions WHERE restaurant_id = $1 FOR UPDATE`,
+          `SELECT id, current_period_end, status FROM subscriptions WHERE restaurant_id = $1 AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
           [payment.restaurant_id],
         );
         const existingSub = subResult.rows[0];
@@ -471,8 +477,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           );
         }
 
-        // Ensure restaurant status is active
-        await client.query(`UPDATE restaurants SET status = 'active', updated_at = $2 WHERE id = $1`, [payment.restaurant_id, now]);
+        // Payment approval does not undo an administrative restaurant suspension.
 
         // Update payment status to approved
         await client.query(
@@ -515,6 +520,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           throw err;
         }
 
+        if (payment.status === "approved") throw Object.assign(new Error("Approved payments require an audited correction; they cannot be rejected."), { code: "PAYMENT_ALREADY_APPROVED", statusCode: 409 });
+        if (payment.status === "rejected") { await client.query("COMMIT"); return { rejected: true, replayed: true }; }
         const now = clock();
         await client.query(
           `UPDATE manual_payments
@@ -549,6 +556,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       try {
         await client.query("BEGIN");
         const now = clock();
+        await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
 
         await client.query(`UPDATE restaurants SET status = 'suspended', updated_at = $2 WHERE id = $1`, [restaurantId, now]);
         await client.query(
@@ -581,6 +589,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       try {
         await client.query("BEGIN");
         const now = clock();
+        await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
 
         await client.query(`UPDATE restaurants SET status = 'active', updated_at = $2 WHERE id = $1`, [restaurantId, now]);
         await client.query(

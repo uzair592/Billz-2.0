@@ -126,11 +126,24 @@ const purchasesUI = createPurchasesUI({
 });
 globalThis.BiteTechPurchases = purchasesUI;
 
-globalThis.addEventListener("online", () => {
-  adapter.flush().catch((error) => console.warn("Cloud order retry failed:", error));
-  cloudStatus.refresh();
-});
-adapter.flush().catch((error) => console.warn("Cloud order startup retry failed:", error));
+async function recoverSync() {
+  try {
+    const current = await session.currentUser();
+    if (!current.user || !current.restaurantId) return;
+    const access = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": current.restaurantId } });
+    if (!access.ok) return;
+    await outbox.resumeAccess(current.restaurantId);
+    await adapter.flush();
+  } catch (error) {
+    if (![401, 402, 403].includes(error.status)) console.warn("Cloud retry deferred:", error.message);
+  }
+}
+globalThis.addEventListener("online", () => { void recoverSync(); cloudStatus.refresh(); });
+globalThis.addEventListener("billz-session-restored", () => { void recoverSync(); });
+// A timer drains deadlines that become due without another online event.
+const retryTimer = setInterval(() => { if (navigator.onLine) void recoverSync(); }, 15000);
+globalThis.addEventListener("pagehide", () => clearInterval(retryTimer), { once: true });
+void recoverSync();
 
 export {
   cloudStatus,

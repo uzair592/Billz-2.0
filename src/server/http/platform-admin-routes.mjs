@@ -20,14 +20,14 @@ const manualPaymentSchema = z.object({
   planCode: z.string().trim().min(1).max(64),
   amountMinor: z.number().int().min(0),
   currencyCode: z.string().regex(/^[A-Z]{3}$/).default("PKR"),
-  paymentDate: z.string(),
-  coveredFrom: z.string(),
-  coveredUntil: z.string(),
+  paymentDate: z.iso.datetime({ offset: true }),
+  coveredFrom: z.iso.datetime({ offset: true }),
+  coveredUntil: z.iso.datetime({ offset: true }),
   paymentMethod: z.string().trim().default("manual_bank_transfer"),
   externalReference: z.string().trim().min(1).max(200),
   whatsappReferenceText: z.string().trim().max(1000).optional(),
   administratorNote: z.string().trim().max(1000).optional(),
-});
+}).refine(value => new Date(value.coveredUntil) > new Date(value.coveredFrom), { message: "Coverage end must follow start." });
 
 const rejectPaymentSchema = z.object({
   note: z.string().trim().max(1000).optional(),
@@ -71,7 +71,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
         sameSite: "lax",
         expires: session.expiresAt,
       });
-      return { admin: session.admin };
+      return { admin: { id: session.admin.id, username: session.admin.username, displayName: session.admin.displayName, status: session.admin.status } };
     } catch (err) {
       if (err.code === "INVALID_ADMIN_CREDENTIALS") {
         return reply.code(401).send({ error: err.message, code: err.code });
@@ -96,7 +96,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.get("/platform-admin/api/auth/me", async (request) => {
-    return { admin: request.adminSession.admin, expiresAt: request.adminSession.expiresAt };
+    return { admin: { id: request.adminSession.admin.id, username: request.adminSession.admin.username, displayName: request.adminSession.admin.displayName, status: request.adminSession.admin.status }, expiresAt: request.adminSession.expiresAt };
   });
 
   app.get("/platform-admin/api/dashboard", async () => {

@@ -270,7 +270,7 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
       [tenantA.restaurantId, orderIdA],
     );
     assert.equal(movementRes.rows.length, 1);
-    assert.equal(Number(movementRes.rows[0].quantity_delta), 100);
+    assert.equal(Number(movementRes.rows[0].quantity_delta), 200);
 
     // Compensating ledger entry was recorded against the cash account.
     const ledgerRes = await admin.query(

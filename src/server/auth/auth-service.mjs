@@ -12,6 +12,7 @@ function publicUser(user) {
   return {
     id: user.id,
     email: user.email,
+    username: user.username,
     displayName: user.displayName,
     platformRole: user.platformRole,
   };

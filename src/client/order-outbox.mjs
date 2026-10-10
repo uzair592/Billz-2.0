@@ -154,6 +154,21 @@ export function createOrderOutbox({
       });
     },
 
+    async resumeAccess(restaurantId) {
+      return serialize(async () => {
+        const records = await read();
+        for (const record of records) {
+          if (record.restaurantId === restaurantId && (record.status === "blocked" ||
+            (record.status === "failed" && [401, 402, 403].includes(record.lastError?.status)))) {
+            record.status = "pending";
+            record.nextAttemptAt = clock().toISOString();
+            record.lastError = null;
+          }
+        }
+        await write(records);
+        return clone(records);
+      });
+    },
     async list() {
       return serialize(async () => clone(await read()));
     },
@@ -191,7 +206,7 @@ export function createOrderOutbox({
             const retriable = isRetryable(error);
             records[index] = {
               ...record,
-              status: retriable ? "retrying" : "failed",
+              status: [401, 402, 403].includes(Number(error?.status)) ? "blocked" : retriable ? "retrying" : "failed",
               attempts,
               nextAttemptAt: retriable
                 ? new Date(clock().getTime() + retryDelay(

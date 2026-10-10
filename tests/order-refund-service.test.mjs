@@ -881,14 +881,14 @@ describe("Order Refund Service (Unit Tests)", () => {
     });
 
     // Recipe snapshot: 200 base units per item, 2 items sold.
-    // Refunding 1 of 2 restores 200 * 1 / 2 = 100 base units.
+    // Refunding 1 of 2 restores the frozen per-unit 200 base units.
     assert.equal(state.stockMovements.length, 1);
     const movement = state.stockMovements[0];
     // params: [restaurantId, branchId, stockItemId, orderId, quantityDelta, movementKey, occurredAt, userId]
     assert.equal(movement[0], RESTAURANT_ID);
     assert.equal(movement[2], STOCK_ITEM_ID);
     assert.equal(movement[3], ORDER_ID);
-    assert.equal(Number(movement[4]), 100);
+    assert.equal(Number(movement[4]), 200);
     assert.equal(movement[7], USER_ID);
   });
 

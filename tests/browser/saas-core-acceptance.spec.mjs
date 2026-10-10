@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createAppPool, provisionIntegrationDatabase, seedPlan } from "../helpers/postgres.mjs";
+import { createAppPool, createControlPool, seedPlan } from "../helpers/postgres.mjs";
 import { createPlatformAdminRepository } from "../../src/server/auth/platform-admin-repository.mjs";
 import { createPlatformAdminService } from "../../src/server/auth/platform-admin-service.mjs";
 import { createPlatformAdminPortalService } from "../../src/server/subscriptions/platform-admin-portal-service.mjs";
@@ -19,8 +19,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
   let authRepo;
 
   test.beforeAll(async () => {
-    await provisionIntegrationDatabase();
-    pool = await createAppPool();
+    pool = await createControlPool();
     await seedPlan(pool, { code: "GROWTH", provider: "manual" });
 
     const adminRepo = createPlatformAdminRepository(pool);
@@ -100,40 +99,43 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
         await page.screenshot({ path: `tests/browser/screenshots/restaurant-login-${vp.name}.png` });
       }
 
-      // 5. Create Cashier user via Auth Repo
+      // Visible owner sign-in and actual menu onboarding.
+      await page.fill("#cloud-restaurant-code", restCode);
+      await page.fill("#cloud-username", `owner_${vp.name}`);
+      await page.fill("#cloud-password", "OwnerPass123!");
+      await page.click("#cloud-signin-button");
+      await expect(page.locator(".app-container")).toBeVisible();
       const restRow = await pool.query(`SELECT id FROM restaurants WHERE code = $1`, [restCode]);
       const restId = restRow.rows[0].id;
-
-      await authRepo.createTenantUser({
-        restaurantId: restId,
-        username: `cashier_${vp.name}`,
-        passwordHash: await import("../../src/server/auth/passwords.mjs").then((m) => m.hashPassword("CashierPass123!", pepper)),
-        displayName: "Cashier One",
-        role: "cashier",
+      // Populate one valid product in this tenant's local catalog before import.
+      await page.evaluate(async () => {
+        menuItems = [{ id: 1, itemNumber: 1, name: "Acceptance Burger", category: "Burgers", price: 100, otherCost: 0 }];
+        categories = ["Burgers"];
+        await saveToStorage();
+        renderDynamicCategoryTabsRow();
+        renderFoodGridOrderingUI();
       });
-
-      // 6. Cashier Logs in via Server API
-      const loginRes = await page.request.post("http://127.0.0.1:3000/api/auth/login", {
-        data: {
-          restaurantCode: restCode,
-          username: `cashier_${vp.name}`,
-          password: "CashierPass123!",
-        },
+      await page.evaluate(() => openCloudAccountModal());
+      await page.click("#cloud-import-button");
+      await expect(page.locator("#cloud-account-status")).toContainText("Copied 1 menu items");
+      await page.evaluate(() => closeCloudAccountModal());
+      // Real checkout uses the visible POS action; no accepted error statuses.
+      await page.evaluate(() => {
+        switchScreen("new-order");
+        setOrderType("Takeaway");
+        cart = [{ ...menuItems[0], qty: 2 }];
+        renderCart();
       });
-      expect(loginRes.status()).toBe(200);
-
-      // 7. Cashier Completes a Test Order via POS Server API
-      const orderRes = await page.request.post("http://127.0.0.1:3000/api/pos/orders", {
-        headers: { "x-restaurant-id": restId },
-        data: {
-          idempotencyKey: "10000000-0000-4000-8000-00000000000" + (vp.name === "mobile" ? "1" : vp.name === "tablet" ? "2" : "3"),
-          orderType: "dine_in",
-          customerName: "Acceptance Customer",
-          items: [],
-        },
-      });
-      // (Returns 400 for empty items array or 429 if global rate limiter triggers, validating subscription gate passed closed)
-      expect([201, 400, 429]).toContain(orderRes.status());
+      const completed = page.waitForResponse(r => r.url().endsWith("/api/pos/orders") && r.request().method() === "POST");
+      await page.evaluate(() => submitOrder(false));
+      const response = await completed;
+      expect(response.status()).toBe(201);
+      const sale = (await response.json()).order;
+      expect(sale.totalMinor).toBe(20000);
+      expect(sale.paymentStatus).toBe("paid");
+      const persisted = await pool.query(`SELECT total_minor, payment_status FROM orders WHERE restaurant_id = $1 AND id = $2`, [restId, sale.id]);
+      expect(Number(persisted.rows[0].total_minor)).toBe(20000);
+      expect(persisted.rows[0].payment_status).toBe("paid");
 
       // 8. Platform Admin Suspends Restaurant
       await page.goto("http://127.0.0.1:3000/platform-admin/");
@@ -150,8 +152,8 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       const posSuspendedRes = await page.request.post("http://127.0.0.1:3000/api/auth/login", {
         data: {
           restaurantCode: restCode,
-          username: `cashier_${vp.name}`,
-          password: "CashierPass123!",
+          username: `owner_${vp.name}`,
+          password: "OwnerPass123!",
         },
       });
       expect(posSuspendedRes.status()).toBe(403);
@@ -170,8 +172,8 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       const posRestoredRes = await page.request.post("http://127.0.0.1:3000/api/auth/login", {
         data: {
           restaurantCode: restCode,
-          username: `cashier_${vp.name}`,
-          password: "CashierPass123!",
+          username: `owner_${vp.name}`,
+          password: "OwnerPass123!",
         },
       });
       expect(posRestoredRes.status()).toBe(200);

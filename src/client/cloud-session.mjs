@@ -114,10 +114,12 @@ export function createCloudSessionClient({
       });
       const account = await loadAccount();
       const restaurants = account?.restaurants ?? [];
-      return writeStored({
-        user: account?.user ?? null,
-        restaurantId: restaurants.length === 1 ? restaurants[0].restaurantId : null,
-      });
+      const previous = await readStored();
+      const restaurantId = restaurants.length === 1 ? restaurants[0].restaurantId : null;
+      if (previous.restaurantId !== restaurantId) await storage.set("pos_cloud_context_v1", null);
+      const result = await writeStored({ user: account?.user ?? null, restaurantId });
+      globalThis.dispatchEvent?.(new Event("billz-session-restored"));
+      return result;
     },
 
     async signOut({ forgetRestaurant = false } = {}) {
@@ -125,6 +127,7 @@ export function createCloudSessionClient({
         await call("/api/auth/logout", { method: "POST" });
       } finally {
         const stored = await readStored();
+        await storage.set("pos_cloud_context_v1", null);
         await writeStored({
           user: null,
           restaurantId: forgetRestaurant ? null : stored.restaurantId,

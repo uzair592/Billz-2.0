@@ -136,14 +136,14 @@ describe("order cancellation service", () => {
 
     const refund = pool.calls.find((call) => call.text.startsWith("UPDATE order_payments"));
     assert.match(refund.text, /SET status = 'refunded'/);
-    assert.match(refund.text, /status = 'captured'/);
+    assert.match(refund.text, /status IN \('captured', 'partially_refunded'\)/);
 
     const ledger = pool.calls.find((call) => call.text.startsWith("INSERT INTO ledger_entries"));
     assert.match(ledger.text, /'debit'/);
     assert.match(ledger.text, /'refund'/);
     assert.match(ledger.text, /ON CONFLICT DO NOTHING/);
     assert.deepEqual(ledger.values, [
-      restaurantId, branchId, accountId, paymentId, "1050",
+      restaurantId, branchId, accountId, paymentId, 1050,
       "Refund / Cancelled Order #12", `refund:${orderId}:${paymentId}`, now,
     ]);
   });
@@ -155,7 +155,7 @@ describe("order cancellation service", () => {
     const reversal = pool.calls.find((call) => call.text.startsWith("WITH sales AS"));
     assert.match(reversal.text, /movement_type = 'sale'/);
     assert.match(reversal.text, /'sale_reversal'/);
-    assert.match(reversal.text, /WHERE movement_type = 'sale_reversal'/);
+    assert.match(reversal.text, /idempotency_key/);
     assert.match(reversal.text, /DO NOTHING/);
     assert.deepEqual(reversal.values, [
       restaurantId, orderId, branchId, now, userId,

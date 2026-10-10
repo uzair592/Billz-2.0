@@ -1,30 +1,23 @@
-import { pool } from "./database/pool.mjs";
+import { createDatabasePool } from "./database/pool.mjs";
 import { createPlatformAdminRepository } from "./auth/platform-admin-repository.mjs";
 import { createPlatformAdminService } from "./auth/platform-admin-service.mjs";
 
-const username = process.argv[2];
-const password = process.argv[3];
-const displayName = process.argv[4] || "Super Administrator";
-
-if (!username || !password) {
-  console.error("Usage: node src/server/bootstrap-platform-admin.mjs <username> <password> [displayName]");
+// Passwords are environment input, never command-line arguments or log output.
+const username = process.env.BOOTSTRAP_ADMIN_USERNAME;
+const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+const pepper = process.env.PASSWORD_PEPPER;
+if (!username || !password || password.length < 10 || !pepper || pepper.length < 16) {
+  console.error("Set BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_PASSWORD (10+ characters), and PASSWORD_PEPPER (16+ characters).");
   process.exit(1);
 }
-
-const pepper = process.env.PASSWORD_PEPPER || "test-pepper-for-development-only";
-const repository = createPlatformAdminRepository(pool);
-const adminService = createPlatformAdminService({ repository, passwordPepper: pepper });
-
+const pool = createDatabasePool({ ...process.env,
+  DATABASE_URL: process.env.CONTROL_DATABASE_URL || process.env.DATABASE_URL });
 try {
-  const result = await adminService.bootstrapAdmin({ username, password, displayName });
-  if (result.created) {
-    console.log(`Successfully created platform administrator: ${result.admin.username} (${result.admin.id})`);
-  } else {
-    console.log(`Platform administrator already exists: ${result.admin.username} (${result.admin.id})`);
-  }
+  const service = createPlatformAdminService({ repository: createPlatformAdminRepository(pool), passwordPepper: pepper });
+  const result = await service.bootstrapAdmin({ username, password,
+    displayName: process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME || "Super Administrator" });
+  console.log(result.created ? "Platform administrator created." : "Platform administrator already exists.");
 } catch (error) {
-  console.error("Failed to bootstrap platform administrator:", error.message);
-  process.exit(1);
-} finally {
-  await pool.end();
-}
+  console.error("Administrator bootstrap failed:", error.message);
+  process.exitCode = 1;
+} finally { await pool.end(); }

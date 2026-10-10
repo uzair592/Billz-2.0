@@ -25,7 +25,7 @@ const POSTGRES_TESTS = [
   "backup-restore.test.mjs",
 ];
 
-if (!isDatabaseAvailable()) {
+if (!await isDatabaseAvailable()) {
   console.error(
     "PostgreSQL is not reachable at TEST_DATABASE_ADMIN_URL. "
     + "The PostgreSQL-dependent tests require a live database.",

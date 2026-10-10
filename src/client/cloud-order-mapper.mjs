@@ -172,7 +172,8 @@ export function mapCloudOrderDetail(detail) {
       offerLabel,
       originalPrice,
       extras: [],
-      lineCostAtSale: unitCost,
+      lineCostAtSale: item?.lineCostMinor != null
+        ? fromMinor(item.lineCostMinor) : unitCost * (Number(item?.quantity) || 0),
       unitCostAtSale: unitCost,
       costSnapshotVersion: 1,
     };
@@ -249,7 +250,7 @@ export function mapCloudOrderDetail(detail) {
           .map((entry) => `${entry?.stockItemId} +${entry?.quantityBaseUnits}`)
           .join("; ")
       : "",
-    costOfGoods: fromMinor(order.costOfGoodsMinor),
+    costOfGoods: order.costOfGoodsMinor != null ? fromMinor(order.costOfGoodsMinor) : items.reduce((sum, item) => sum + item.lineCostAtSale, 0),
     costSnapshotVersion: 1,
     costSnapshotSource: "cloud",
     legacyOrderId: order.legacyOrderId ?? null,

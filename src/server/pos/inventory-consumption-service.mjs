@@ -36,6 +36,16 @@ import {
  * that have no recipe (missing-recipe warnings).
  */
 async function resolveUsage(client, restaurantId, lines) {
+  if (lines.some(line => line.inventoryRecipe !== undefined)) {
+    const usage = new Map();
+    const missingRecipes = [];
+    for (const line of lines) {
+      for (const recipe of line.inventoryRecipe || []) {
+        usage.set(recipe.inventoryItemId, (usage.get(recipe.inventoryItemId) || 0) + Number(recipe.quantityPerUnit) * Number(line.quantity));
+      }
+    }
+    return { usage, missingRecipes };
+  }
   const menuItemIds = lines.map((line) => line.menuItemId);
   const uniqueMenuItemIds = [...new Set(menuItemIds)];
 
@@ -112,7 +122,7 @@ async function consumeWithinTransaction(
   const warnings = [...missingRecipes];
   const movements = [];
 
-  for (const [inventoryItemId, required] of usage) {
+  for (const [inventoryItemId, required] of [...usage].sort(([a],[b]) => a.localeCompare(b))) {
     const locked = await lockInventoryItem(client, restaurantId, inventoryItemId);
     if (!locked) {
       // The recipe references an item that no longer exists.

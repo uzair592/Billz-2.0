@@ -116,6 +116,8 @@ describe("transactional order service", () => {
     assert.equal(orderInsert.values[18], 46);
     assert.equal(itemInsert.values[8], 23);
     assert.deepEqual(JSON.parse(itemInsert.values[9]), {
+      version: 2,
+      inventoryItems: [],
       items: [{ stockItemId, quantityBaseUnits: 0.5 }],
       components: [],
       offer: null,
@@ -154,18 +156,12 @@ describe("transactional order service", () => {
     assert.equal(pool.calls.at(-1).text, "COMMIT");
   });
 
-  it("rolls back without creating an order when recipe stock is insufficient", async () => {
+  it("allows negative legacy stock with an explicit warning", async () => {
     const pool = fakePool({ stockQuantity: 0.5 });
-    await assert.rejects(
-      createOrderService(pool, { clock: () => now }).create({
-        tenant: tenant(), userId, input: input(),
-      }),
-      (error) => error.code === "INSUFFICIENT_STOCK" && error.statusCode === 409,
-    );
-
-    assert.equal(pool.calls.some((call) => call.text.startsWith("INSERT INTO orders")), false);
-    assert.equal(pool.calls.at(-1).text, "ROLLBACK");
-    assert.equal(pool.released, true);
+    const result = await createOrderService(pool, { clock: () => now }).create({ tenant: tenant(), userId, input: input() });
+    assert.ok(result.inventoryConsumption.warnings.some(warning => warning.type === "negative_stock" && warning.quantityAfter === -0.5));
+    assert.ok(pool.calls.some(call => call.text.startsWith("INSERT INTO orders")));
+    assert.equal(pool.calls.at(-1).text, "COMMIT");
   });
 
   it("recursively expands deal components into stock, cost, and immutable snapshots", async () => {

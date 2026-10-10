@@ -1,23 +1,24 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const DEFAULT_SECRET = "offline-entitlement-secret-key-32-chars!!";
+
 const MAX_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 export function createEntitlementService({
-  secret = process.env.OFFLINE_ENTITLEMENT_SECRET || DEFAULT_SECRET,
+  secret = process.env.OFFLINE_ENTITLEMENT_SECRET,
   clock = () => new Date(),
 } = {}) {
+  if (typeof secret !== "string" || secret.length < 32) throw new TypeError("A private entitlement signing secret of at least 32 characters is required.");
   function sign(payloadString) {
     return createHmac("sha256", secret).update(payloadString).digest("hex");
   }
 
   return Object.freeze({
-    issueToken({ restaurantId, userId, deviceId, permissions = [], subscriptionState = "active", ttlMs = MAX_TTL_MS }) {
+    issueToken({ restaurantId, userId, deviceId, permissions = [], subscriptionState = "active", validUntil, ttlMs = MAX_TTL_MS }) {
       if (!restaurantId || !userId || !deviceId) {
         throw new TypeError("restaurantId, userId, and deviceId are required.");
       }
 
-      if (subscriptionState === "suspended" || subscriptionState === "expired") {
+      if (!["active", "trialing", "past_due", "cancel_at_period_end"].includes(subscriptionState)) {
         const error = new Error("Cannot issue offline entitlement for suspended or expired subscription.");
         error.code = "SUBSCRIPTION_INELIGIBLE";
         error.statusCode = 403;
@@ -25,7 +26,9 @@ export function createEntitlementService({
       }
 
       const now = clock();
-      const actualTtl = Math.min(ttlMs, MAX_TTL_MS);
+      const end = new Date(validUntil).getTime();
+      if (!Number.isFinite(end) || end <= now.getTime() || !Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError("A future subscription boundary and positive TTL are required.");
+      const actualTtl = Math.min(ttlMs, MAX_TTL_MS, end - now.getTime());
       const issuedAt = now.toISOString();
       const expiresAt = new Date(now.getTime() + actualTtl).toISOString();
 
@@ -77,6 +80,9 @@ export function createEntitlementService({
       }
 
       const now = clock();
+      const issued = new Date(claims.issuedAt).getTime();
+      const expires = new Date(claims.expiresAt).getTime();
+      if (!Number.isFinite(issued) || !Number.isFinite(expires) || expires <= issued || expires - issued > MAX_TTL_MS || issued > now.getTime() + 60000 || !claims.restaurantId || !claims.userId || !claims.deviceId) return { valid: false, reason: "invalid_claims" };
 
       if (new Date(claims.expiresAt).getTime() <= now.getTime()) {
         return { valid: false, reason: "token_expired", claims };

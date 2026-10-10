@@ -10,6 +10,7 @@ import {
   verifyMigrationsCurrent,
   getAppliedMigrations,
   ensureMigrationsTable,
+  listMigrationFiles,
 } from "../src/server/database/migration-runner.mjs";
 import {
   ADMIN_DATABASE_URL,
@@ -20,6 +21,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REAL_MIGRATIONS_DIR = path.join(here, "..", "database", "migrations");
+const migrationFiles = await listMigrationFiles(REAL_MIGRATIONS_DIR);
 
 /**
  * Creates a throwaway database so migration tests never touch the
@@ -60,21 +62,21 @@ describe("migration runner", () => {
     await dropScratchDatabase(databaseName);
   });
 
-  it("applies all 12 migrations to a clean database", async () => {
+  it("applies all bundled migrations to a clean database", async () => {
     const result = await runMigrations({ pool, migrationsDir: REAL_MIGRATIONS_DIR, logger: silentLogger });
-    assert.equal(result.applied, 12);
+    assert.equal(result.applied, migrationFiles.length);
     assert.equal(result.alreadyApplied, 0);
 
     const applied = await getAppliedMigrations(pool);
-    assert.equal(applied.size, 12);
+    assert.equal(applied.size, migrationFiles.length);
     // The highest version is the partial-refunds migration.
-    assert.ok(applied.has(12));
+    assert.ok(applied.has(migrationFiles.at(-1).version));
   });
 
   it("is idempotent on a repeated run", async () => {
     const result = await runMigrations({ pool, migrationsDir: REAL_MIGRATIONS_DIR, logger: silentLogger });
     assert.equal(result.applied, 0);
-    assert.equal(result.alreadyApplied, 12);
+    assert.equal(result.alreadyApplied, migrationFiles.length);
   });
 
   it("detects a changed checksum and refuses to continue", async () => {
