@@ -198,7 +198,7 @@ jobs:
           docker run --rm \
             -v "$PWD:/repo" \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
-            git --redact --verbose --log-opts="$scan_range" /repo
+            git --redact --verbose --gitleaks-ignore-path=/repo/.gitleaksignore --log-opts="$scan_range" /repo
 
       - name: Verify working tree clean
         run: |

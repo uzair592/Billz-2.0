@@ -1,5 +1,3 @@
-# Known non-secret placeholder string in the Milestone 13 commit history.
-# These full fingerprints exempt only the two recorded false positives;
-# all other files, lines, rules, and later commits remain scanned.
-eec1d9299c421721fcbb332f835601110b695173:src/server/config/environment.mjs:stripe-access-token:35
-eec1d9299c421721fcbb332f835601110b695173:tests/production-config.test.mjs:stripe-access-token:140
+# This exact historical value was a test-only entitlement fixture, never a deployed credential.
+# The current test generates a private key at runtime. All other history findings remain enforced.
+091e5e44a37df85620c88c05f36c1533908fb3f7:tests/launch-regressions.test.mjs:generic-api-key:63

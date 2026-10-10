@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import vm from "node:vm";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { createServer } from "../src/server/main.mjs";
 import { createStaticFileHandler } from "../src/server/http/static-files.mjs";
 import { createEntitlementService } from "../src/server/auth/entitlement-service.mjs";
@@ -60,7 +60,7 @@ test("authentication DTO strips credential fields even from a repository-shaped 
 test("entitlement cannot use a source default and expires at the paid boundary", () => {
   assert.throws(()=>createEntitlementService({secret:null}),/private entitlement/);
   const now=new Date("2026-10-10T10:00:00Z");
-  const service=createEntitlementService({secret:"fixture-private-signing-material-32-chars",clock:()=>now});
+  const service=createEntitlementService({secret:randomBytes(32).toString("hex"),clock:()=>now});
   const issued=service.issueToken({restaurantId:randomUUID(),userId:randomUUID(),deviceId:"one",validUntil:"2026-10-10T10:10:00Z"});
   assert.equal(issued.claims.expiresAt,"2026-10-10T10:10:00.000Z");
   assert.equal(service.verifyToken(issued.token).valid,true);
