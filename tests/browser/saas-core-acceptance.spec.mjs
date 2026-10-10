@@ -127,7 +127,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
         renderCart();
       });
       const completed = page.waitForResponse(r => r.url().endsWith("/api/pos/orders") && r.request().method() === "POST");
-      await page.evaluate(() => submitOrder(false));
+      await page.locator('#screen-new-order button[onclick="submitOrder(false)"]').click();
       const response = await completed;
       expect(response.status()).toBe(201);
       const sale = (await response.json()).order;

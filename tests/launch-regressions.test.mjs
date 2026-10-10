@@ -13,7 +13,7 @@ import { createOrderOutbox, OrderSyncError } from "../src/client/order-outbox.mj
 import { createLegacyCloudAdapter, CLOUD_CONTEXT_KEY } from "../src/client/legacy-cloud-adapter.mjs";
 import { mapCloudOrderDetail } from "../src/client/cloud-order-mapper.mjs";
 import { readLegacyApp, extractInlineScript, extractDeclaration } from "./helpers/legacy-source.mjs";
-import { runMigrations } from "../src/server/database/migration-runner.mjs";
+import { runMigrations, verifyMigrationsCurrent } from "../src/server/database/migration-runner.mjs";
 
 function memory() { const data = new Map(); return { get: async key => structuredClone(data.get(key)), set: async (key,value) => data.set(key,structuredClone(value)) }; }
 const env = { NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test", PASSWORD_PEPPER: "fixture-password-pepper-long", SESSION_SECRET: "fixture-session-secret-long", TRUSTED_ORIGIN: "http://localhost:3000" };
@@ -117,4 +117,12 @@ test("actual invoice renderer escapes customer, item, offer and attribute canari
     extractDeclaration(source,"function showOrderInvoiceDetailsView(orderId)","function refreshOrderDependentViews()")+"\nshowOrderInvoiceDetailsView(1);",sandbox);
   assert.ok(!content.innerHTML.includes("<img"));assert.ok(content.innerHTML.includes("&lt;img"), content.innerHTML.slice(0,3000));
   assert.ok(content.innerHTML.includes("&quot;canary()&quot;"));
+});
+
+test("runtime migration readiness never requests schema creation privileges", async t => {
+  const dir=await mkdtemp(path.join(tmpdir(),"billz-readiness-"));t.after(()=>rm(dir,{recursive:true,force:true}));
+  const queries=[];
+  const client={query:async sql=>{queries.push(sql);return {rows:[]}},release(){}};
+  assert.equal((await verifyMigrationsCurrent({pool:{connect:async()=>client},migrationsDir:dir})).current,true);
+  assert.equal(queries.length,1);assert.match(queries[0],/^SELECT version/);
 });

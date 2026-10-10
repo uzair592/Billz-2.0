@@ -1,7 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
-  globalSetup: "./tests/browser/setup-saas.mjs",
   testDir: "./tests/browser",
   testMatch: "saas-core-acceptance.spec.mjs",
   timeout: 60_000,
@@ -9,7 +8,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   webServer: {
-    command: "node src/server/main.mjs",
+    command: "node tests/browser/setup-saas.mjs && node src/server/main.mjs",
     url: "http://127.0.0.1:3000/health/ready",
     reuseExistingServer: false,
     timeout: 30_000,

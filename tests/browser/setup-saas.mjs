@@ -5,3 +5,5 @@ export default async function setup() {
   try { await seedPlan(pool, { code: "GROWTH", provider: "manual" }); }
   finally { await pool.end(); }
 }
+
+if (process.argv[1] && import.meta.url === (await import("node:url")).pathToFileURL(process.argv[1]).href) await setup();

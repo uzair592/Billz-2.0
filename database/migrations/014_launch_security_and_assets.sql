@@ -79,4 +79,9 @@ ALTER TABLE inventory_movements ADD CONSTRAINT inventory_movements_movement_type
  CHECK (movement_type IN ('purchase_receipt', 'sale_consumption', 'sale_reversal', 'adjustment_increase', 'adjustment_decrease', 'waste'));
 -- Partial refunds need more than one compensating movement per ingredient.
 DROP INDEX IF EXISTS stock_movements_sale_reversal_key_idx;
+-- Consumption remains unique per order/item; partial compensations are separate.
+DROP INDEX inventory_movements_order_consumption_key_idx;
+CREATE UNIQUE INDEX inventory_movements_order_consumption_key_idx
+ ON inventory_movements (restaurant_id, reference_id, inventory_item_id)
+ WHERE reference_type = 'order' AND movement_type = 'sale_consumption';
 COMMIT;

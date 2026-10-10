@@ -48,8 +48,8 @@ export async function ensureMigrationsTable(client) {
   `);
 }
 
-export async function getAppliedMigrations(client) {
-  await ensureMigrationsTable(client);
+export async function getAppliedMigrations(client, { ensureTable = true } = {}) {
+  if (ensureTable) await ensureMigrationsTable(client);
   const result = await client.query(
     `SELECT version, name, checksum FROM ${MIGRATIONS_TABLE} ORDER BY version ASC`,
   );
@@ -182,7 +182,7 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
 export async function verifyMigrationsCurrent({ pool, migrationsDir }) {
   const client = await pool.connect();
   try {
-    const applied = await getAppliedMigrations(client);
+    const applied = await getAppliedMigrations(client, { ensureTable: false });
     const files = await listMigrationFiles(migrationsDir);
     for (const migration of files) {
       const sql = await readFile(path.join(migrationsDir, migration.file), "utf8");
