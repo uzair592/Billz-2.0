@@ -18940,6 +18940,7 @@
 
       // 🔒 Manual logout — clears the session flag so the PIN screen reappears immediately, and again on the next browser open
       function lockSystemNow() {
+        if (window.BILLZ_MANAGED) return submitCloudSignOut();
         if (
           !confirm(
             "Lock the system now? You'll need to enter the PIN again to continue.",
@@ -19916,6 +19917,8 @@
 
       async function runBootSequence() {
         if (window.BILLZ_MANAGED) {
+          document.getElementById("pin-lock-overlay").classList.add("hidden");
+          document.getElementById("onboarding-overlay").classList.add("hidden");
           let account;
           try {
             const response = await fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" });

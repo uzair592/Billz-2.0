@@ -125,4 +125,18 @@ test("runtime migration readiness never requests schema creation privileges", as
   const client={query:async sql=>{queries.push(sql);return {rows:[]}},release(){}};
   assert.equal((await verifyMigrationsCurrent({pool:{connect:async()=>client},migrationsDir:dir})).current,true);
   assert.equal(queries.length,1);assert.match(queries[0],/^SELECT version/);
+  await writeFile(path.join(dir,"001_probe.sql"),"SELECT 1;");
+  const missing={query:async sql=>{assert.match(sql,/^SELECT version/);throw Object.assign(new Error("missing history"),{code:"42P01"})},release(){}};
+  const pending=await verifyMigrationsCurrent({pool:{connect:async()=>missing},migrationsDir:dir});
+  assert.equal(pending.current,false);assert.equal(pending.pending,"001_probe.sql");
+});
+
+test("managed sign-in hides the initial legacy PIN overlay before requesting a session", async () => {
+  const source=extractInlineScript(await readLegacyApp());const hidden=new Set(["cloud-account-modal-overlay"]);let message;
+  const sandbox=vm.createContext({window:{BILLZ_MANAGED:true},fetch:async()=>({ok:false,status:401}),hideBootSplash(){},cloudSetStatus:text=>{message=text},
+    document:{getElementById:id=>({classList:{add:()=>hidden.add(id),remove:()=>hidden.delete(id)}})}});
+  await vm.runInContext(extractDeclaration(source,"async function runBootSequence()", "\n      bootBiteTechApp();")+"\nrunBootSequence();",sandbox);
+  assert.equal(hidden.has("pin-lock-overlay"),true);
+  assert.equal(hidden.has("cloud-account-modal-overlay"),false);
+  assert.equal(message,"Sign in to open your restaurant.");
 });

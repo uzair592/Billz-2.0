@@ -182,7 +182,13 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
 export async function verifyMigrationsCurrent({ pool, migrationsDir }) {
   const client = await pool.connect();
   try {
-    const applied = await getAppliedMigrations(client, { ensureTable: false });
+    let applied;
+    try { applied = await getAppliedMigrations(client, { ensureTable: false }); }
+    catch (error) {
+      if (error.code !== "42P01") throw error;
+      // A fresh database is pending, never provisioned by a runtime readiness probe.
+      applied = new Map();
+    }
     const files = await listMigrationFiles(migrationsDir);
     for (const migration of files) {
       const sql = await readFile(path.join(migrationsDir, migration.file), "utf8");
