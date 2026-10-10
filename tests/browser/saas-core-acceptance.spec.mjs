@@ -137,6 +137,41 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       expect(Number(persisted.rows[0].total_minor)).toBe(20000);
       expect(persisted.rows[0].payment_status).toBe("paid");
 
+      // Stored text must stay inert in the real DOM, including inline handler arguments.
+      const rendered = await page.evaluate(() => {
+        globalThis.launchCanaryExecuted = false;
+        const canary = '<img src=x onerror="globalThis.launchCanaryExecuted=true">';
+        const key = "stock');globalThis.launchCanaryExecuted=true;//";
+        menuItems[0].name = canary;
+        menuItems.push({ id: 2, name: "Canary deal", category: "Deals", price: 200, desc: canary,
+          dealComponents: [{ itemId: 1, qty: 2 }] });
+        managementMenuCategoryFilter = "All";
+        managementMenuSearchQuery = "";
+        renderManagementMenuTable();
+        stockItemDefs[key] = { label: canary, icon: canary, group: "kitchen", buyUnit: "kg", sellUnit: "g" };
+        renderStockHistoryIngredientFilterOptions("kitchen");
+        const filters = document.getElementById(STOCK_GROUPS.kitchen.filterOptions);
+        const checkbox = [...filters.querySelectorAll('input[type="checkbox"]')]
+          .find(input => input.parentElement.textContent.includes(canary));
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }));
+        expenseFields = [{ key: '"><img src=x>', label: canary }];
+        populateExpenseFieldSelect();
+        const expense = document.getElementById("expense-field-select");
+        return {
+          managementImages: document.getElementById("management-menu-rows").querySelectorAll("img").length,
+          filterImages: filters.querySelectorAll("img").length,
+          expenseImages: expense.querySelectorAll("img").length,
+          expenseLabel: expense.options[0].textContent,
+          expenseValue: expense.options[0].value,
+          exactFilterSelected: selectedStockHistoryIngredientFilters.kitchen.includes(key),
+        };
+      });
+      expect(rendered).toEqual({ managementImages: 0, filterImages: 0, expenseImages: 0,
+        expenseLabel: '<img src=x onerror="globalThis.launchCanaryExecuted=true">',
+        expenseValue: '"><img src=x>', exactFilterSelected: true });
+      expect(await page.evaluate(() => globalThis.launchCanaryExecuted)).toBe(false);
+
       // 8. Platform Admin Suspends Restaurant
       await page.goto("http://127.0.0.1:3000/platform-admin/");
       await page.waitForSelector("#portal-view:not(.hidden)");

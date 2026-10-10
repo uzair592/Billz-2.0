@@ -72,6 +72,48 @@ test("launch fixes against non-superuser tenant and control roles", async t => {
     assert.equal(await stock(),1000);assert.equal(cancelled.cancellation.refundedMinor,10000);
     await cancellation.cancel(request);assert.equal(await stock(),1000);
   });
+  await t.test("mixed legacy and migrated deal recipes cost and reverse each ledger exactly once",async()=>{
+    const product=async(name,type="standard")=>(await admin.query(
+      `INSERT INTO menu_items(restaurant_id,name,item_type,price_minor) VALUES($1,$2,$3,30000) RETURNING id`,
+      [a.restaurantId,name,type])).rows[0].id;
+    const migrated=await product("Migrated component");const legacy=await product("Legacy component");const deal=await product("Mixed deal","deal");
+    const stockId=(await admin.query(`INSERT INTO stock_items(restaurant_id,name,base_unit) VALUES($1,'Legacy ingredient','gram') RETURNING id`,[a.restaurantId])).rows[0].id;
+    await admin.query(`INSERT INTO inventory_balances(restaurant_id,branch_id,stock_item_id,quantity_base_units,average_cost_minor_per_base_unit)
+      VALUES($1,$2,$3,1000,3)`,[a.restaurantId,a.branchId,stockId]);
+    // The obsolete legacy recipe on the migrated component must not double-consume stock.
+    for(const [id,quantity] of [[migrated,999],[legacy,10]]) await admin.query(
+      `INSERT INTO menu_item_recipe_items(restaurant_id,menu_item_id,stock_item_id,quantity_base_units) VALUES($1,$2,$3,$4)`,[a.restaurantId,id,stockId,quantity]);
+    const inventoryId=(await admin.query(`INSERT INTO inventory_items(restaurant_id,name,base_unit,current_quantity,average_cost_minor,idempotency_key)
+      VALUES($1,'Migrated ingredient','gram',2000,2,$2) RETURNING id`,[a.restaurantId,randomUUID()])).rows[0].id;
+    await admin.query(`INSERT INTO product_recipes(restaurant_id,product_id,inventory_item_id,quantity_required) VALUES($1,$2,$3,200)`,[a.restaurantId,migrated,inventoryId]);
+    for(const [id,quantity] of [[migrated,2],[legacy,3]]) await admin.query(
+      `INSERT INTO menu_item_components(restaurant_id,menu_item_id,component_menu_item_id,quantity) VALUES($1,$2,$3,$4)`,[a.restaurantId,deal,id,quantity]);
+    const sale=await createOrderService(app).create({tenant,userId:a.userId,input:{idempotencyKey:randomUUID(),orderType:"takeaway",
+      expectedTotalMinor:60000,items:[{menuItemId:deal,quantity:2}],payment:{method:"cash",amountReceivedMinor:60000}}});
+    const row=(await admin.query("SELECT * FROM order_items WHERE order_id=$1",[sale.order.id])).rows[0];
+    assert.equal(Number(row.unit_cost_minor),890);
+    const balances=async()=>[
+      Number((await admin.query("SELECT current_quantity FROM inventory_items WHERE id=$1",[inventoryId])).rows[0].current_quantity),
+      Number((await admin.query("SELECT quantity_base_units FROM inventory_balances WHERE stock_item_id=$1 AND branch_id=$2",[stockId,a.branchId])).rows[0].quantity_base_units),
+    ];
+    assert.deepEqual(await balances(),[1200,940]);
+    // Edits after printing must not alter the frozen quantities used by a refund.
+    await admin.query("UPDATE product_recipes SET quantity_required=999 WHERE product_id=$1",[migrated]);
+    await admin.query("UPDATE menu_item_recipe_items SET quantity_base_units=999 WHERE menu_item_id=$1",[legacy]);
+    const refund={idempotencyKey:randomUUID(),reason:"One deal returned",items:[{orderItemId:row.id,quantity:1,restock:true}]};
+    const refunds=createOrderRefundService(app);
+    await refunds.createRefund({tenant,userId:a.userId,orderId:sale.order.id,input:refund});
+    assert.deepEqual(await balances(),[1600,970]);
+    await refunds.createRefund({tenant,userId:a.userId,orderId:sale.order.id,input:refund});
+    assert.deepEqual(await balances(),[1600,970]);
+    const cancel={tenant,userId:a.userId,orderId:sale.order.id,reason:"Cancel remainder",idempotencyKey:randomUUID()};
+    const cancellations=createOrderCancellationService(app);
+    const result=await cancellations.cancel(cancel);
+    assert.equal(result.cancellation.refundedMinor,30000);
+    assert.deepEqual(await balances(),[2000,1000]);
+    await cancellations.cancel(cancel);
+    assert.deepEqual(await balances(),[2000,1000]);
+  });
   await t.test("changed prices reject before creating a payment or receipt",async()=>{
     const product=(await admin.query(`INSERT INTO menu_items(restaurant_id,name,price_minor) VALUES($1,'Price probe',12000) RETURNING id`,[a.restaurantId])).rows[0].id;
     const key=randomUUID();
