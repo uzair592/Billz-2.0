@@ -1,5 +1,7 @@
 # Launch review remediation — 10 October 2026
 
+See [the post-merge recheck](LAUNCH_RECHECK.md) for additional renderer defects reproduced after PR #8, the follow-up repairs, and the remaining finding-by-finding release gates.
+
 This branch includes the previously unmerged SaaS core from PR #7 and repairs the production entrypoint, visible tenant login, tenant isolation, refund/cost snapshots, private file retention, and deployment/test lifecycle. It is a review branch, not a production deployment.
 
 ## Release behaviour

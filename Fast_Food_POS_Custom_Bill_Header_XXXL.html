@@ -14713,6 +14713,7 @@
       }
 
       function safeStorageRemove(key, useSession) {
+        if (window.BILLZ_MANAGED) key = `tenant:${window.BILLZ_TENANT_ID || "signed-out"}:${key}`;
         delete memoryStorageFallback[key];
         try {
           const store = useSession
@@ -16639,7 +16640,7 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${def ? def.icon : ""} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
                             <button type="button" onclick="startEditExtraInCartItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
                             <button type="button" onclick="removeExtraFromCartItem(${cartExtrasModalTargetId}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
@@ -18297,7 +18298,7 @@
             ) {
               return `
                         <div style="margin-bottom: 14px;">
-                            <strong style="font-size: 14px;">${cartItem.name} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
+                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
                             <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">⚠️ No ingredients found for this item (it may have been changed or removed from the menu since this order was placed) — nothing to restock here.</div>
                         </div>
                     `;
@@ -18311,10 +18312,10 @@
               const displayAmount = def.buyUnit === "number" ? ing.grams : ing.grams / 1000;
               const unitLabel = def.buyUnit === "number" ? "pcs" : "Kg";
               return `
-                        <div class="cancel-restock-item-row" data-type="ingredient" data-key="${ing.key}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
+                        <div class="cancel-restock-item-row" data-type="ingredient" data-key="${escapeHtmlForExport(ing.key)}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                ${def.icon} ${def.label}
+                                ${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
                                 <input type="number" class="cancel-restock-amount" min="0" max="${displayAmount}" step="any" value="${displayAmount}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
@@ -18327,10 +18328,10 @@
             const softDrinkRows = breakdown.softDrinks.map((sd) => {
               const [brand, flavor, size] = sd.key.split("|");
               return `
-                        <div class="cancel-restock-item-row" data-type="softdrink" data-key="${sd.key}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
+                        <div class="cancel-restock-item-row" data-type="softdrink" data-key="${escapeHtmlForExport(sd.key)}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                🥤 ${brand} ${flavor} <span style="color:#94a3b8; font-weight:400;">${size}</span>
+                                🥤 ${escapeHtmlForExport(brand)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${size}</span>
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
                                 <input type="number" class="cancel-restock-amount" min="0" max="${sd.units}" step="1" value="${sd.units}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
@@ -18343,10 +18344,10 @@
             const iceCreamRows = breakdown.iceCreams.map((ic) => {
               const [name, flavor, size] = ic.key.split("|");
               return `
-                        <div class="cancel-restock-item-row" data-type="icecream" data-key="${ic.key}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
+                        <div class="cancel-restock-item-row" data-type="icecream" data-key="${escapeHtmlForExport(ic.key)}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                🍦 ${escapeHtmlForExport(name)} ${flavor} <span style="color:#94a3b8; font-weight:400;">${size}g</span>
+                                🍦 ${escapeHtmlForExport(name)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${size}g</span>
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
                                 <input type="number" class="cancel-restock-amount" min="0" max="${ic.servings}" step="1" value="${ic.servings}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
@@ -18359,7 +18360,7 @@
             return `
                     <div style="margin-bottom: 14px;">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                            <strong style="font-size: 14px;">${cartItem.name} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
+                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
                             <label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; cursor:pointer;">
                                 <input type="checkbox" checked onchange="document.getElementById('cancel-restock-group-${itemIdx}').querySelectorAll('.cancel-restock-row').forEach(cb => { cb.checked = this.checked; cb.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked; })">
                                 Select All
@@ -20925,7 +20926,7 @@
         sortedItems.forEach((item) => {
           const tr = document.createElement("tr");
           let descLine = item.desc
-            ? `<br><small style="color:#7f8c8d;">✨ Consists: ${item.desc}</small>`
+            ? `<br><small style="color:#7f8c8d;">✨ Consists: ${escapeHtmlForExport(item.desc)}</small>`
             : "";
 
           // 🍔 For deals built with the Deal Builder, also show exactly which real items they're linked to
@@ -20941,7 +20942,7 @@
               })
               .filter(Boolean)
               .join(", ");
-            descLine += `<br><small style="color:#16a34a; font-weight:600;">🔗 Linked (auto stock deduct): ${linkedNames}</small>`;
+            descLine += `<br><small style="color:#16a34a; font-weight:600;">🔗 Linked (auto stock deduct): ${escapeHtmlForExport(linkedNames)}</small>`;
           } else if (isDealMenuItem(item)) {
             descLine += `<br><small style="color:#d97706; font-weight:600;">⚠️ Not linked to any items yet — stock won't deduct when this deal sells. Edit it to add items.</small>`;
           }
@@ -21005,11 +21006,11 @@
 
           const mgmtImgElId = `mgmt-img-${item.id}`;
           const mgmtImageHtml = item.hasImage
-            ? `<img id="${mgmtImgElId}" src="${menuImageObjectUrlCache[item.id] || ""}" alt="" style="width:38px; height:38px; object-fit:cover; border-radius:5px; margin-right:8px; background:#f1f5f9; vertical-align:middle;">`
+            ? `<img id="${escapeHtmlForExport(mgmtImgElId)}" src="${escapeHtmlForExport(menuImageObjectUrlCache[item.id] || "")}" alt="" style="width:38px; height:38px; object-fit:cover; border-radius:5px; margin-right:8px; background:#f1f5f9; vertical-align:middle;">`
             : "";
 
           tr.innerHTML = `
-                    <td><strong>#${item.itemNumber ?? item.id}</strong></td>
+                    <td><strong>#${escapeHtmlForExport(item.itemNumber ?? item.id)}</strong></td>
                     <td>${mgmtImageHtml}<strong>${escapeHtmlForExport(item.name)}</strong><br><small style="color:gray; text-transform:uppercase;">Category: ${escapeHtmlForExport(item.category)}${item.subcategory ? ` · Subcategory: ${escapeHtmlForExport(item.subcategory)}` : ""}</small>${descLine}</td>
                     <td>${priceCellHtml}${costLine}</td>
                     <td style="text-align:center; white-space:nowrap;">
@@ -21134,7 +21135,7 @@
           .map((comp) => {
             const item = menuItems.find((m) => m.id === comp.itemId);
             if (!item) return null;
-            return comp.qty > 1 ? `${comp.qty}× ${escapeHtmlForExport(item.name)}` : item.name;
+            return comp.qty > 1 ? `${comp.qty}× ${item.name}` : item.name;
           })
           .filter(Boolean)
           .join(" + ");
@@ -21471,7 +21472,7 @@
           html += `<div style="display: flex; gap: 10px;">${cells[i]}${cells[i + 1] || '<div style="flex:1;"></div>'}</div>`;
         }
         const availableKeys = Object.keys(stockItemDefs).filter((key) => key !== "IceCream" && !stockItemDefs[key].deleted && !enabledKeys.includes(key));
-        html += `<div style="display:flex; gap:6px; align-items:center; margin:4px 0 10px;"><select id="recipe-ingredient-select" class="styled-form-select" style="flex:1; min-width:0;"><option value="">Select another inventory ingredient</option>${availableKeys.map((key) => `<option value="${key}">${escapeHtmlForExport(stockItemDefs[key].label)}</option>`).join("")}</select><button type="button" class="btn-sm" onclick="addRecipeIngredientField()">+ Add ingredient</button></div>`;
+        html += `<div style="display:flex; gap:6px; align-items:center; margin:4px 0 10px;"><select id="recipe-ingredient-select" class="styled-form-select" style="flex:1; min-width:0;"><option value="">Select another inventory ingredient</option>${availableKeys.map((key) => `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(stockItemDefs[key].label)}</option>`).join("")}</select><button type="button" class="btn-sm" onclick="addRecipeIngredientField()">+ Add ingredient</button></div>`;
         container.innerHTML = html;
         draft.forEach(({ value, unit }, key) => {
           const input = [...container.querySelectorAll(".custom-recipe-input")].find((field) => field.dataset.key === key);
@@ -22394,8 +22395,8 @@
             return `
                     <div style="display: flex; justify-content: space-between; align-items: center; background: ${isOut ? "#fef2f2" : "#fffbeb"}; border-left: 4px solid ${isOut ? "#dc2626" : "#d97706"}; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
-                            <span style="font-size: 20px;">${def ? def.icon : "📦"}</span>
-                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${def ? def.label : key} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
+                            <span style="font-size: 20px;">${escapeHtmlForExport(def ? def.icon : "📦")}</span>
+                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(def ? def.label : key)} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
                         <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${qtyLabel} left <span style="font-weight: 500; color: #94a3b8;">(min ${minLabel})</span></span>
                     </div>
@@ -22414,7 +22415,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; background: ${isOut ? "#fef2f2" : "#fffbeb"}; border-left: 4px solid ${isOut ? "#dc2626" : "#d97706"}; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 20px;">🥤</span>
-                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${brand} ${flavor} ${size} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
+                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(brand)} ${escapeHtmlForExport(flavor)} ${escapeHtmlForExport(size)} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
                         <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${displayUnits} left <span style="font-weight: 500; color: #94a3b8;">(min ${threshold})</span></span>
                     </div>
@@ -22433,7 +22434,7 @@
                     <div style="display: flex; justify-content: space-between; align-items: center; background: ${isOut ? "#fef2f2" : "#fffbeb"}; border-left: 4px solid ${isOut ? "#dc2626" : "#d97706"}; padding: 12px 16px; border-radius: 6px; margin-bottom: 10px;">
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 20px;">🍦</span>
-                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(name)} ${flavor} (${size}g) ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
+                            <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(name)} ${escapeHtmlForExport(flavor)} (${escapeHtmlForExport(size)}g) ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
                         <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${Math.round(displayGrams).toLocaleString()}g left <span style="font-weight: 500; color: #94a3b8;">(min ${Math.round(threshold).toLocaleString()}g)</span></span>
                     </div>
@@ -22796,7 +22797,7 @@
                     <div style="display: flex; flex-direction: column; gap: 8px; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${def.color};">
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                             <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
-                            <select id="threshold-mode-${escapeHtmlForExport(key)}" onchange="onThresholdModeChange('${escapeHtmlForExport(key)}')" style="font-size: 12px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569;">
+                            <select id="threshold-mode-${escapeHtmlForExport(key)}" onchange="onThresholdModeChange(${htmlJsValue(key)})" style="font-size: 12px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569;">
                                 <option value="weight" ${mode === "weight" ? "selected" : ""}>⚖️ Alert by Weight</option>
                                 <option value="pieces" ${mode === "pieces" ? "selected" : ""}>🔢 Alert by Pieces</option>
                             </select>
@@ -23574,7 +23575,7 @@
           }
           tr.innerHTML = `
                     <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small></td>
-                    <td>${displayName}</td>
+                    <td>${escapeHtmlForExport(displayName)}</td>
                     <td style="color:#43a047;">+${qtyDisplay}</td>
                     <td>Rs. ${p.amountPaid}</td>
                     <td>Rs. ${p.costPerGram.toFixed(3)}/${unitShort}</td>
@@ -23628,8 +23629,8 @@
                 : "";
               return `
                         <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; font-weight:${isChecked ? "700" : "500"};">
-                            <input type="checkbox" onchange="toggleStockHistoryIngredientFilter('${escapeHtmlForExport(key)}', this.checked, '${group}')" ${isChecked ? "checked" : ""} style="width:15px; height:15px;">
-                            ${def.icon || "📦"} ${def.label || key}${discontinuedTag}
+                            <input type="checkbox" onchange="toggleStockHistoryIngredientFilter(${htmlJsValue(key)}, this.checked, ${htmlJsValue(group)})" ${isChecked ? "checked" : ""} style="width:15px; height:15px;">
+                            ${escapeHtmlForExport(def.icon || "📦")} ${escapeHtmlForExport(def.label || key)}${discontinuedTag}
                         </label>
                     `;
             })
@@ -24341,7 +24342,7 @@
             const safeBrand = brand.replace(/'/g, "\\'");
             return `
                     <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditSoftDrinkBrand('${safeBrand}')">
-                        <td><strong>${brand}</strong></td>
+                        <td><strong>${escapeHtmlForExport(brand)}</strong></td>
                         <td>${data.flavors.length > 0 ? data.flavors.join(", ") : '<span style="color:#94a3b8;">— none —</span>'}</td>
                         <td>${data.sizes.join(", ")}</td>
                         <td style="text-align: center; white-space: nowrap;">
@@ -24790,7 +24791,7 @@
 
             return `
                     <tr>
-                        <td><strong>${brand}</strong> — ${flavor}<br><small style="color:gray;">${size}</small></td>
+                        <td><strong>${escapeHtmlForExport(brand)}</strong> — ${escapeHtmlForExport(flavor)}<br><small style="color:gray;">${escapeHtmlForExport(size)}</small></td>
                         <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${sd.stockUnits}</td>
                         <td>Rs. ${sd.avgCostPerUnit.toFixed(2)}</td>
                         <td>
@@ -24865,7 +24866,7 @@
             return `
                     <tr${rowClass}>
                         <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small>${editedBadge}</td>
-                        <td>${p.brand} ${p.flavor} <small style="color:gray;">${p.size}</small></td>
+                        <td>${escapeHtmlForExport(p.brand)} ${escapeHtmlForExport(p.flavor)} <small style="color:gray;">${escapeHtmlForExport(p.size)}</small></td>
                         <td style="color:#43a047;">+${p.unitsPurchased}</td>
                         <td>Rs. ${p.amountPaid}</td>
                         <td>Rs. ${p.costPerUnit.toFixed(2)}</td>
@@ -25657,7 +25658,7 @@
 
             return `
                     <tr>
-                        <td><strong>${escapeHtmlForExport(name)}</strong> — ${flavor}<br><small style="color:gray;">${size}g / serving</small></td>
+                        <td><strong>${escapeHtmlForExport(name)}</strong> — ${escapeHtmlForExport(flavor)}<br><small style="color:gray;">${escapeHtmlForExport(size)}g / serving</small></td>
                         <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${stockDisplay}</td>
                         <td>Rs. ${ic.avgCostPerGram.toFixed(3)}/g</td>
                         <td>
@@ -25736,7 +25737,7 @@
             return `
                     <tr${rowClass}>
                         <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small>${editedBadge}</td>
-                        <td>${p.name} ${p.flavor} <small style="color:gray;">${p.size}g</small></td>
+                        <td>${escapeHtmlForExport(p.name)} ${escapeHtmlForExport(p.flavor)} <small style="color:gray;">${escapeHtmlForExport(p.size)}g</small></td>
                         <td style="color:#43a047;">+${weightDisplay}</td>
                         <td>Rs. ${p.amountPaid}</td>
                         <td>Rs. ${p.costPerGram.toFixed(3)}</td>
@@ -26034,7 +26035,7 @@
         select.innerHTML =
           activeFields.length > 0
             ? activeFields
-                .map((f) => `<option value="${f.key}">${f.label}</option>`)
+                .map((f) => `<option value="${escapeHtmlForExport(f.key)}">${escapeHtmlForExport(f.label)}</option>`)
                 .join("")
             : `<option value="">No categories yet — add one via Manage Expense Categories below</option>`;
 
@@ -26085,7 +26086,7 @@
         select.innerHTML =
           `<option value="All">All Categories</option>` +
           activeFields
-            .map((f) => `<option value="${f.key}">${f.label}${f.deleted ? " (discontinued)" : ""}</option>`)
+            .map((f) => `<option value="${escapeHtmlForExport(f.key)}">${escapeHtmlForExport(f.label)}${f.deleted ? " (discontinued)" : ""}</option>`)
             .join("");
         select.value = previousValue || "All";
       }
@@ -32072,7 +32073,7 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${def ? def.icon : ""} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
                             <button type="button" onclick="startEditExtraInDraftItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
                             <button type="button" onclick="removeExtraFromDraftItem(${editOrderExtrasTargetIdx}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
