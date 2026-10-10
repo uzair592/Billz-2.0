@@ -96,17 +96,32 @@ export function createCloudSessionClient({
       return { ...account, ...session };
     },
 
-    async signIn({ email, password }) {
+    async signIn(credentials) {
+      const body = credentials.restaurantCode && credentials.username
+        ? {
+            restaurantCode: String(credentials.restaurantCode ?? "").trim(),
+            username: String(credentials.username ?? "").trim(),
+            password: String(credentials.password ?? ""),
+          }
+        : {
+            email: String(credentials.email ?? "").trim(),
+            password: String(credentials.password ?? ""),
+          };
+
       await call("/api/auth/login", {
         method: "POST",
-        body: { email: String(email ?? "").trim(), password: String(password ?? "") },
+        body,
       });
       const account = await loadAccount();
       const restaurants = account?.restaurants ?? [];
-      return writeStored({
-        user: account?.user ?? null,
-        restaurantId: restaurants.length === 1 ? restaurants[0].restaurantId : null,
-      });
+      const previous = await readStored();
+      const restaurantId = restaurants.length === 1 ? restaurants[0].restaurantId : null;
+      // Managed boot selects the authorized namespace after authentication. Do
+      // not access tenant business storage while still on the sign-in screen.
+      if (!globalThis.BILLZ_MANAGED && previous.restaurantId !== restaurantId) await storage.set("pos_cloud_context_v1", null);
+      const result = await writeStored({ user: account?.user ?? null, restaurantId });
+      globalThis.dispatchEvent?.(new Event("billz-session-restored"));
+      return result;
     },
 
     async signOut({ forgetRestaurant = false } = {}) {
@@ -114,6 +129,7 @@ export function createCloudSessionClient({
         await call("/api/auth/logout", { method: "POST" });
       } finally {
         const stored = await readStored();
+        await storage.set("pos_cloud_context_v1", null);
         await writeStored({
           user: null,
           restaurantId: forgetRestaurant ? null : stored.restaurantId,

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,25 +49,34 @@ export function createStaticFileHandler({ root = appRoot() } = {}) {
     if (pathname === "/" || pathname === "") {
       pathname = `/${CLIENT_ENTRY}`;
     }
+    if (pathname === "/platform-admin" || pathname === "/platform-admin/") {
+      pathname = "/platform-admin/index.html";
+    }
 
-    // Only the POS entry page and client modules are served. Anything
-    // else is left to the API routes (which 404).
+    // Only POS entry page, platform-admin portal, and client modules are served.
     const isClientModule = pathname.startsWith("/src/client/");
+    const isPlatformAdmin = pathname.startsWith("/platform-admin/");
     const isEntry = pathname === `/${CLIENT_ENTRY}`;
-    if (!isClientModule && !isEntry) {
+    if (!isClientModule && !isPlatformAdmin && !isEntry) {
       return reply.code(404).send({ error: "Not found." });
     }
 
     const filePath = normalize(join(normalizedRoot, pathname));
-    const rootWithSep = normalizedRoot.endsWith(sep)
-      ? normalizedRoot
-      : normalizedRoot + sep;
-    if (!filePath.startsWith(rootWithSep) && filePath !== normalizedRoot) {
+    const allowedRoot = isClientModule ? join(normalizedRoot, "src", "client")
+      : isPlatformAdmin ? join(normalizedRoot, "platform-admin") : normalizedRoot;
+    const rootWithSep = allowedRoot + sep;
+    if (!filePath.startsWith(rootWithSep) || (isEntry && filePath !== join(normalizedRoot, CLIENT_ENTRY))) {
       return reply.code(403).send({ error: "Forbidden." });
     }
 
     try {
-      const body = await readFile(filePath);
+      const canonicalRoot = await realpath(allowedRoot);
+      const canonicalFile = await realpath(filePath);
+      if (!canonicalFile.startsWith(canonicalRoot + sep)) {
+        return reply.code(403).send({ error: "Forbidden." });
+      }
+      let body = await readFile(canonicalFile);
+      if (isEntry) body = Buffer.from(body.toString("utf8").replace("<head>", "<head><script>window.BILLZ_MANAGED = true;</script>"));
       return reply
         .header("Content-Type", MIME[extname(filePath).toLowerCase()] ?? "application/octet-stream")
         .header("Cache-Control", "no-store")

@@ -27,6 +27,7 @@ COPY package.json ./
 
 # Application source: the Fastify API and the POS client it serves.
 COPY src ./src
+COPY platform-admin ./platform-admin
 COPY Fast_Food_POS_Custom_Bill_Header_XXXL.html ./
 
 # The migration runner and bootstrap CLI are release-time tools, not

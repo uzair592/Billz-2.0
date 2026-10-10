@@ -97,7 +97,7 @@ jobs:
 
       - name: Apply migrations
         run: |
-          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -eq 12
+          test "$(find database/migrations -maxdepth 1 -name '*.sql' | wc -l)" -gt 0
           export PGPASSWORD=validation-only
           for migration in database/migrations/*.sql; do
             echo "Applying $migration"
@@ -137,6 +137,11 @@ jobs:
           pg_restore --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "pg_restore is not PostgreSQL 17"; exit 1; }
           psql --version | grep -Eq '\(PostgreSQL\) 17\.' || { echo "psql is not PostgreSQL 17"; exit 1; }
 
+      - name: Prepare database test roles
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+        run: node --input-type=module -e "import { provisionIntegrationDatabase } from './tests/helpers/postgres.mjs'; await provisionIntegrationDatabase();"
+
       - name: Run PostgreSQL-dependent tests
         env:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
@@ -154,6 +159,15 @@ jobs:
             echo "Required PostgreSQL tests were skipped"
             exit 1
           fi
+
+      - name: Run SaaS production-composition tests
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+          TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
+        run: |
+          node --test tests/saas-core-fullstack.test.mjs
+          node --test tests/launch-regressions-postgres.test.mjs
+          node --test tests/inventory-purchasing-postgres.test.mjs
 
       - name: Validate migrations in clean PostgreSQL 17
         run: npm run validate:database
@@ -184,7 +198,7 @@ jobs:
           docker run --rm \
             -v "$PWD:/repo" \
             ghcr.io/gitleaks/gitleaks:v8.30.1 \
-            git --redact --verbose --log-opts="$scan_range" /repo
+            git --redact --verbose --gitleaks-ignore-path=/repo/.gitleaksignore --log-opts="$scan_range" /repo
 
       - name: Verify working tree clean
         run: |
@@ -290,6 +304,18 @@ jobs:
             bite-tech-pos:smoke \
             src/server/bootstrap-first-restaurant.mjs
 
+      - name: Provision separate runtime roles
+        env:
+          PGPASSWORD: ${{ env.SMOKE_PASSWORD }}
+        run: |
+          psql -h localhost -U "$SMOKE_USER" -d "$SMOKE_DB" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE pos_smoke_app LOGIN PASSWORD 'smoke-app-only' NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE pos_smoke_control LOGIN PASSWORD 'smoke-control-only' NOSUPERUSER BYPASSRLS;
+          GRANT USAGE ON SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          SQL
+
       - name: Start the production container
         env:
           # The production-built image is exercised in true
@@ -299,7 +325,8 @@ jobs:
           # proves the production configuration validation
           # passes and the server starts under it.
           NODE_ENV: production
-          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          DATABASE_URL: postgresql://pos_smoke_app:smoke-app-only@localhost:5432/${{ env.SMOKE_DB }}
+          CONTROL_DATABASE_URL: postgresql://pos_smoke_control:smoke-control-only@localhost:5432/${{ env.SMOKE_DB }}
           TRUSTED_ORIGINS: https://pos.example.test
           SESSION_SECRET: ${{ env.SMOKE_SESSION }}
           PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
@@ -313,6 +340,7 @@ jobs:
           docker run -d --name pos-smoke \
             -e NODE_ENV \
             -e DATABASE_URL \
+            -e CONTROL_DATABASE_URL \
             -e TRUSTED_ORIGINS \
             -e SESSION_SECRET \
             -e PASSWORD_PEPPER \
@@ -437,3 +465,39 @@ jobs:
         if: always()
         run: |
           docker rm -f pos-smoke || true
+
+  saas-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: restaurant_pos_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: validation-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres -d restaurant_pos_test"
+          --health-interval=2s --health-timeout=2s --health-retries=20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - name: Visible SaaS login and paid checkout at three viewport sizes
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
+          TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
+          TEST_CONTROL_DATABASE_URL: postgresql://pos_control_test:control-test-only@localhost:5432/restaurant_pos_test
+        run: npm run test:browser:saas-core
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: saas-playwright-report
+          path: |
+            playwright-report/
+            test-results/

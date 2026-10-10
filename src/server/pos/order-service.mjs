@@ -1,3 +1,4 @@
+import { freezeInventoryRecipes } from "./inventory-sale-snapshot.mjs";
 import { randomUUID } from "node:crypto";
 import { MoneyEngine } from "../../domain/money-engine.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
@@ -16,6 +17,7 @@ function publicOrder(row) {
     deliveryMinor: Number(row.delivery_minor),
     additionalChargesMinor: Number(row.additional_charges_minor),
     totalMinor: Number(row.total_minor),
+    ...(row.cost_of_goods_minor == null ? {} : { costOfGoodsMinor: Number(row.cost_of_goods_minor) }),
     businessDate: row.business_date,
     orderedAt: row.ordered_at,
   };
@@ -116,7 +118,7 @@ export function createOrderService(
           const existing = await client.query(
             `SELECT id, order_number, order_type, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
-                    additional_charges_minor, total_minor, business_date, ordered_at
+                    additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at
                FROM orders
               WHERE idempotency_key = $1`,
             [input.idempotencyKey],
@@ -126,9 +128,6 @@ export function createOrderService(
           }
 
           const requestedIds = input.items.map((item) => item.menuItemId);
-          if (new Set(requestedIds).size !== requestedIds.length) {
-            throw apiError("Duplicate menu items must be combined into one line.", "DUPLICATE_ORDER_ITEM");
-          }
           const menuResult = await client.query(
             `SELECT mi.id, mi.name, mi.item_type, mi.price_minor,
                     mi.other_cost_minor,
@@ -254,6 +253,7 @@ export function createOrderService(
             };
           });
 
+          await freezeInventoryRecipes(client, restaurantId, menuLines, byId);
           const stockUsage = new Map();
           for (const line of menuLines) {
             for (const recipeItem of line.recipe) {
@@ -265,27 +265,24 @@ export function createOrderService(
             }
           }
           const stockIds = [...stockUsage.keys()];
+          for (const stockItemId of [...stockIds].sort()) await client.query(`INSERT INTO inventory_balances
+            (restaurant_id, branch_id, stock_item_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [restaurantId, branchId, stockItemId]);
           const stockResult = stockIds.length
             ? await client.query(
                 `SELECT stock_item_id, quantity_base_units,
                         average_cost_minor_per_base_unit
                    FROM inventory_balances
                   WHERE branch_id = $1 AND stock_item_id = ANY($2::uuid[])
-                  FOR UPDATE`,
+                  ORDER BY stock_item_id FOR UPDATE`,
                 [branchId, stockIds],
               )
             : { rows: [] };
           const stockById = new Map(stockResult.rows.map((row) => [row.stock_item_id, row]));
+          const legacyWarnings = [];
           for (const [stockItemId, required] of stockUsage) {
             const balance = stockById.get(stockItemId);
-            if (!balance || Number(balance.quantity_base_units) < required) {
-              throw apiError(
-                "Insufficient stock for this order.",
-                "INSUFFICIENT_STOCK",
-                409,
-                { stockItemId },
-              );
-            }
+            if (!balance) throw apiError("Inventory balance could not be initialized.", "STOCK_BALANCE_MISSING", 409);
+            if (Number(balance.quantity_base_units) < required) legacyWarnings.push({ type: "negative_stock", stockItemId, quantityAfter: Number(balance.quantity_base_units) - required });
           }
 
           for (const line of menuLines) {
@@ -296,10 +293,11 @@ export function createOrderService(
                 * Number(balance.average_cost_minor_per_base_unit)
               );
             }, 0);
-            line.unitCostMinor = Math.round(recipeUnitCostMinor + line.otherCostMinor);
+            line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + line.otherCostMinor);
           }
 
           const pricing = MoneyEngine.calculate(pricingInput(menuLines, input));
+          if (input.expectedTotalMinor !== undefined && input.expectedTotalMinor !== pricing.minor.total) throw apiError("Menu prices changed. Refresh the catalog and check the bill before taking payment.", "PRICE_CHANGED", 409);
           const paymentMinor = input.payment?.amountReceivedMinor ?? 0;
           if (paymentMinor > pricing.minor.total) {
             throw apiError("Payment cannot exceed the order total.", "PAYMENT_EXCEEDS_TOTAL");
@@ -344,7 +342,7 @@ export function createOrderService(
              )
              RETURNING id, order_number, order_type, order_status, payment_status,
                        subtotal_minor, discount_minor, delivery_minor,
-                       additional_charges_minor, total_minor, business_date, ordered_at`,
+                       additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at`,
             [
               orderId, restaurantId, branchId, input.idempotencyKey, orderNumber,
               input.orderType, paymentStatus, input.tableId ?? null,
@@ -374,7 +372,9 @@ export function createOrderService(
                 line.quantity, line.priceMinor, line.priceMinor * line.quantity,
                 line.unitCostMinor,
                 JSON.stringify({
+                  version: 2,
                   items: line.recipe,
+                  inventoryItems: line.inventoryRecipe || [],
                   components: line.componentSnapshots,
                   offer: line.offer,
                 }),
@@ -441,6 +441,7 @@ export function createOrderService(
             },
           );
 
+          inventoryConsumption.warnings.push(...legacyWarnings);
           if (paymentMinor > 0) {
             let accountId = input.payment.financialAccountId ?? null;
             if (accountId) {

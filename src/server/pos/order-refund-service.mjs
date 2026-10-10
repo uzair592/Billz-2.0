@@ -1,3 +1,4 @@
+import { restockInventoryRecipe } from "./inventory-sale-snapshot.mjs";
 import { createHash } from "node:crypto";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
@@ -584,6 +585,9 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
 
             // Inventory restock using frozen recipe snapshot
             if (item.restock) {
+              await restockInventoryRecipe(client, { restaurantId, orderId, refundId,
+                orderItemId: item.orderItemId, quantity: item.quantity, userId, now,
+                recipe: item.orderItem.recipe_snapshot?.inventoryItems || [] });
               const recipe = Array.isArray(item.orderItem.recipe_snapshot)
                 ? item.orderItem.recipe_snapshot
                 : typeof item.orderItem.recipe_snapshot === "object" && item.orderItem.recipe_snapshot !== null
@@ -596,7 +600,7 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
                 const baseQtyPerUnit = Number(recipeItem.quantityBaseUnits ?? 0);
                 if (!stockItemId || baseQtyPerUnit <= 0 || origQty <= 0) continue;
 
-                const restockQtyDelta = (baseQtyPerUnit * item.quantity) / origQty;
+                const restockQtyDelta = baseQtyPerUnit * item.quantity;
                 const movementKey = `${refundId}:${item.orderItemId}:${stockItemId}`;
 
                 await client.query(

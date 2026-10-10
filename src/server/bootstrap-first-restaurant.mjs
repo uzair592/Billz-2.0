@@ -134,6 +134,7 @@ export async function bootstrapFirstRestaurant({
     branchCode = "main",
     ownerEmail,
     ownerDisplayName = "Owner",
+    ownerUsername = "owner",
     subscriptionPlan = "STANDARD",
     subscriptionStatus = "trial",
     pepper,
@@ -159,8 +160,8 @@ export async function bootstrapFirstRestaurant({
 
     // Restaurant (idempotent on slug).
     const restaurantRes = await client.query(
-      `INSERT INTO restaurants (name, slug, timezone, currency_code)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO restaurants (name, slug, timezone, currency_code, code)
+       VALUES ($1, $2, $3, $4, $2)
        ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, slug`,
       [restaurantName, safeSlug, safeTimezone, safeCurrency],
@@ -190,6 +191,11 @@ export async function bootstrapFirstRestaurant({
       [normalizedEmail, normalizedEmail, ownerDisplayName, passwordHash],
     );
     const ownerId = userRes.rows[0].id;
+    const scoped = await client.query(`UPDATE users SET restaurant_id = $2,
+      username = COALESCE(username, $3), normalized_username = COALESCE(normalized_username, lower(btrim($3)))
+      WHERE id = $1 AND (restaurant_id IS NULL OR restaurant_id = $2) RETURNING id`,
+      [ownerId, restaurantId, ownerUsername]);
+    if (!scoped.rows[0]) fail("Owner email belongs to another restaurant.");
 
     // Owner membership (idempotent on restaurant + user).
     await client.query(
@@ -323,6 +329,7 @@ if (invokedDirectly) {
       branchName: env.BRANCH_NAME ?? "Main",
       branchCode: env.BRANCH_CODE ?? "main",
       ownerEmail: env.OWNER_EMAIL,
+    ownerUsername: env.OWNER_USERNAME || "owner",
       ownerDisplayName: env.OWNER_DISPLAY_NAME ?? "Owner",
       ownerPassword: env.BOOTSTRAP_OWNER_PASSWORD,
       subscriptionPlan: env.SUBSCRIPTION_PLAN ?? "STANDARD",

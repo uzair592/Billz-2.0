@@ -11,6 +11,10 @@ import {
   createPolicyMailer,
   resolveRegistrationPolicy,
 } from "./mail/mail-policy.mjs";
+import { createOrderHistoryService } from "./pos/order-history-service.mjs";
+import { createOrderCancellationService } from "./pos/order-cancellation-service.mjs";
+import { createLegacyCatalogImportService } from "./pos/legacy-catalog-import-service.mjs";
+import { createBusinessSettingsService } from "./pos/business-settings-service.mjs";
 import { createOrderRefundService } from "./pos/order-refund-service.mjs";
 import { createSalesReportService } from "./pos/sales-report-service.mjs";
 import { createOrderService } from "./pos/order-service.mjs";
@@ -29,6 +33,11 @@ import {
   closeDatabasePool,
   createDatabasePool,
 } from "./database/pool.mjs";
+import { createPlatformAdminRepository } from "./auth/platform-admin-repository.mjs";
+import { createPlatformAdminService } from "./auth/platform-admin-service.mjs";
+import { createPlatformAdminPortalService } from "./subscriptions/platform-admin-portal-service.mjs";
+import { createEntitlementService } from "./auth/entitlement-service.mjs";
+import { createStorageService } from "./storage/storage-service.mjs";
 import { verifyMigrationsCurrent } from "./database/migration-runner.mjs";
 
 /**
@@ -42,6 +51,7 @@ export async function createServer({
   env = process.env,
   logger = { info() {}, warn() {}, error() {} },
   pool = null,
+  controlPool = null,
   migrationsDir = "auto",
   verifyMigrations = true,
 } = {}) {
@@ -49,6 +59,22 @@ export async function createServer({
   const billing = loadBillingConfiguration(env);
 
   const database = pool ?? createDatabasePool(env, logger);
+
+  if (config.nodeEnv === "production" && !env.CONTROL_DATABASE_URL && !controlPool) {
+    if (!pool) await closeDatabasePool(database);
+    throw new Error("CONTROL_DATABASE_URL is required for the isolated authentication/admin database boundary.");
+  }
+  const controlDatabase = controlPool ?? (env.CONTROL_DATABASE_URL
+    ? createDatabasePool({ ...env, DATABASE_URL: env.CONTROL_DATABASE_URL }, logger) : database);
+  if (config.nodeEnv === "production") {
+    const appRole = (await database.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")).rows[0];
+    const controlRole = (await controlDatabase.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")).rows[0];
+    if (!appRole || appRole.rolsuper || appRole.rolbypassrls || !controlRole?.rolbypassrls || controlRole.rolsuper) {
+      if (!pool) await closeDatabasePool(database);
+      if (!controlPool && controlDatabase !== database) await closeDatabasePool(controlDatabase);
+      throw new Error("Use a non-superuser NOBYPASSRLS POS role and a separate non-superuser BYPASSRLS control role.");
+    }
+  }
 
   // Startup readiness: the process must not claim readiness before the
   // database is usable. A deployment that cannot reach PostgreSQL fails
@@ -74,7 +100,7 @@ export async function createServer({
   const shouldVerifyMigrations = verifyMigrations && resolvedMigrationsDir !== null;
 
   const billingWebhookService = createBillingWebhookService({
-    pool: database,
+    pool: controlDatabase,
     provider: billing.provider,
     graceDays: billing.graceDays,
     maxAttempts: billing.maxAttempts,
@@ -103,27 +129,34 @@ export async function createServer({
   });
 
   const authService = createAuthService({
-    repository: createPostgresAuthRepository(database),
+    repository: createPostgresAuthRepository(controlDatabase),
     mailer,
     passwordPepper: config.pepper,
   });
 
+  const platformAdminRepository = createPlatformAdminRepository(controlDatabase);
+  const platformAdminService = createPlatformAdminService({
+    repository: platformAdminRepository,
+    passwordPepper: config.pepper,
+  });
+  const platformAdminPortalService = createPlatformAdminPortalService({
+    pool: controlDatabase,
+    passwordPepper: config.pepper,
+  });
+  const entitlementService = env.OFFLINE_ENTITLEMENT_SECRET
+    ? createEntitlementService({ secret: env.OFFLINE_ENTITLEMENT_SECRET }) : null;
+  const storageService = createStorageService({ pool: database });
+
+  const orderHistoryService = createOrderHistoryService(database);
+  const orderCancellationService = createOrderCancellationService(database);
+  const catalogImportService = createLegacyCatalogImportService(database);
+  const businessSettingsService = createBusinessSettingsService(database);
   const orderRefundService = createOrderRefundService(database);
   const salesReportService = createSalesReportService(database);
-  // The order service is wired so the real checkout flow
-  // (POST /api/pos/orders, where the legacy POS outbox
-  // delivers every completed order) deducts recipe
-  // ingredients from the inventory domain inside the
-  // authoritative order transaction. The consumption
-  // service is shared so the order service and any direct
-  // caller use one instance.
   const inventoryConsumptionService = createInventoryConsumptionService(database);
   const orderService = createOrderService(database, {
     inventoryConsumption: inventoryConsumptionService,
   });
-  // The menu service is wired so the recipe editor can list
-  // the restaurant's products. It is a read-only, existing
-  // route (GET /api/pos/menu) guarded by ORDER_CREATE.
   const menuService = createMenuService(database);
   const supplierService = createSupplierService(database);
   const inventoryService = createInventoryService(database);
@@ -132,12 +165,20 @@ export async function createServer({
 
   const app = await buildHttpApp({
     authService,
+    platformAdminService,
+    platformAdminPortalService,
+    entitlementService,
+    storageService,
     tenantContextService: createTenantContextService(database),
     subscriptionService,
     billingWebhookService,
     menuService,
     orderService,
     orderRefundService,
+    orderHistoryService,
+    orderCancellationService,
+    catalogImportService,
+    businessSettingsService,
     salesReportService,
     supplierService,
     inventoryService,
@@ -151,6 +192,7 @@ export async function createServer({
     migrationsDir: shouldVerifyMigrations ? resolvedMigrationsDir : null,
     verifyMigrationsCurrent: shouldVerifyMigrations ? verifyMigrationsCurrent : null,
     nodeEnv: config.nodeEnv,
+    trustProxy: config.trustProxy,
   });
 
   return {
@@ -164,6 +206,7 @@ export async function createServer({
     async close() {
       await app.close();
       if (!pool) await closeDatabasePool(database);
+      if (!controlPool && controlDatabase !== database) await closeDatabasePool(controlDatabase);
     },
   };
 }

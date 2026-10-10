@@ -211,4 +211,16 @@ describe("browser cloud session client", () => {
       (error) => error.code === "UNAUTHENTICATED" && error.status === 401,
     );
   });
+  it("managed login writes the shared session without accessing an unselected tenant namespace", async t => {
+    const previous=globalThis.BILLZ_MANAGED;globalThis.BILLZ_MANAGED=true;
+    t.after(()=>{if(previous===undefined)delete globalThis.BILLZ_MANAGED;else globalThis.BILLZ_MANAGED=previous});
+    const values=new Map();
+    const storage={get:async key=>values.get(key),set:async(key,value)=>{
+      assert.equal(key,CLOUD_SESSION_KEY,"business storage is unavailable before managed boot selects a tenant");
+      values.set(key,value);
+    }};
+    const session=createCloudSessionClient({storage,...router([restaurantA])});
+    assert.equal((await session.signIn({restaurantCode:"restaurant-a",username:"owner",password:"long-password"})).restaurantId,restaurantA);
+  });
+
 });

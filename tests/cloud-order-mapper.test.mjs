@@ -154,7 +154,7 @@ describe("cloud order mapper", () => {
     assert.equal(order.items[0].price, 50);
     assert.equal(order.items[0].offerLabel, "🔥 Item Offer");
     assert.equal(order.items[0].originalPrice, 60);
-    assert.equal(order.items[0].lineCostAtSale, 16.5);
+    assert.equal(order.items[0].lineCostAtSale, 33);
     assert.equal(order.discountType, "percent");
     assert.equal(order.discountValue, 10);
     assert.equal(order.discountAmount, 10);

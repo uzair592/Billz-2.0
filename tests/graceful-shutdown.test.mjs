@@ -1,3 +1,4 @@
+import { APP_DATABASE_URL, controlDatabaseUrl, provisionIntegrationDatabase } from "./helpers/postgres.mjs";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { spawn } from "node:child_process";
@@ -180,6 +181,8 @@ describe("graceful startup and shutdown", () => {
       env: {
         ...serverEnv,
         NODE_ENV: "production",
+        DATABASE_URL: APP_DATABASE_URL,
+        CONTROL_DATABASE_URL: controlDatabaseUrl(),
         TRUSTED_ORIGINS: "https://pos.example.test",
         MAIL_PROVIDER: "",
         PORT: String(port),
@@ -203,6 +206,8 @@ describe("graceful startup and shutdown", () => {
       env: {
         ...serverEnv,
         NODE_ENV: "production",
+        DATABASE_URL: APP_DATABASE_URL,
+        CONTROL_DATABASE_URL: controlDatabaseUrl(),
         TRUSTED_ORIGINS: "https://pos.example.test",
         MAIL_PROVIDER: "",
         PORT: String(port),

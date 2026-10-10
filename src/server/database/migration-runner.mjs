@@ -48,8 +48,8 @@ export async function ensureMigrationsTable(client) {
   `);
 }
 
-export async function getAppliedMigrations(client) {
-  await ensureMigrationsTable(client);
+export async function getAppliedMigrations(client, { ensureTable = true } = {}) {
+  if (ensureTable) await ensureMigrationsTable(client);
   const result = await client.query(
     `SELECT version, name, checksum FROM ${MIGRATIONS_TABLE} ORDER BY version ASC`,
   );
@@ -90,6 +90,7 @@ export async function listMigrationFiles(migrationsDir) {
  */
 export async function runMigrations({ pool, migrationsDir, logger = console }) {
   const client = await pool.connect();
+  let lockHeld = false;
   try {
     // Hold the advisory lock for the whole run so two instances cannot
     // interleave migrations. pg_try_advisory_lock is session-scoped and
@@ -105,6 +106,7 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
       ), { code: "MIGRATION_LOCK_BUSY" });
     }
 
+    lockHeld = true;
     await ensureMigrationsTable(client);
     const applied = await getAppliedMigrations(client);
     const files = await listMigrationFiles(migrationsDir);
@@ -136,7 +138,8 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
       // Each migration is atomic: a failure rolls back cleanly.
       await client.query("BEGIN");
       try {
-        await client.query(sql);
+        const statements = sql.replace(/^\s*BEGIN\s*;/i, "").replace(/COMMIT\s*;\s*$/i, "");
+        await client.query(statements);
         await client.query(
           `INSERT INTO ${MIGRATIONS_TABLE} (version, name, checksum)
            VALUES ($1, $2, $3)`,
@@ -166,7 +169,8 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
     });
     return { applied: appliedCount, alreadyApplied: alreadyAppliedCount, skipped: 0 };
   } finally {
-    client.release();
+    try { if (lockHeld) await releaseAdvisoryLock(client); }
+    finally { client.release(); }
   }
 }
 
@@ -178,7 +182,13 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
 export async function verifyMigrationsCurrent({ pool, migrationsDir }) {
   const client = await pool.connect();
   try {
-    const applied = await getAppliedMigrations(client);
+    let applied;
+    try { applied = await getAppliedMigrations(client, { ensureTable: false }); }
+    catch (error) {
+      if (error.code !== "42P01") throw error;
+      // A fresh database is pending, never provisioned by a runtime readiness probe.
+      applied = new Map();
+    }
     const files = await listMigrationFiles(migrationsDir);
     for (const migration of files) {
       const sql = await readFile(path.join(migrationsDir, migration.file), "utf8");

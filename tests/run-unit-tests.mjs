@@ -16,6 +16,8 @@ import { projectRoot } from './helpers/legacy-source.mjs';
  * try to connect before the database is reachable.
  */
 const EXCLUDED = new Set([
+  'saas-core-fullstack.test.mjs',
+  'launch-regressions-postgres.test.mjs',
   'billing-postgres.test.mjs',
   'refund-sales-report-postgres.test.mjs',
   'inventory-purchasing-postgres.test.mjs',

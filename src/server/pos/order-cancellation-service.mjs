@@ -1,3 +1,4 @@
+import { reverseRemainingInventory } from "./inventory-sale-snapshot.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
 
@@ -73,6 +74,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
             );
           }
 
+          await reverseRemainingInventory(client, { restaurantId, orderId, userId, now });
           const reversalResult = await client.query(
             `WITH sales AS (
                SELECT stock_item_id, SUM(-quantity_delta) AS quantity
@@ -92,14 +94,12 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
                created_by_user_id
              )
              SELECT gen_random_uuid(), $1, $3, s.stock_item_id, $2,
-                    'sale_reversal', s.quantity + COALESCE(r.quantity, 0),
+                    'sale_reversal', s.quantity - COALESCE(r.quantity, 0),
                     gen_random_uuid(), $4, $5
                FROM sales s
                LEFT JOIN reversals r ON r.stock_item_id = s.stock_item_id
-              WHERE s.quantity + COALESCE(r.quantity, 0) <> 0
-             ON CONFLICT (restaurant_id, order_id, stock_item_id)
-               WHERE movement_type = 'sale_reversal'
-             DO NOTHING
+              WHERE s.quantity - COALESCE(r.quantity, 0) <> 0
+             ON CONFLICT (restaurant_id, idempotency_key) DO NOTHING
              RETURNING stock_item_id, quantity_delta`,
             [restaurantId, orderId, order.branch_id, now, userId],
           );
@@ -125,13 +125,17 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
           const paymentResult = await client.query(
             `UPDATE order_payments
                 SET status = 'refunded'
-              WHERE restaurant_id = $1 AND order_id = $2 AND status = 'captured'
+              WHERE restaurant_id = $1 AND order_id = $2 AND status IN ('captured', 'partially_refunded')
               RETURNING id, financial_account_id, amount_minor`,
             [restaurantId, orderId],
           );
 
           let refundedMinor = 0;
           for (const payment of paymentResult.rows) {
+            const prior = await client.query(`SELECT COALESCE(SUM(amount_minor), 0) AS amount FROM order_refund_tenders
+              WHERE restaurant_id = $1 AND order_payment_id = $2`, [restaurantId, payment.id]);
+            payment.amount_minor = Math.max(0, minor(payment.amount_minor) - minor(prior.rows[0]?.amount));
+            if (!payment.amount_minor) continue;
             refundedMinor += minor(payment.amount_minor);
             if (!payment.financial_account_id) continue;
             await client.query(

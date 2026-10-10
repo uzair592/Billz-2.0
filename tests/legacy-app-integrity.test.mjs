@@ -90,12 +90,12 @@ describe("legacy POS application integrity", () => {
     );
   });
 
-  it("never blocks checkout on the cloud", async () => {
+  it("requires server acceptance before managed checkout", async () => {
     const html = await readLegacyApp();
 
     assert.ok(
-      !html.includes("await window.BiteTechCloudSync"),
-      "Checkout must not await a network call.",
+      html.includes("await window.BiteTechCloudSync.checkoutOnline(finalOrder)"),
+      "Managed checkout must confirm server persistence before issuing a paid receipt.",
     );
   });
 

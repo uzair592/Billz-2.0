@@ -37,6 +37,7 @@ const SUBSCRIPTION_PROBLEM_STATUSES = new Set([
 export function createCloudStatus({
   storage,
   refreshIntervalMs = 60_000,
+  managed = Boolean(globalThis.BILLZ_MANAGED),
 } = {}) {
   if (!storage || typeof storage.get !== "function") {
     throw new TypeError("storage must provide a get function.");
@@ -87,7 +88,7 @@ export function createCloudStatus({
       if (kind === ApiErrorKind.UNREACHABLE) {
         return {
           tone: "amber",
-          text: "Cloud unreachable — sales keep working locally",
+          text: managed ? "Cloud unreachable — checkout paused" : "Cloud unreachable — sales keep working locally",
         };
       }
       return null;
@@ -111,7 +112,7 @@ export function createCloudStatus({
     if (!navigator.onLine) {
       apply({
         tone: "gray",
-        text: "Offline — sales keep working locally",
+        text: managed ? "Offline — checkout paused" : "Offline — sales keep working locally",
       });
       return;
     }
@@ -124,7 +125,7 @@ export function createCloudStatus({
 
     const context = await storage.get(CLOUD_CONTEXT_KEY);
     if (!context?.restaurantId) {
-      apply({ tone: "gray", text: "Offline & ready" });
+      apply({ tone: "gray", text: managed ? "Import your catalog to enable checkout" : "Offline & ready" });
       return;
     }
 

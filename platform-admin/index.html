@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Billz 2.0 — Platform Super-Admin Portal</title>
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg-gradient); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    .container { max-width: 1200px; margin: 0 auto; width: 100%; padding: 20px; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 15px; margin-bottom: 25px; }
+    h1 { font-size: 1.5rem; color: #a5b4fc; }
+    .btn { background: var(--primary); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: background 0.2s; }
+    .btn:hover { background: var(--primary-hover); }
+    .btn-success { background: var(--success); }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-danger { background: var(--danger); }
+    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; padding: 20px; backdrop-filter: blur(10px); margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px; }
+    .stat-card { text-align: center; }
+    .stat-val { font-size: 2rem; font-weight: 700; color: #6366f1; margin-top: 5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; text-align: left; }
+    th, td { padding: 12px 15px; border-bottom: 1px solid var(--card-border); }
+    th { color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; }
+    .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
+    .badge-active { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+    .badge-suspended { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+    .badge-pending { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-size: 0.9rem; color: var(--text-muted); }
+    input, select, textarea { width: 100%; padding: 10px; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--card-border); border-radius: 6px; color: white; }
+    .hidden { display: none !important; }
+    .alert { padding: 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9rem; }
+    .alert-danger { background: rgba(239, 68, 68, 0.2); border: 1px solid var(--danger); color: #f87171; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Billz 2.0 Super-Admin Portal</h1>
+      <div id="user-info">
+        <span id="admin-display-name"></span>
+        <button id="logout-btn" class="btn btn-danger hidden" style="margin-left:10px;">Logout</button>
+      </div>
+    </header>
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-view" class="card" style="max-width: 400px; margin: 50px auto;">
+      <h2 style="margin-bottom:20px; text-align:center;">Platform Login</h2>
+      <div id="login-error" class="alert alert-danger hidden"></div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input type="text" id="username" required autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required autocomplete="current-password" />
+        </div>
+        <button type="submit" class="btn" style="width:100%;">Sign In</button>
+      </form>
+    </div>
+
+    <!-- PORTAL DASHBOARD -->
+    <div id="portal-view" class="hidden">
+      <!-- STATS GRID -->
+      <div class="grid">
+        <div class="card stat-card">
+          <div>Total Restaurants</div>
+          <div id="stat-total" class="stat-val">0</div>
+        </div>
+        <div class="card stat-card">
+          <div>Active Tenants</div>
+          <div id="stat-active" class="stat-val" style="color:#10b981;">0</div>
+        </div>
+        <div class="card stat-card">
+          <div>Suspended Tenants</div>
+          <div id="stat-suspended" class="stat-val" style="color:#ef4444;">0</div>
+        </div>
+        <div class="card stat-card">
+          <div>Pending Payments</div>
+          <div id="stat-pending" class="stat-val" style="color:#f59e0b;">0</div>
+        </div>
+      </div>
+
+      <!-- ACTIONS & RESTAURANT LIST -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+          <h2>Tenant Restaurants</h2>
+          <button id="open-create-modal" class="btn btn-success">+ Create Restaurant</button>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+          <input type="text" id="search-input" placeholder="Search by restaurant name or code..." style="flex:1;" />
+          <select id="status-filter" style="width:150px;">
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+          </select>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Restaurant Code</th>
+              <th>Name</th>
+              <th>Status</th>
+              <th>Subscription</th>
+              <th>Storage Used</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="restaurants-tbody">
+            <tr><td colspan="6" style="text-align:center;">Loading tenants...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- RESTAURANT DETAIL VIEW / MODAL -->
+      <div id="detail-view" class="card hidden">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+          <h2 id="detail-name">Restaurant Details</h2>
+          <button id="close-detail-btn" class="btn">Back to List</button>
+        </div>
+        <div id="detail-content"></div>
+      </div>
+
+      <!-- CREATE RESTAURANT FORM MODAL -->
+      <div id="create-modal" class="card hidden" style="max-width:500px; margin:20px auto;">
+        <h2>Create New Restaurant</h2>
+        <div id="create-error" class="alert alert-danger hidden"></div>
+        <form id="create-restaurant-form" style="margin-top:15px;">
+          <div class="form-group">
+            <label for="create-code">Restaurant Code (Unique Login Code)</label>
+            <input type="text" id="create-code" required placeholder="e.g. burger-haven" />
+          </div>
+          <div class="form-group">
+            <label for="create-name">Restaurant Name</label>
+            <input type="text" id="create-name" required placeholder="e.g. Burger Haven Central" />
+          </div>
+          <div class="form-group">
+            <label for="create-owner-user">Owner Username</label>
+            <input type="text" id="create-owner-user" required placeholder="e.g. owner_burger" />
+          </div>
+          <div class="form-group">
+            <label for="create-owner-pass">Owner Password</label>
+            <input type="password" id="create-owner-pass" required placeholder="At least 8 characters" />
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+            <button type="button" id="cancel-create-btn" class="btn" style="background:#475569;">Cancel</button>
+            <button type="submit" class="btn btn-success">Create Tenant</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    async function apiCall(path, options = {}) {
+      const headers = { ...options.headers };
+      if (options.body || options.method === 'POST' || options.method === 'PUT') {
+        headers['content-type'] = 'application/json';
+        if (!options.body) options.body = JSON.stringify({});
+      }
+      const res = await fetch(path, { credentials: 'same-origin', ...options, headers });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const errMsg = data?.error || data?.message || `HTTP ${res.status}`;
+        console.error(`API Error [${res.status}] ${path}:`, data);
+        throw new Error(errMsg);
+      }
+      return data;
+    }
+
+    const loginView = document.getElementById('login-view');
+    const portalView = document.getElementById('portal-view');
+    const loginError = document.getElementById('login-error');
+
+    async function checkAuth() {
+      try {
+        const data = await apiCall('/platform-admin/api/auth/me');
+        document.getElementById('admin-display-name').textContent = data.admin.displayName;
+        document.getElementById('logout-btn').classList.remove('hidden');
+        loginView.classList.add('hidden');
+        portalView.classList.remove('hidden');
+      } catch {
+        loginView.classList.remove('hidden');
+        portalView.classList.add('hidden');
+        return;
+      }
+      loadDashboard().catch(console.error);
+      loadRestaurants().catch(console.error);
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      loginError.classList.add('hidden');
+      try {
+        await apiCall('/platform-admin/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value
+          })
+        });
+        await checkAuth();
+      } catch (err) {
+        loginError.textContent = err.message;
+        loginError.classList.remove('hidden');
+      }
+    });
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await apiCall('/platform-admin/api/auth/logout', { method: 'POST' });
+      await checkAuth();
+    });
+
+    async function loadDashboard() {
+      const stats = await apiCall('/platform-admin/api/dashboard');
+      document.getElementById('stat-total').textContent = stats.totalRestaurants;
+      document.getElementById('stat-active').textContent = stats.activeRestaurants;
+      document.getElementById('stat-suspended').textContent = stats.suspendedRestaurants;
+      document.getElementById('stat-pending').textContent = stats.pendingPayments;
+    }
+
+    let searchReqId = 0;
+    async function loadRestaurants() {
+      const reqId = ++searchReqId;
+      const search = document.getElementById('search-input').value;
+      const status = document.getElementById('status-filter').value;
+      const list = await apiCall(`/platform-admin/api/restaurants?search=${encodeURIComponent(search)}&status=${status}`);
+      if (reqId !== searchReqId) return;
+      const tbody = document.getElementById('restaurants-tbody');
+      tbody.innerHTML = '';
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No restaurants found.</td></tr>';
+        return;
+      }
+      list.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><strong>${r.code}</strong></td>
+          <td>${r.name}</td>
+          <td><span class="badge badge-${r.status}">${r.status}</span></td>
+          <td>${r.subscriptionStatus}</td>
+          <td>${(Number(r.usedStorageBytes)/(1024*1024)).toFixed(1)} MB / 5 GB</td>
+          <td><button class="btn btn-manage" data-id="${r.id}">Manage</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+      document.querySelectorAll('.btn-manage').forEach(b => b.addEventListener('click', () => viewRestaurant(b.dataset.id)));
+    }
+
+    document.getElementById('search-input').addEventListener('input', () => { loadRestaurants().catch(console.error); });
+    document.getElementById('status-filter').addEventListener('change', () => { loadRestaurants().catch(console.error); });
+
+    document.getElementById('open-create-modal').addEventListener('click', () => {
+      document.getElementById('create-modal').classList.remove('hidden');
+    });
+    document.getElementById('cancel-create-btn').addEventListener('click', () => {
+      document.getElementById('create-modal').classList.add('hidden');
+    });
+
+    document.getElementById('create-restaurant-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const createErr = document.getElementById('create-error');
+      createErr.classList.add('hidden');
+      try {
+        await apiCall('/platform-admin/api/restaurants', {
+          method: 'POST',
+          body: JSON.stringify({
+            code: document.getElementById('create-code').value,
+            name: document.getElementById('create-name').value,
+            ownerUsername: document.getElementById('create-owner-user').value,
+            ownerPassword: document.getElementById('create-owner-pass').value
+          })
+        });
+        document.getElementById('create-modal').classList.add('hidden');
+        await loadRestaurants();
+        await loadDashboard();
+      } catch (err) {
+        createErr.textContent = err.message;
+        createErr.classList.remove('hidden');
+      }
+    });
+
+    async function viewRestaurant(id) {
+      const data = await apiCall(`/platform-admin/api/restaurants/${id}`);
+      const detailView = document.getElementById('detail-view');
+      document.getElementById('detail-name').textContent = `${data.restaurant.name} (${data.restaurant.code})`;
+
+      const content = document.getElementById('detail-content');
+      content.innerHTML = `
+        <div style="margin-bottom:20px; display:flex; gap:15px; align-items:center;">
+          <div>Status: <span class="badge badge-${data.restaurant.status}">${data.restaurant.status}</span></div>
+          <div>Plan: <strong>${data.subscription.planName}</strong></div>
+          ${data.restaurant.status === 'active'
+            ? `<button id="suspend-btn" class="btn btn-danger">Suspend Access</button>`
+            : `<button id="restore-btn" class="btn btn-success">Restore Access</button>`}
+        </div>
+
+        <h3 style="margin-top:20px;">Record Manual Payment</h3>
+        <form id="record-pay-form" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+          <div><label>Plan Code</label><input id="pay-plan" value="GROWTH" required /></div>
+          <div><label>Amount (Minor Units PKR)</label><input id="pay-amount" type="number" value="500000" required /></div>
+          <div><label>Covered From</label><input id="pay-from" type="date" required /></div>
+          <div><label>Covered Until</label><input id="pay-until" type="date" required /></div>
+          <div style="grid-column:span 2;"><label>External Reference / Transaction ID</label><input id="pay-ref" required placeholder="TRX-123456" /></div>
+          <div style="grid-column:span 2;"><button type="submit" class="btn btn-success">Record Payment</button></div>
+        </form>
+
+        <h3 style="margin-top:25px;">Payment History</h3>
+        <table>
+          <thead>
+            <tr><th>Reference</th><th>Amount</th><th>Status</th><th>Covered Dates</th><th>Action</th></tr>
+          </thead>
+          <tbody>
+            ${data.payments.map(p => `
+              <tr>
+                <td>${p.externalReference}</td>
+                <td>PKR ${(p.amountMinor/100).toFixed(2)}</td>
+                <td><span class="badge badge-${p.status}">${p.status}</span></td>
+                <td>${new Date(p.coveredFrom).toLocaleDateString()} - ${new Date(p.coveredUntil).toLocaleDateString()}</td>
+                <td>
+                  ${p.status === 'pending' ? `<button class="btn btn-success btn-approve" data-pid="${p.id}">Approve</button>` : ''}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      detailView.classList.remove('hidden');
+
+      const today = new Date().toISOString().split('T')[0];
+      const nextMonth = new Date(Date.now() + 30*24*60*60*1000).toISOString().split('T')[0];
+      if (document.getElementById('pay-from')) document.getElementById('pay-from').value = today;
+      if (document.getElementById('pay-until')) document.getElementById('pay-until').value = nextMonth;
+
+      if (document.getElementById('suspend-btn')) {
+        document.getElementById('suspend-btn').onclick = async () => {
+          try {
+            await apiCall(`/platform-admin/api/restaurants/${id}/suspend`, { method: 'POST' });
+            await viewRestaurant(id);
+            await loadRestaurants();
+          } catch (err) {
+            console.error('Suspend failed:', err);
+          }
+        };
+      }
+      if (document.getElementById('restore-btn')) {
+        document.getElementById('restore-btn').onclick = async () => {
+          try {
+            await apiCall(`/platform-admin/api/restaurants/${id}/restore`, { method: 'POST' });
+            await viewRestaurant(id);
+            await loadRestaurants();
+          } catch (err) {
+            console.error('Restore failed:', err);
+          }
+        };
+      }
+
+      document.getElementById('record-pay-form').onsubmit = async (e) => {
+        e.preventDefault();
+        await apiCall(`/platform-admin/api/restaurants/${id}/payments`, {
+          method: 'POST',
+          body: JSON.stringify({
+            planCode: document.getElementById('pay-plan').value,
+            amountMinor: Number(document.getElementById('pay-amount').value),
+            paymentDate: new Date().toISOString(),
+            coveredFrom: new Date(document.getElementById('pay-from').value).toISOString(),
+            coveredUntil: new Date(document.getElementById('pay-until').value).toISOString(),
+            externalReference: document.getElementById('pay-ref').value
+          })
+        });
+        await viewRestaurant(id);
+      };
+
+      document.querySelectorAll('.btn-approve').forEach(b => {
+        b.onclick = async (e) => {
+          e.preventDefault();
+          const pid = b.getAttribute('data-pid') || b.dataset.pid;
+          try {
+            await apiCall(`/platform-admin/api/payments/${pid}/approve`, { method: 'POST' });
+            await viewRestaurant(id);
+            await loadRestaurants();
+          } catch (err) {
+            console.error('Approve payment failed:', err);
+          }
+        };
+      });
+    }
+
+    document.getElementById('close-detail-btn').onclick = () => {
+      document.getElementById('detail-view').classList.add('hidden');
+    };
+
+    checkAuth();
+  </script>
+</body>
+</html>

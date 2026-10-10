@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
@@ -32,7 +32,7 @@ export function scratchDatabaseUrl(databaseName) {
  */
 export const APP_DATABASE_URL =
   process.env.TEST_DATABASE_URL
-  ?? `postgresql://${APP_ROLE}:integration-only@127.0.0.1:55432/restaurant_pos_test`;
+  ?? (() => { const url = new URL(ADMIN_DATABASE_URL); url.username = APP_ROLE; url.password = "integration-only"; return url.toString(); })();
 
 const MIGRATIONS_DIR = path.join(projectRoot, "database", "migrations");
 
@@ -60,12 +60,32 @@ export async function provisionIntegrationDatabase() {
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;");
     await admin.query("GRANT ALL ON SCHEMA public TO public;");
 
+    await admin.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version integer PRIMARY KEY,
+        name text NOT NULL,
+        checksum text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+
     const files = (await readdir(MIGRATIONS_DIR))
       .filter((file) => file.endsWith(".sql"))
       .sort();
     for (const file of files) {
       const sql = await readFile(path.join(MIGRATIONS_DIR, file), "utf8");
       await admin.query(sql);
+      const match = /^(\d+)_(.+)\.sql$/.exec(file);
+      if (match) {
+        const version = Number(match[1]);
+        const name = match[2];
+        const hash = createHash("sha256").update(sql, "utf8").digest("hex");
+        await admin.query(
+          `INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)
+           ON CONFLICT (version) DO UPDATE SET checksum = EXCLUDED.checksum`,
+          [version, name, hash],
+        );
+      }
     }
 
     await admin.query(`
@@ -77,6 +97,14 @@ export async function provisionIntegrationDatabase() {
       END
       $$;
     `);
+    await admin.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pos_control_test') THEN
+        CREATE ROLE pos_control_test LOGIN PASSWORD 'control-test-only' NOSUPERUSER BYPASSRLS;
+      END IF;
+    END $$;`);
+    await admin.query(`GRANT USAGE ON SCHEMA public TO pos_control_test;
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_control_test;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pos_control_test;`);
     await admin.query(`
       DO $$
       DECLARE
@@ -205,4 +233,14 @@ export async function resetBillingState(admin) {
              subscriptions, billing_customers
     RESTART IDENTITY CASCADE
   `);
+}
+export function controlDatabaseUrl() {
+  const url = new URL(ADMIN_DATABASE_URL);
+  url.username = "pos_control_test"; url.password = "control-test-only";
+  return url.toString();
+}
+export async function createControlPool() {
+  const pool = new pg.Pool({ connectionString: controlDatabaseUrl(), max: 5 });
+  await pool.query("SELECT 1");
+  return pool;
 }
