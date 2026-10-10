@@ -40,6 +40,9 @@ async function resolveUsage(client, restaurantId, lines) {
     const usage = new Map();
     const missingRecipes = [];
     for (const line of lines) {
+      if (!line.inventoryRecipe?.length && !line.recipe?.length) missingRecipes.push({
+        type: "missing_recipe", menuItemId: line.menuItemId, quantity: Number(line.quantity),
+      });
       for (const recipe of line.inventoryRecipe || []) {
         usage.set(recipe.inventoryItemId, (usage.get(recipe.inventoryItemId) || 0) + Number(recipe.quantityPerUnit) * Number(line.quantity));
       }

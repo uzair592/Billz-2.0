@@ -116,7 +116,9 @@ export function createCloudSessionClient({
       const restaurants = account?.restaurants ?? [];
       const previous = await readStored();
       const restaurantId = restaurants.length === 1 ? restaurants[0].restaurantId : null;
-      if (previous.restaurantId !== restaurantId) await storage.set("pos_cloud_context_v1", null);
+      // Managed boot selects the authorized namespace after authentication. Do
+      // not access tenant business storage while still on the sign-in screen.
+      if (!globalThis.BILLZ_MANAGED && previous.restaurantId !== restaurantId) await storage.set("pos_cloud_context_v1", null);
       const result = await writeStored({ user: account?.user ?? null, restaurantId });
       globalThis.dispatchEvent?.(new Event("billz-session-restored"));
       return result;

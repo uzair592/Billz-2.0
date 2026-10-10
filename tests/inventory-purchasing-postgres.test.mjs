@@ -191,12 +191,13 @@ describeDatabase("Inventory & Purchasing PostgreSQL Integration Tests", () => {
     await admin.end();
   });
 
-  it("applies all 12 migrations and creates the new tables", async () => {
+  it("applies every available migration and creates the inventory tables", async () => {
     const files = (await readdir(path.join(projectRoot, "database", "migrations")))
       .filter((file) => file.endsWith(".sql"))
       .sort();
-    assert.equal(files.length, 12);
-    assert.equal(files.at(-1), "012_inventory_purchasing.sql");
+    const history = await admin.query("SELECT version FROM schema_migrations ORDER BY version");
+    assert.deepEqual(history.rows.map(row => row.version), files.map(file => Number(file.split("_")[0])));
+    assert.ok(files.includes("012_inventory_purchasing.sql"));
 
     const tables = await admin.query(
       `SELECT tablename FROM pg_tables
