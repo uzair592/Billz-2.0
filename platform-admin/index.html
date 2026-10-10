@@ -300,13 +300,13 @@
       const data = await apiCall(`/platform-admin/api/restaurants/${id}`);
       const detailView = document.getElementById('detail-view');
       document.getElementById('detail-name').textContent = `${data.restaurant.name} (${data.restaurant.code})`;
-      
+
       const content = document.getElementById('detail-content');
       content.innerHTML = `
         <div style="margin-bottom:20px; display:flex; gap:15px; align-items:center;">
           <div>Status: <span class="badge badge-${data.restaurant.status}">${data.restaurant.status}</span></div>
           <div>Plan: <strong>${data.subscription.planName}</strong></div>
-          ${data.restaurant.status === 'active' 
+          ${data.restaurant.status === 'active'
             ? `<button id="suspend-btn" class="btn btn-danger">Suspend Access</button>`
             : `<button id="restore-btn" class="btn btn-success">Restore Access</button>`}
         </div>
