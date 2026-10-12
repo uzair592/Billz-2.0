@@ -13,6 +13,8 @@ This release implements the four requested groups on `fix/admin-launch-hardening
 
 Node **22.23.3** was installed for local checks. Unit totals after groups 1–4: **623, 626, 629, 630**, with zero failures or skips after each group's local fixes. Exact-head CI results and any subsequent acceptance fixes are recorded in PR #10. Existing migrations 001–014 are unchanged; new migrations are 015–017.
 
+A final UI regression prevents editing a previously loaded restaurant while another restaurant's details are loading. It brings the unit total to **631**.
+
 The requested `npm run test:postgres` and `npm run test:fullstack` commands were attempted locally after every group. They failed explicitly because PostgreSQL is unavailable. The workspace denies OS user/permission operations required by package installation and has no Docker. No local database pass is claimed. Local Playwright execution was attempted; Chromium downloads were truncated, and the SaaS web server also requires PostgreSQL. GitHub CI supplies real PostgreSQL 17, Node 22 and Chromium for these checks. Browser failure artifacts must not retain generated passwords; the reset test clears the generated field before assertions/artifact capture.
 
 The shutdown defect is fixture setup, not a production password-authentication bypass: the standalone runner did not provision application/control roles, the shutdown suite imported but never called provisioning, and an existing role's stale password was left untouched. Provisioning now repairs those fixed test roles, and a real PostgreSQL regression deliberately starts with stale credentials and verifies repair. Runtime security checks still reject incorrect production roles.

@@ -5,6 +5,18 @@ import { readFile } from "node:fs/promises";
 import { publicAuditMetadata } from "../src/server/subscriptions/platform-admin-portal-service.mjs";
 import { buildHttpApp } from "../src/server/http/app.mjs";
 
+test("loading another restaurant prevents edits against stale detail state", async () => {
+  const source = await readFile(new URL("../platform-admin/app.js", import.meta.url), "utf8");
+  const nodes = new Map();
+  const context = vm.createContext({ currentRestaurant: { restaurant: { id: "old" } },
+    $: id => { if (!nodes.has(id)) nodes.set(id, { disabled: false, classList: { add() {}, remove() {} } }); return nodes.get(id); },
+    showView() {}, apiCall: () => new Promise(() => {}) });
+  const viewer = source.slice(source.indexOf("let detailReqId"), source.indexOf('$("close-detail-btn").onclick'));
+  vm.runInContext(viewer + '\nviewRestaurant("new");', context);
+  assert.equal(context.currentRestaurant, null);
+  assert.equal(nodes.get("edit-restaurant-btn").disabled, true);
+});
+
 test("user and payment renderers escape every stored text and attribute value", async () => {
   const source = await readFile(
     new URL("../platform-admin/app.js", import.meta.url),

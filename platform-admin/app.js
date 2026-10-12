@@ -333,6 +333,8 @@ function paymentsMarkup(payments) {
 let detailReqId = 0;
 async function viewRestaurant(id) {
   const requestId = ++detailReqId;
+  currentRestaurant = null;
+  $("edit-restaurant-btn").disabled = true;
   showView("restaurants");
   $("restaurants-page").classList.add("hidden");
   $("detail-view").classList.remove("hidden");
@@ -344,6 +346,7 @@ async function viewRestaurant(id) {
   );
   if (requestId !== detailReqId) return;
   currentRestaurant = data;
+  $("edit-restaurant-btn").disabled = false;
   const r = data.restaurant,
     s = data.subscription,
     storage = data.storage;
