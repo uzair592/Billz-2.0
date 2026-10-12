@@ -91,7 +91,7 @@ describe("authentication HTTP boundary", () => {
       method: "POST",
       url: "/api/auth/login",
       headers: { origin: "https://pos.example.com" },
-      payload: { email: "owner@example.com", password: "password" },
+      payload: { email: "owner@example.com", password: "incorrect-password" },
     });
 
     assert.equal(response.statusCode, 200);
@@ -123,7 +123,7 @@ describe("authentication HTTP boundary", () => {
         origin: "https://evil.example",
         "sec-fetch-site": "cross-site",
       },
-      payload: { email: "owner@example.com", password: "password" },
+      payload: { email: "owner@example.com", password: "incorrect-password" },
     });
 
     assert.equal(response.statusCode, 403);

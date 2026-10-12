@@ -10,6 +10,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { passwordSchema } from "../auth/password-policy.mjs";
 import { PERMISSION } from "../authorization/permissions.mjs";
 import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
@@ -19,7 +20,7 @@ import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
-  password: z.string().min(10).max(200),
+  password: passwordSchema,
   displayName: z.string().trim().min(1).max(120),
   restaurantName: z.string().trim().min(1).max(160),
 });
@@ -28,11 +29,11 @@ const loginSchema = z.union([
   z.object({
     restaurantCode: z.string().trim().min(1).max(64),
     username: z.string().trim().min(1).max(64),
-    password: z.string().min(1).max(200),
+    password: passwordSchema,
   }),
   z.object({
     email: z.string().trim().email().max(320),
-    password: z.string().min(1).max(200),
+    password: passwordSchema,
   }),
 ]);
 
@@ -413,12 +414,14 @@ export async function buildHttpApp({
   serveClient = true,
   nodeEnv = "development",
   trustProxy = false,
+  loginThrottle = null,
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
 
   const originAllowlist = trustedOrigins ?? [trustedOrigin];
 
+  if (trustProxy === true) throw new TypeError("Proxy trust requires an explicit IP/CIDR allowlist.");
   const app = Fastify({
     logger,
     trustProxy,
@@ -437,6 +440,10 @@ export async function buildHttpApp({
   // would break it; CSP is deliberately left off and this limitation is
   // documented.
   app.addHook("onSend", async (_request, reply) => {
+    if (new URL(_request.url, "http://internal").pathname === "/platform-admin" || _request.url.startsWith("/platform-admin/")) {
+      reply.header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+      reply.header("Cache-Control", "no-store");
+    }
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -539,6 +546,7 @@ export async function buildHttpApp({
       platformAdminService,
       platformAdminPortalService,
       secureCookies,
+      loginThrottle,
     });
   }
 
@@ -605,28 +613,19 @@ export async function buildHttpApp({
     },
   );
 
-  const accountAttempts = new Map();
   app.post(
     "/api/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
-      preHandler: async (request, reply) => {
-        const b = request.body || {};
-        const key = b.email ? String(b.email).trim().toLowerCase()
-          : String(b.restaurantCode || "").trim().toLowerCase() + ":" + String(b.username || "").trim().toLowerCase();
-        const now = Date.now();
-        const attempt = accountAttempts.get(key);
-        if (attempt && attempt.until > now && attempt.count >= 10) return reply.code(429).send({ error: "Too many sign-in attempts. Try again later.", code: "LOGIN_RATE_LIMITED" });
-        for (const [k, value] of accountAttempts) if (value.until <= now) accountAttempts.delete(k);
-        if (accountAttempts.size >= 10000 && !accountAttempts.has(key)) accountAttempts.delete(accountAttempts.keys().next().value);
-        accountAttempts.set(key, { until: attempt?.until > now ? attempt.until : now + 900000, count: attempt?.until > now ? attempt.count + 1 : 1 });
-      } },
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
     async (request, reply) => {
       const input = loginSchema.parse(request.body);
+      const attempt = { scope: "restaurant", ...input, password: undefined, ipAddress: request.ip };
+      await loginThrottle?.check(attempt);
       try {
         const session = await authService.login({
           ...input,
           ...requestMetadata(request),
         });
+        await loginThrottle?.succeeded(attempt);
         setSessionCookie(reply, session, secureCookies);
         return { user: publicUser(session.user) };
       } catch (err) {
@@ -644,6 +643,7 @@ export async function buildHttpApp({
           });
         }
         if (err.code === "INVALID_CREDENTIALS") {
+          await loginThrottle?.failed(attempt);
           return reply.code(401).send({
             error: err.message,
             code: "INVALID_CREDENTIALS",
@@ -1460,7 +1460,7 @@ export async function buildHttpApp({
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) {
       return reply.code(400).send({
-        error: "Invalid request.",
+        error: error.issues.find(issue => issue.path.some(part => /password/i.test(String(part))))?.message ?? "Invalid request.",
         issues: error.issues.map((issue) => ({
           path: issue.path.join("."),
           message: issue.message,
@@ -1468,6 +1468,7 @@ export async function buildHttpApp({
       });
     }
     const statusCode = Number(error.statusCode) || 500;
+    if (error.retryAfter) reply.header("Retry-After", String(error.retryAfter));
     const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
     return reply.code(statusCode).send({
       error: publicMessage,

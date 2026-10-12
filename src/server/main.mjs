@@ -3,6 +3,7 @@ import path from "node:path";
 import { buildHttpApp } from "./http/app.mjs";
 import { createBillingWebhookService } from "./billing/billing-webhook-service.mjs";
 import { createSubscriptionService } from "./billing/subscription-service.mjs";
+import { createLoginThrottle } from "./auth/login-throttle.mjs";
 import { createAuthService } from "./auth/auth-service.mjs";
 import { createPostgresAuthRepository } from "./auth/postgres-auth-repository.mjs";
 import { createTenantContextService } from "./tenancy/tenant-context-service.mjs";
@@ -165,6 +166,7 @@ export async function createServer({
 
   const app = await buildHttpApp({
     authService,
+    loginThrottle: createLoginThrottle(controlDatabase),
     platformAdminService,
     platformAdminPortalService,
     entitlementService,

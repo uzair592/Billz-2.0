@@ -53,7 +53,7 @@ application refuses placeholder values in production.
 | `STRIPE_WEBHOOK_SECRET` | conditional | required when `PAYMENT_PROVIDER=stripe` |
 | `STRIPE_PUBLISHABLE_KEY` | no | publishable key for checkout |
 | `LOG_LEVEL` | no | `info` recommended for production |
-| `TRUST_PROXY` | conditional | `true` only behind a trusted reverse proxy |
+| `TRUST_PROXY` | conditional | `true` on Render; requires verified `TRUSTED_PROXY_CIDRS` |
 
 Generate secrets with a CSPRNG, for example:
 
@@ -222,3 +222,11 @@ container replacement.
 Because the database is separate from the application container, you can
 redeploy, scale, or roll back the application without touching tenant
 data.
+
+### Launch configuration alignment
+
+Render launch uses `PAYMENT_PROVIDER=manual`; Stripe credentials are unnecessary. Set `TRUST_PROXY=true` and supply `TRUSTED_PROXY_CIDRS` with the verified proxy chain addresses/CIDRs for your deployment. Do not guess the forwarding depth or trust all private networks. Untrusted immediate peers cannot supply trusted `X-Forwarded-For` values; forged prefixes before the first untrusted hop are ignored. Test two different client IPs and a forged header on staging. This repository cannot infer Render's runtime proxy addresses. Startup fails closed if proxy trust is enabled without the allowlist.
+
+Provision a non-superuser NOBYPASSRLS POS connection in `DATABASE_URL` and a separate non-superuser BYPASSRLS auth/admin connection in `CONTROL_DATABASE_URL` (not the database-owner URL). Apply migrations with an owner connection and grant the runtime roles their required privileges. `render.yaml` leaves the control connection and proxy allowlist for operator configuration.
+
+Failed-login counters live in PostgreSQL, scoped to account and IP. Successful login clears that counter; failed credentials impose a progressive 250 ms–5 s delay, not a 15-minute account lock. Existing per-IP request limits remain. Admin scripts are external and admin routes have a scoped CSP; the legacy POS CSP is unchanged.

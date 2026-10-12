@@ -1,17 +1,18 @@
 import { z } from "zod";
+import { passwordSchema } from "../auth/password-policy.mjs";
 
 const PLATFORM_COOKIE_NAME = "platform_admin_session";
 
 const adminLoginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(200),
+  password: passwordSchema,
 });
 
 const createRestaurantSchema = z.object({
   name: z.string().trim().min(1).max(160),
   code: z.string().trim().min(2).max(64),
   ownerUsername: z.string().trim().min(2).max(64),
-  ownerPassword: z.string().min(8).max(200),
+  ownerPassword: passwordSchema,
   ownerDisplayName: z.string().trim().min(1).max(120).optional(),
   planCode: z.string().trim().min(1).max(64).default("GROWTH"),
 });
@@ -37,7 +38,7 @@ const updateStorageSchema = z.object({
   maxStorageBytes: z.number().int().min(0),
 });
 
-export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true }) {
+export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true, loginThrottle = null }) {
   // Authentication Guard Helper for Platform Admin Routes
   async function requirePlatformAdmin(request, reply) {
     const token = request.cookies[PLATFORM_COOKIE_NAME];
@@ -57,6 +58,8 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
 
   app.post("/platform-admin/api/auth/login", { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async (request, reply) => {
     const input = adminLoginSchema.parse(request.body);
+    const attempt = { scope: "platform_admin", username: input.username, ipAddress: request.ip };
+    await loginThrottle?.check(attempt);
     try {
       const session = await platformAdminService.login({
         username: input.username,
@@ -64,6 +67,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
         ipAddress: request.ip,
         userAgent: request.headers["user-agent"] ?? null,
       });
+      await loginThrottle?.succeeded(attempt);
       reply.setCookie(PLATFORM_COOKIE_NAME, session.token, {
         path: "/",
         httpOnly: true,
@@ -74,6 +78,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
       return { admin: { id: session.admin.id, username: session.admin.username, displayName: session.admin.displayName, status: session.admin.status } };
     } catch (err) {
       if (err.code === "INVALID_ADMIN_CREDENTIALS") {
+        await loginThrottle?.failed(attempt);
         return reply.code(401).send({ error: err.message, code: err.code });
       }
       if (err.code === "ADMIN_DISABLED") {

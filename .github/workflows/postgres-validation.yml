@@ -165,7 +165,7 @@ jobs:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
           TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
         run: |
-          node --test tests/saas-core-fullstack.test.mjs
+          npm run test:fullstack
           node --test tests/launch-regressions-postgres.test.mjs
           node --test tests/inventory-purchasing-postgres.test.mjs
 

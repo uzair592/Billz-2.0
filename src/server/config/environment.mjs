@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import { createStripePaymentProvider } from "../billing/stripe-payment-provider.mjs";
 import { createManualPaymentProvider } from "../billing/manual-payment-provider.mjs";
 import { assertPaymentProvider } from "../billing/payment-provider.mjs";
@@ -226,6 +227,17 @@ export function loadServerConfiguration(env = process.env) {
   // Proxy handling: only enable trust-proxy when explicitly opted in,
   // because trusting proxies by default lets a client spoof its IP.
   const trustProxyEnabled = ["true", "1", "yes"].includes(trustProxy);
+  const trustedProxyCidrs = String(env.TRUSTED_PROXY_CIDRS ?? "").split(",").map(value => value.trim()).filter(Boolean);
+  for (const cidr of trustedProxyCidrs) {
+    const [address, prefix, extra] = cidr.split("/");
+    const version = isIP(address);
+    if (!version || extra !== undefined || (prefix !== undefined && (!/^\d+$/.test(prefix) || Number(prefix) > (version === 4 ? 32 : 128)))) {
+      throw configurationError("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDRs.");
+    }
+  }
+  if (trustProxyEnabled && !trustedProxyCidrs.length) {
+    throw configurationError("TRUSTED_PROXY_CIDRS is required when TRUST_PROXY=true. List only verified platform proxy IPs/CIDRs.");
+  }
 
   return Object.freeze({
     nodeEnv,
@@ -240,7 +252,7 @@ export function loadServerConfiguration(env = process.env) {
     trustedOrigin: trustedOrigins[0],
     secureCookies: trustedOrigins.every((origin) => origin.startsWith("https:")),
     logLevel,
-    trustProxy: trustProxyEnabled,
+    trustProxy: trustProxyEnabled ? trustedProxyCidrs : false,
     mailProvider,
   });
 }
