@@ -19,7 +19,7 @@ export default defineConfig({
       SESSION_SECRET: "test-session-secret-development-32bytes",
       TRUSTED_ORIGIN: "http://127.0.0.1:3000",
       DISABLE_RATE_LIMIT: "true",
-      NODE_ENV: "development",
+      NODE_ENV: "test",
     },
   },
   use: {

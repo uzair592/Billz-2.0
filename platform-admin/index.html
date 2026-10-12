@@ -1,91 +1,301 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Billz — Platform administration</title>
-  <link rel="stylesheet" href="/platform-admin/styles.css" />
-  <script src="/platform-admin/app.js" defer></script>
-</head>
-<body>
-  <div id="toasts" aria-live="polite" aria-atomic="false"></div>
-  <main id="login-view" class="login-card">
-    <div class="brand">B<span>Billz</span></div>
-    <p class="eyebrow">PLATFORM ADMINISTRATION</p>
-    <h1>Welcome back</h1><p class="muted">Manage restaurants, access and subscriptions.</p>
-    <div id="login-error" class="error hidden" role="alert"></div>
-    <form id="login-form">
-      <label for="username">Administrator username</label><input id="username" required autocomplete="username" maxlength="64" />
-      <label for="password">Password</label><input id="password" type="password" required minlength="10" maxlength="200" autocomplete="current-password" />
-      <button type="submit" class="btn full">Sign in</button>
-    </form>
-  </main>
-  <div id="portal-view" class="shell hidden">
-    <aside class="sidebar">
-      <div class="brand">B<span>Billz</span></div><p class="muted">Platform administration</p>
-      <nav aria-label="Main navigation">
-        <button data-view="dashboard" class="nav-item selected">Overview</button>
-        <button data-view="restaurants" class="nav-item">Restaurants</button>
-        <button data-view="audits" class="nav-item">Audit log</button>
-      </nav>
-      <div class="sidebar-footer"><span id="admin-display-name"></span><button id="logout-btn" class="btn secondary">Sign out</button></div>
-    </aside>
-    <main class="workspace">
-      <header class="page-header"><div><p class="eyebrow">BILLZ CONTROL CENTRE</p><h1 id="page-title">Overview</h1></div><span class="badge good">Super admin</span></header>
-      <section id="dashboard-page">
-        <div class="stats">
-          <article class="stat"><span>Total restaurants</span><strong id="stat-total">—</strong></article>
-          <article class="stat"><span>Active restaurants</span><strong id="stat-active">—</strong></article>
-          <article class="stat"><span>Suspended</span><strong id="stat-suspended">—</strong></article>
-          <article class="stat"><span>Pending payments</span><strong id="stat-pending">—</strong></article>
-          <article class="stat"><span>Total stored files</span><strong id="stat-storage">—</strong></article>
-        </div>
-        <article class="card"><h2>Restaurant operations</h2><p class="muted">Review access, record manual payments and help restaurant users recover their accounts.</p><button id="dashboard-restaurants" class="btn">View restaurants</button></article>
-      </section>
-      <section id="restaurants-page" class="hidden">
-        <article class="card">
-          <div class="section-heading"><div><h2>Restaurants</h2><p class="muted">Search by name or restaurant code.</p></div><button id="open-create-modal" class="btn">+ Create restaurant</button></div>
-          <div class="filters"><label class="grow" for="search-input">Search<input id="search-input" type="search" placeholder="Name or code" maxlength="200" /></label><label for="status-filter">Status<select id="status-filter"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="deactivated">Deactivated</option></select></label></div>
-          <div class="table-wrap"><table><thead><tr><th>Code</th><th>Restaurant</th><th>Access</th><th>Subscription</th><th>File storage</th><th>Action</th></tr></thead><tbody id="restaurants-tbody"></tbody></table></div>
-          <div class="pager"><span id="restaurant-page-info"></span><div><button id="restaurant-prev" class="btn secondary">Previous</button><button id="restaurant-next" class="btn secondary">Next</button></div></div>
-        </article>
-      </section>
-      <section id="detail-view" class="hidden">
-        <button id="close-detail-btn" class="btn secondary">← Restaurants</button>
-        <div class="section-heading"><h2 id="detail-name"></h2><button id="edit-restaurant-btn" class="btn secondary">Edit restaurant</button></div>
-        <div id="detail-content"></div>
-      </section>
-      <section id="audits-page" class="hidden"><article class="card">
-        <h2>Audit log</h2><p class="muted">Read-only history of platform and restaurant actions.</p>
-        <div class="filters"><label class="grow" for="audit-search">Action<input id="audit-search" placeholder="e.g. user.password_reset" maxlength="200" /></label><button id="refresh-audits" class="btn secondary">Refresh</button></div>
-        <div class="table-wrap"><table><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Restaurant / resource</th><th>Details</th></tr></thead><tbody id="audits-tbody"></tbody></table></div>
-        <div class="pager"><span id="audit-page-info"></span><div><button id="audit-prev" class="btn secondary">Previous</button><button id="audit-next" class="btn secondary">Next</button></div></div>
-      </article></section>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Billz — Platform administration</title>
+    <link rel="stylesheet" href="/platform-admin/styles.css" />
+    <script src="/platform-admin/app.js" defer></script>
+  </head>
+  <body>
+    <div id="toasts" aria-live="polite" aria-atomic="false"></div>
+    <main id="login-view" class="login-card">
+      <div class="brand">B<span>Billz</span></div>
+      <p class="eyebrow">PLATFORM ADMINISTRATION</p>
+      <h1>Welcome back</h1>
+      <p class="muted">Manage restaurants, access and subscriptions.</p>
+      <div id="login-error" class="error hidden" role="alert"></div>
+      <form id="login-form">
+        <label for="username">Administrator username</label
+        ><input id="username" required autocomplete="username" maxlength="64" />
+        <label for="password">Password</label
+        ><input
+          id="password"
+          type="password"
+          required
+          minlength="10"
+          maxlength="200"
+          autocomplete="current-password"
+        />
+        <button type="submit" class="btn full">Sign in</button>
+      </form>
     </main>
-  </div>
-  <dialog id="create-modal"><form id="create-restaurant-form">
-    <h2>Create restaurant</h2><p class="muted">Create an owner account with a 14-day trial.</p><div id="create-error" class="error hidden" role="alert"></div>
-    <label for="create-name">Restaurant name</label><input id="create-name" required maxlength="160" />
-    <label for="create-code">Restaurant code</label><input id="create-code" required minlength="2" maxlength="64" />
-    <label for="create-owner-user">Owner username</label><input id="create-owner-user" required minlength="2" maxlength="64" autocomplete="off" />
-    <label for="create-owner-pass">Owner password (10–200 characters)</label><input id="create-owner-pass" type="password" required minlength="10" maxlength="200" autocomplete="new-password" />
-    <label for="create-plan">Plan code</label><input id="create-plan" value="GROWTH" required maxlength="64" />
-    <div class="dialog-actions"><button type="button" id="cancel-create-btn" class="btn secondary">Cancel</button><button type="submit" class="btn">Create restaurant</button></div>
-  </form></dialog>
-  <dialog id="edit-modal"><form id="edit-restaurant-form"><h2>Edit restaurant</h2>
-    <label for="edit-name">Name</label><input id="edit-name" required maxlength="160" />
-    <label for="edit-phone">Contact phone</label><input id="edit-phone" maxlength="40" />
-    <label for="edit-email">Contact email</label><input id="edit-email" type="email" maxlength="320" />
-    <label for="edit-address">Address</label><textarea id="edit-address" rows="3" maxlength="500"></textarea>
-    <div class="dialog-actions"><button type="button" data-close="edit-modal" class="btn secondary">Cancel</button><button type="submit" class="btn">Save changes</button></div>
-  </form></dialog>
-  <dialog id="reset-modal"><form id="reset-password-form"><h2>Reset user password</h2><p id="reset-user-label" class="muted"></p>
-    <label class="check"><input id="reset-generate" type="checkbox" checked /> Generate a strong temporary password</label>
-    <label for="reset-new-password">New password (10–200 characters)</label><input id="reset-new-password" type="password" minlength="10" maxlength="200" autocomplete="new-password" disabled />
-    <p class="muted">All of this user's sessions will be revoked.</p>
-    <div class="dialog-actions"><button type="button" data-close="reset-modal" class="btn secondary">Cancel</button><button type="submit" class="btn danger">Reset password</button></div>
-  </form></dialog>
-  <dialog id="confirm-dialog"><h2 id="confirm-title">Confirm action</h2><p id="confirm-message"></p><div class="dialog-actions"><button id="confirm-cancel" class="btn secondary">Cancel</button><button id="confirm-accept" class="btn danger">Confirm</button></div></dialog>
-  <dialog id="temporary-password-modal"><h2>Temporary password</h2><p class="muted">Shown once. Share it securely and ask the user to change it after signing in.</p><label for="temporary-password">Generated password</label><input id="temporary-password" readonly autocomplete="off" spellcheck="false" /><div class="dialog-actions"><button id="copy-temporary-password" class="btn">Copy password</button><button data-close="temporary-password-modal" class="btn secondary">Done</button></div></dialog>
-</body>
+    <div id="portal-view" class="shell hidden">
+      <aside class="sidebar">
+        <div class="brand">B<span>Billz</span></div>
+        <p class="muted">Platform administration</p>
+        <nav aria-label="Main navigation">
+          <button data-view="dashboard" class="nav-item selected">
+            Overview
+          </button>
+          <button data-view="restaurants" class="nav-item">Restaurants</button>
+          <button data-view="audits" class="nav-item">Audit log</button>
+        </nav>
+        <div class="sidebar-footer">
+          <span id="admin-display-name"></span
+          ><button id="logout-btn" class="btn secondary">Sign out</button>
+        </div>
+      </aside>
+      <main class="workspace">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">BILLZ CONTROL CENTRE</p>
+            <h1 id="page-title">Overview</h1>
+          </div>
+          <span class="badge good">Super admin</span>
+        </header>
+        <section id="dashboard-page">
+          <div class="stats">
+            <article class="stat">
+              <span>Total restaurants</span><strong id="stat-total">—</strong>
+            </article>
+            <article class="stat">
+              <span>Active restaurants</span><strong id="stat-active">—</strong>
+            </article>
+            <article class="stat">
+              <span>Suspended</span><strong id="stat-suspended">—</strong>
+            </article>
+            <article class="stat">
+              <span>Pending payments</span><strong id="stat-pending">—</strong>
+            </article>
+            <article class="stat">
+              <span>Total stored files</span
+              ><strong id="stat-storage">—</strong>
+            </article>
+          </div>
+          <article class="card">
+            <h2>Restaurant operations</h2>
+            <p class="muted">
+              Review access, record manual payments and help restaurant users
+              recover their accounts.
+            </p>
+            <button id="dashboard-restaurants" class="btn">
+              View restaurants
+            </button>
+          </article>
+        </section>
+        <section id="restaurants-page" class="hidden">
+          <article class="card">
+            <div class="section-heading">
+              <div>
+                <h2>Restaurants</h2>
+                <p class="muted">Search by name or restaurant code.</p>
+              </div>
+              <button id="open-create-modal" class="btn">
+                + Create restaurant
+              </button>
+            </div>
+            <div class="filters">
+              <label class="grow" for="search-input"
+                >Search<input
+                  id="search-input"
+                  type="search"
+                  placeholder="Name or code"
+                  maxlength="200" /></label
+              ><label for="status-filter"
+                >Status<select id="status-filter">
+                  <option value="all">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="deactivated">Deactivated</option>
+                </select></label
+              >
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Restaurant</th>
+                    <th>Access</th>
+                    <th>Subscription</th>
+                    <th>File storage</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="restaurants-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="restaurant-page-info"></span>
+              <div>
+                <button id="restaurant-prev" class="btn secondary">
+                  Previous</button
+                ><button id="restaurant-next" class="btn secondary">
+                  Next
+                </button>
+              </div>
+            </div>
+          </article>
+        </section>
+        <section id="detail-view" class="hidden">
+          <button id="close-detail-btn" class="btn secondary">
+            ← Restaurants
+          </button>
+          <div class="section-heading">
+            <h2 id="detail-name"></h2>
+            <button id="edit-restaurant-btn" class="btn secondary">
+              Edit restaurant
+            </button>
+          </div>
+          <div id="detail-content"></div>
+        </section>
+        <section id="audits-page" class="hidden">
+          <article class="card">
+            <h2>Audit log</h2>
+            <p class="muted">
+              Read-only history of platform and restaurant actions.
+            </p>
+            <div class="filters">
+              <label class="grow" for="audit-search"
+                >Action<input
+                  id="audit-search"
+                  placeholder="e.g. user.password_reset"
+                  maxlength="200" /></label
+              ><button id="refresh-audits" class="btn secondary">
+                Refresh
+              </button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>When</th>
+                    <th>Actor</th>
+                    <th>Action</th>
+                    <th>Restaurant / resource</th>
+                    <th>Details</th>
+                  </tr>
+                </thead>
+                <tbody id="audits-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="audit-page-info"></span>
+              <div>
+                <button id="audit-prev" class="btn secondary">Previous</button
+                ><button id="audit-next" class="btn secondary">Next</button>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+    <dialog id="create-modal">
+      <form id="create-restaurant-form">
+        <h2>Create restaurant</h2>
+        <p class="muted">Create an owner account with a 14-day trial.</p>
+        <div id="create-error" class="error hidden" role="alert"></div>
+        <label for="create-name">Restaurant name</label
+        ><input id="create-name" required maxlength="160" />
+        <label for="create-code">Restaurant code</label
+        ><input id="create-code" required minlength="2" maxlength="64" />
+        <label for="create-owner-user">Owner username</label
+        ><input
+          id="create-owner-user"
+          required
+          minlength="2"
+          maxlength="64"
+          autocomplete="off"
+        />
+        <label for="create-owner-pass">Owner password (10–200 characters)</label
+        ><input
+          id="create-owner-pass"
+          type="password"
+          required
+          minlength="10"
+          maxlength="200"
+          autocomplete="new-password"
+        />
+        <label for="create-plan">Plan code</label
+        ><input id="create-plan" value="GROWTH" required maxlength="64" />
+        <div class="dialog-actions">
+          <button type="button" id="cancel-create-btn" class="btn secondary">
+            Cancel</button
+          ><button type="submit" class="btn">Create restaurant</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="edit-modal">
+      <form id="edit-restaurant-form">
+        <h2>Edit restaurant</h2>
+        <label for="edit-name">Name</label
+        ><input id="edit-name" required maxlength="160" />
+        <label for="edit-phone">Contact phone</label
+        ><input id="edit-phone" maxlength="40" />
+        <label for="edit-email">Contact email</label
+        ><input id="edit-email" type="email" maxlength="320" />
+        <label for="edit-address">Address</label
+        ><textarea id="edit-address" rows="3" maxlength="500"></textarea>
+        <div class="dialog-actions">
+          <button type="button" data-close="edit-modal" class="btn secondary">
+            Cancel</button
+          ><button type="submit" class="btn">Save changes</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="reset-modal">
+      <form id="reset-password-form">
+        <h2>Reset user password</h2>
+        <p id="reset-user-label" class="muted"></p>
+        <label class="check"
+          ><input id="reset-generate" type="checkbox" checked /> Generate a
+          strong temporary password</label
+        >
+        <label for="reset-new-password">New password (10–200 characters)</label
+        ><input
+          id="reset-new-password"
+          type="password"
+          minlength="10"
+          maxlength="200"
+          autocomplete="new-password"
+          disabled
+        />
+        <p class="muted">All of this user's sessions will be revoked.</p>
+        <div class="dialog-actions">
+          <button type="button" data-close="reset-modal" class="btn secondary">
+            Cancel</button
+          ><button type="submit" class="btn danger">Reset password</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="confirm-dialog">
+      <h2 id="confirm-title">Confirm action</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-actions">
+        <button id="confirm-cancel" class="btn secondary">Cancel</button
+        ><button id="confirm-accept" class="btn danger">Confirm</button>
+      </div>
+    </dialog>
+    <dialog id="temporary-password-modal">
+      <h2>Temporary password</h2>
+      <p class="muted">
+        Shown once. Share it securely and ask the user to change it after
+        signing in.
+      </p>
+      <label for="temporary-password">Generated password</label
+      ><input
+        id="temporary-password"
+        readonly
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <div class="dialog-actions">
+        <button id="copy-temporary-password" class="btn">Copy password</button
+        ><button data-close="temporary-password-modal" class="btn secondary">
+          Done
+        </button>
+      </div>
+    </dialog>
+  </body>
 </html>

@@ -207,7 +207,7 @@ export function createPostgresAuthRepository(pool) {
         await client.query("UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1", [userId, passwordHash, now]);
         await client.query("UPDATE sessions SET revoked_at = $3 WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL", [userId, sessionTokenHash, now]);
         await client.query(`INSERT INTO audit_logs(restaurant_id, actor_user_id, actor_type, action, resource_type, resource_id, metadata)
-          VALUES($1,$2,'user','user.password_changed','user',$2::text,$3)`, [user.restaurant_id, userId, JSON.stringify({ otherSessionsRevoked: true })]);
+          VALUES($1,$2,'user','user.password_changed','user',$3,$4)`, [user.restaurant_id, userId, userId, JSON.stringify({ otherSessionsRevoked: true })]);
         await client.query("COMMIT");
       } catch (error) {
         await rollback(client, error);

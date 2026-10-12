@@ -453,8 +453,9 @@ export async function buildHttpApp({
 
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
-  const rateLimitMax = (nodeEnv === "test" || process.env.DISABLE_RATE_LIMIT === "true") ? 100_000 : 120;
-  await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute" });
+  const rateLimitMax = nodeEnv === "test" ? 100_000 : 120;
+  await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute",
+    allowList: nodeEnv === "test" && process.env.DISABLE_RATE_LIMIT === "true" ? () => true : undefined });
 
   // Security headers that do not depend on helmet's CSP. The legacy POS
   // uses inline event handlers and inline scripts, so a restrictive CSP

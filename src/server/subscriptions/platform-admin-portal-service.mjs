@@ -58,7 +58,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           AND EXISTS(SELECT 1 FROM restaurant_memberships WHERE user_id = $1 AND restaurant_id = $2 AND status <> 'removed') FOR UPDATE`, [userId, restaurantId])).rows[0];
         if (!user) throw Object.assign(new Error("Restaurant user not found."), { code: "USER_NOT_FOUND", statusCode: 404 });
         await client.query("UPDATE users SET status = $2 WHERE id = $1 AND restaurant_id = $3", [userId, status, restaurantId]);
-        await client.query("UPDATE restaurant_memberships SET status = $3 WHERE user_id = $1 AND restaurant_id = $2", [userId, restaurantId, status === "active" ? "active" : "suspended"]);
+        await client.query("UPDATE restaurant_memberships SET status = $3, joined_at = CASE WHEN $3 = 'active' THEN COALESCE(joined_at, $4) ELSE joined_at END WHERE user_id = $1 AND restaurant_id = $2", [userId, restaurantId, status === "active" ? "active" : "suspended", clock()]);
         if (status === "disabled") await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, clock()]);
         await recordAudit({ client, adminId, restaurantId, action: status === "active" ? "user.enabled" : "user.disabled", resourceType: "user", resourceId: userId,
           metadata: { userId, status, sessionsRevoked: status === "disabled" } });
