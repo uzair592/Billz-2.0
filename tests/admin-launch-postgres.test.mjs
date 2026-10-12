@@ -12,7 +12,7 @@ import { createServer } from "../src/server/main.mjs";
 import { createPlatformAdminService } from "../src/server/auth/platform-admin-service.mjs";
 import { createPlatformAdminRepository } from "../src/server/auth/platform-admin-repository.mjs";
 import { createPostgresAuthRepository } from "../src/server/auth/postgres-auth-repository.mjs";
-import { hashOpaqueToken } from "../src/server/auth/tokens.mjs";
+import { createTokenPair } from "../src/server/auth/tokens.mjs";
 import { seedPlan } from "./helpers/postgres.mjs";
 
 test("test provisioning repairs stale role credentials and security flags", async (t) => {
@@ -525,7 +525,7 @@ test("password management through actual HTTP composition and PostgreSQL", async
     createPostgresAuthRepository(control).createSession({
       userId: restaurant.owner.id,
       expectedPasswordHash: beforeHash,
-      tokenHash: hashOpaqueToken("stale-login-operation"),
+      tokenHash: createTokenPair().tokenHash,
       ipAddress: "198.51.100.100",
       userAgent: "test",
       expiresAt: new Date(Date.now() + 60000),
