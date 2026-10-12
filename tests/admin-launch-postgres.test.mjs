@@ -98,6 +98,8 @@ test("durable login throttling with real control and tenant roles", async (t) =>
 
 test("password management through actual HTTP composition and PostgreSQL", async (t) => {
   await provisionIntegrationDatabase();
+  const fixtureAdmin = await connectAdmin();
+  t.after(() => fixtureAdmin.end());
   const control = await createControlPool();
   const appPool = await createAppPool();
   await seedPlan(control, { code: "GROWTH", provider: "manual" });
@@ -206,7 +208,7 @@ test("password management through actual HTTP composition and PostgreSQL", async
       404,
     );
   // If audit persistence fails, credentials and revocation must roll back too.
-  await control.query(`CREATE FUNCTION fail_password_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+  await fixtureAdmin.query(`CREATE FUNCTION fail_password_audit() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN IF NEW.action IN ('user.password_reset','user.password_changed') THEN RAISE EXCEPTION 'injected password audit failure'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER fail_password_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_password_audit();`);
   try {
@@ -227,7 +229,7 @@ test("password management through actual HTTP composition and PostgreSQL", async
     );
     assert.equal((await login("OriginalPassword123!")).statusCode, 200);
   } finally {
-    await control.query(
+    await fixtureAdmin.query(
       "DROP TRIGGER fail_password_audit ON audit_logs; DROP FUNCTION fail_password_audit();",
     );
   }
