@@ -431,6 +431,26 @@ export async function buildHttpApp({
       request.headers["x-request-id"]
         ?? randomUUID(),
   });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof z.ZodError) {
+      return reply.code(400).send({
+        error: error.issues.find(issue => issue.path.some(part => /password/i.test(String(part))))?.message ?? "Invalid request.",
+        issues: error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      });
+    }
+    const statusCode = Number(error.statusCode) || 500;
+    if (error.retryAfter) reply.header("Retry-After", String(error.retryAfter));
+    const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
+    return reply.code(statusCode).send({
+      error: publicMessage,
+      code: error.code,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    });
+  });
+
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
   const rateLimitMax = (nodeEnv === "test" || process.env.DISABLE_RATE_LIMIT === "true") ? 100_000 : 120;
@@ -442,7 +462,7 @@ export async function buildHttpApp({
   // documented.
   app.addHook("onSend", async (_request, reply) => {
     if (new URL(_request.url, "http://internal").pathname === "/platform-admin" || _request.url.startsWith("/platform-admin/")) {
-      reply.header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+      reply.header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
       reply.header("Cache-Control", "no-store");
     }
     reply.header("X-Content-Type-Options", "nosniff");
@@ -1468,25 +1488,7 @@ export async function buildHttpApp({
     }
   }
 
-  app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof z.ZodError) {
-      return reply.code(400).send({
-        error: error.issues.find(issue => issue.path.some(part => /password/i.test(String(part))))?.message ?? "Invalid request.",
-        issues: error.issues.map((issue) => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      });
-    }
-    const statusCode = Number(error.statusCode) || 500;
-    if (error.retryAfter) reply.header("Retry-After", String(error.retryAfter));
-    const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
-    return reply.code(statusCode).send({
-      error: publicMessage,
-      code: error.code,
-      ...(error.details === undefined ? {} : { details: error.details }),
-    });
-  });
+
 
   return app;
 }

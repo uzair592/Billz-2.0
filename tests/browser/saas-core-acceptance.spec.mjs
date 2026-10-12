@@ -61,6 +61,8 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
         await page.screenshot({ path: `tests/browser/screenshots/platform-admin-dashboard-${vp.name}.png` });
       }
 
+      await page.click('[data-view="restaurants"]');
+
       // 2. Create Restaurant via Platform Admin Portal UI
       await page.click("#open-create-modal");
       await page.waitForSelector("#create-modal:not(.hidden)");
@@ -79,6 +81,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       await page.waitForSelector("#create-modal", { state: "hidden" });
 
       // 3. View created restaurant details, record & approve manual payment
+      await page.click('[data-view="restaurants"]');
       await page.fill("#search-input", restCode);
       await expect(page.locator("#restaurants-tbody")).toContainText(restCode);
       await page.click(`.btn-manage[data-id]`);
@@ -89,6 +92,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
 
       await page.waitForSelector(".btn-approve");
       await page.click(".btn-approve");
+      await page.click("#confirm-accept");
 
       // Verify payment status updated to approved
       await expect(page.locator("#detail-content")).toContainText("approved");
@@ -175,12 +179,14 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       // 8. Platform Admin Suspends Restaurant
       await page.goto("http://127.0.0.1:3000/platform-admin/");
       await page.waitForSelector("#portal-view:not(.hidden)");
+      await page.click('[data-view="restaurants"]');
       await page.fill("#search-input", restCode);
       await page.waitForSelector(`.btn-manage[data-id]`);
       await page.click(`.btn-manage[data-id]`);
 
       await page.waitForSelector("#suspend-btn");
       await page.click("#suspend-btn");
+      await page.click("#confirm-accept");
       await page.waitForSelector("#restore-btn");
 
       // 9. Cashier receives suspension response on POS API
@@ -201,6 +207,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
 
       // 10. Platform Admin Restores Restaurant
       await page.click("#restore-btn");
+      await page.click("#confirm-accept");
       await page.waitForSelector("#suspend-btn");
 
       // 11. Cashier regains access

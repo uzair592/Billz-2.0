@@ -44,6 +44,28 @@ const resetPasswordSchema = z.union([
   z.object({ generateTemporary: z.literal(true) }).strict(),
 ]);
 
+const restaurantParams = z.object({ id: z.uuid() });
+const editRestaurantSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  contactEmail: z.email().max(320).nullable().optional(),
+}).strict().refine(value => Object.keys(value).length > 0, "At least one field is required.");
+const userStatusSchema = z.object({ status: z.enum(["active", "disabled"]) }).strict();
+const paginationSchema = z.object({
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const restaurantListSchema = paginationSchema.extend({
+  search: z.string().trim().max(200).default(""),
+  status: z.enum(["all", "active", "suspended", "deactivated"]).default("all"),
+  includeTotal: z.enum(["true", "false"]).default("false"),
+});
+const auditListSchema = paginationSchema.extend({
+  restaurantId: z.uuid().optional(),
+  action: z.string().trim().max(200).default(""),
+});
+
 export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true, loginThrottle = null }) {
   // Authentication Guard Helper for Platform Admin Routes
   async function requirePlatformAdmin(request, reply) {
@@ -57,7 +79,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
 
   // Guard: Reject non-admins trying to access /platform-admin
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url.startsWith("/platform-admin/api/") && !request.url.startsWith("/platform-admin/api/auth/login")) {
+    if (request.url.startsWith("/platform-admin/api/") && request.url.split("?")[0] !== "/platform-admin/api/auth/login") {
       await requirePlatformAdmin(request, reply);
     }
   });
@@ -122,15 +144,29 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
     });
 
   app.get("/platform-admin/api/restaurants", async (request) => {
-    const query = request.query || {};
-    const statusVal = (query.status && query.status.trim() !== "" && query.status !== "all") ? query.status.trim() : null;
+    const query = restaurantListSchema.parse(request.query || {});
     return platformAdminPortalService.listRestaurants({
-      search: query.search || null,
-      status: statusVal,
-      limit: query.limit ? Number(query.limit) : 50,
-      page: query.page ? Number(query.page) : 1,
+      search: query.search,
+      status: query.status === "all" ? null : query.status,
+      limit: query.limit,
+      page: query.page,
+      includeTotal: query.includeTotal === "true",
     });
   });
+
+  app.patch("/platform-admin/api/restaurants/:id", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async request => {
+    const { id } = restaurantParams.parse(request.params);
+    const input = editRestaurantSchema.parse(request.body);
+    return platformAdminPortalService.editRestaurant({ adminId: request.adminSession.admin.id, restaurantId: id, ...input });
+  });
+
+  app.post("/platform-admin/api/restaurants/:id/users/:userId/status", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async request => {
+    const { id, userId } = restaurantUserParams.parse(request.params);
+    const input = userStatusSchema.parse(request.body);
+    return platformAdminPortalService.setUserStatus({ adminId: request.adminSession.admin.id, restaurantId: id, userId, ...input });
+  });
+
+  app.get("/platform-admin/api/audit-logs", async request => platformAdminPortalService.listAuditLogs(auditListSchema.parse(request.query || {})));
 
   app.post("/platform-admin/api/restaurants", async (request, reply) => {
     const input = createRestaurantSchema.parse(request.body);
@@ -142,7 +178,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.get("/platform-admin/api/restaurants/:id", async (request, reply) => {
-    const { id } = request.params;
+    const { id } = restaurantParams.parse(request.params);
     const details = await platformAdminPortalService.getRestaurantDetails(id);
     if (!details) return reply.code(404).send({ error: "Restaurant not found." });
     return details;

@@ -1,6 +1,13 @@
 import { randomUUID, randomBytes } from "node:crypto";
 import { hashPassword } from "../auth/passwords.mjs";
 
+export function publicAuditMetadata(value) {
+  if (Array.isArray(value)) return value.map(publicAuditMetadata);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !/password|secret|token|credential/i.test(key))
+    .map(([key, item]) => [key, publicAuditMetadata(item)]));
+}
+
 export function createPlatformAdminPortalService({ pool, passwordPepper, clock = () => new Date() }) {
   if (!pool || typeof pool.connect !== "function") {
     throw new TypeError("A PostgreSQL connection pool is required.");
@@ -14,7 +21,65 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
     );
   }
 
+  async function transaction(work) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
   return Object.freeze({
+    async editRestaurant({ adminId, restaurantId, name, phone, address, contactEmail }) {
+      return transaction(async client => {
+        const existing = (await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId])).rows[0];
+        if (!existing) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
+        const changes = {};
+        if (name !== undefined) changes.name = name;
+        if (phone !== undefined) changes.phone = phone;
+        if (address !== undefined) changes.address = address;
+        if (contactEmail !== undefined) changes.contact_email = contactEmail;
+        const keys = Object.keys(changes);
+        await client.query(`UPDATE restaurants SET ${keys.map((key, index) => `${key} = $${index + 2}`).join(", ")} WHERE id = $1`,
+          [restaurantId, ...keys.map(key => changes[key])]);
+        await recordAudit({ client, adminId, restaurantId, action: "restaurant.updated", resourceType: "restaurant", resourceId: restaurantId, metadata: { changedFields: keys } });
+        return { updated: true };
+      });
+    },
+
+    async setUserStatus({ adminId, restaurantId, userId, status }) {
+      return transaction(async client => {
+        const user = (await client.query(`SELECT id FROM users WHERE id = $1 AND restaurant_id = $2
+          AND EXISTS(SELECT 1 FROM restaurant_memberships WHERE user_id = $1 AND restaurant_id = $2 AND status <> 'removed') FOR UPDATE`, [userId, restaurantId])).rows[0];
+        if (!user) throw Object.assign(new Error("Restaurant user not found."), { code: "USER_NOT_FOUND", statusCode: 404 });
+        await client.query("UPDATE users SET status = $2 WHERE id = $1 AND restaurant_id = $3", [userId, status, restaurantId]);
+        await client.query("UPDATE restaurant_memberships SET status = $3 WHERE user_id = $1 AND restaurant_id = $2", [userId, restaurantId, status === "active" ? "active" : "suspended"]);
+        if (status === "disabled") await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, clock()]);
+        await recordAudit({ client, adminId, restaurantId, action: status === "active" ? "user.enabled" : "user.disabled", resourceType: "user", resourceId: userId,
+          metadata: { userId, status, sessionsRevoked: status === "disabled" } });
+        return { userId, status };
+      });
+    },
+
+    async listAuditLogs({ restaurantId = null, action = "", page = 1, limit = 50 } = {}) {
+      const values = [restaurantId, action ? `%${action}%` : null];
+      const where = "($1::uuid IS NULL OR a.restaurant_id = $1) AND ($2::text IS NULL OR a.action ILIKE $2)";
+      const total = await pool.query(`SELECT count(*) AS total FROM audit_logs a WHERE ${where}`, values);
+      const rows = (await pool.query(`SELECT a.id, a.restaurant_id, a.actor_admin_id, a.actor_user_id, a.actor_type, a.action,
+        a.resource_type, a.resource_id, a.metadata, a.created_at, pa.username AS admin_username, u.display_name AS user_name
+        FROM audit_logs a LEFT JOIN platform_administrators pa ON pa.id = a.actor_admin_id
+        LEFT JOIN users u ON u.id = a.actor_user_id WHERE ${where}
+        ORDER BY a.created_at DESC, a.id DESC LIMIT $3 OFFSET $4`, [...values, limit, (page - 1) * limit])).rows;
+      return { audits: rows.map(row => ({ id: row.id, restaurantId: row.restaurant_id, actorAdminId: row.actor_admin_id,
+        actorUserId: row.actor_user_id, actorType: row.actor_type, actorName: row.admin_username ?? row.user_name ?? row.actor_type,
+        action: row.action, resourceType: row.resource_type, resourceId: row.resource_id,
+        metadata: publicAuditMetadata(row.metadata), createdAt: row.created_at })), totalCount: Number(total.rows[0].total), page, limit };
+    },
     async resetUserPassword({ adminId, restaurantId, userId, newPassword, generateTemporary = false }) {
       const password = generateTemporary ? randomBytes(24).toString("base64url") : newPassword;
       const passwordHash = await hashPassword(password, passwordPepper);
@@ -69,7 +134,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       }
     },
 
-    async listRestaurants({ search = "", status = null, limit = 50, page = 1 } = {}) {
+    async listRestaurants({ search = "", status = null, limit = 50, page = 1, includeTotal = false } = {}) {
       const client = await pool.connect();
       try {
         const offset = (page - 1) * limit;
@@ -88,12 +153,12 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
              LEFT JOIN tenant_storage_allowances sa ON sa.restaurant_id = r.id
             WHERE ($1::text IS NULL OR lower(r.name) LIKE $1 OR lower(r.code) LIKE $1 OR lower(r.slug) LIKE $1)
               AND ($2::text IS NULL OR r.status = $2)
-            ORDER BY r.created_at DESC
+            ORDER BY r.created_at DESC, r.id DESC
             LIMIT $3 OFFSET $4`,
           [normSearch, status, limit, offset],
         );
 
-        return result.rows.map((row) => ({
+        const restaurants = result.rows.map((row) => ({
           id: row.id,
           name: row.name,
           code: row.code,
@@ -108,6 +173,11 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           usedStorageBytes: String(row.used_storage_bytes),
           createdAt: row.created_at,
         }));
+        if (!includeTotal) return restaurants;
+        const count = await client.query(`SELECT count(*) AS total FROM restaurants r
+          WHERE ($1::text IS NULL OR lower(r.name) LIKE $1 OR lower(r.code) LIKE $1 OR lower(r.slug) LIKE $1)
+          AND ($2::text IS NULL OR r.status = $2)`, [normSearch, status]);
+        return { restaurants, totalCount: Number(count.rows[0].total), page, limit };
       } finally {
         client.release();
       }
@@ -246,7 +316,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       const client = await pool.connect();
       try {
         const restResult = await client.query(
-          `SELECT r.id, r.name, r.code, r.slug, r.status, r.created_at,
+          `SELECT r.id, r.name, r.code, r.slug, r.status, r.phone, r.address, r.contact_email, r.created_at,
                   s.id AS subscription_id, s.status AS subscription_status, s.current_period_start, s.current_period_end,
                   p.name AS plan_name, p.code AS plan_code, p.id AS plan_id,
                   COALESCE(sa.max_storage_bytes, 5368709120) AS max_storage_bytes,
@@ -266,7 +336,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           `SELECT u.id, u.username, u.display_name, u.status, m.role
              FROM users u
              JOIN restaurant_memberships m ON m.user_id = u.id AND m.restaurant_id = u.restaurant_id
-            WHERE u.restaurant_id = $1`,
+            WHERE u.restaurant_id = $1 ORDER BY lower(u.username), u.id`,
           [restaurantId],
         );
 
@@ -298,6 +368,9 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
             code: restaurant.code,
             slug: restaurant.slug,
             status: restaurant.status,
+            phone: restaurant.phone,
+            address: restaurant.address,
+            contactEmail: restaurant.contact_email,
             createdAt: restaurant.created_at,
           },
           subscription: {
@@ -341,7 +414,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
             actorType: a.actor_type,
             action: a.action,
             resourceType: a.resource_type,
-            metadata: a.metadata,
+            metadata: publicAuditMetadata(a.metadata),
             createdAt: a.created_at,
           })),
         };

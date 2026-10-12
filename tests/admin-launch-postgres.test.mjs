@@ -100,6 +100,41 @@ test("password management through actual HTTP composition and PostgreSQL",async 
   assert.ok(audits.filter(row=>row.action==="user.password_reset").every(row=>row.actor_admin_id===admin.admin.id && row.restaurant_id===restaurant.id));
   assert.equal(audits.find(row=>row.action==="user.password_changed").actor_user_id,restaurant.owner.id);
   const serialized=JSON.stringify(audits);assert.ok(!serialized.includes(temporary) && !serialized.includes("Password123") && !serialized.includes("$argon2"));
+
+  const restPath=`/platform-admin/api/restaurants/${restaurant.id}`;
+  assert.equal((await send("PATCH",restPath,{name:"Updated cafe"})).statusCode,401);
+  for(const body of [{},{name:""},{contactEmail:"invalid"},{code:"forbidden"}])
+    assert.equal((await send("PATCH",restPath,body,adminCookie)).statusCode,400);
+  assert.equal((await send("PATCH",restPath.replace(restaurant.id,randomUUID()),{name:"Cafe"},adminCookie)).statusCode,404);
+  const edited=await send("PATCH",restPath,{name:'Updated <img src=x onerror=alert(1)>',phone:"03001234567",contactEmail:"support@example.com",address:"Peshawar"},adminCookie);
+  assert.equal(edited.statusCode,200,edited.body);
+  const information=(await send("GET",restPath,undefined,adminCookie)).json().restaurant;
+  assert.equal(information.contactEmail,"support@example.com");assert.equal(information.phone,"03001234567");assert.equal(information.address,"Peshawar");
+  const activeLogin=await login(temporary);assert.equal(activeLogin.statusCode,200);
+  const statusPath=`${restPath}/users/${restaurant.owner.id}/status`;
+  assert.equal((await send("POST",statusPath,{status:"disabled"})).statusCode,401);
+  assert.equal((await send("POST",statusPath,{status:"deleted"},adminCookie)).statusCode,400);
+  for(const missing of [statusPath.replace(restaurant.id,randomUUID()),statusPath.replace(restaurant.owner.id,other.owner.id)])
+    assert.equal((await send("POST",missing,{status:"disabled"},adminCookie)).statusCode,404);
+  assert.equal((await send("POST",statusPath,{status:"disabled"},adminCookie)).statusCode,200);
+  assert.equal((await send("GET","/api/auth/me",undefined,cookie(activeLogin))).statusCode,401);
+  assert.equal((await login(temporary)).statusCode,403);
+  assert.equal((await send("POST",statusPath,{status:"active"},adminCookie)).statusCode,200);
+  assert.equal((await send("GET","/api/auth/me",undefined,cookie(activeLogin))).statusCode,401);
+  assert.equal((await login(temporary)).statusCode,200);
+  const actions=(await control.query("SELECT action, actor_admin_id FROM audit_logs WHERE restaurant_id=$1",[restaurant.id])).rows;
+  for(const action of ["restaurant.updated","user.disabled","user.enabled"]) assert.ok(actions.some(row=>row.action===action && row.actor_admin_id===admin.admin.id));
+  assert.equal((await send("GET","/platform-admin/api/audit-logs")).statusCode,401);
+  for(const query of ["page=0","limit=101","restaurantId=invalid"])
+    assert.equal((await send("GET",`/platform-admin/api/audit-logs?${query}`,undefined,adminCookie)).statusCode,400);
+  const auditPage=(await send("GET",`/platform-admin/api/audit-logs?restaurantId=${restaurant.id}&limit=1`,undefined,adminCookie)).json();
+  assert.equal(auditPage.audits.length,1);assert.ok(auditPage.totalCount>=6);
+  assert.ok(auditPage.audits.every(row=>row.restaurantId===restaurant.id));
+  const nextPage=(await send("GET",`/platform-admin/api/audit-logs?restaurantId=${restaurant.id}&limit=1&page=2`,undefined,adminCookie)).json();
+  assert.notEqual(auditPage.audits[0].id,nextPage.audits[0].id);
+  assert.equal((await send("POST","/platform-admin/api/audit-logs",{},adminCookie)).statusCode,404);
+  const list=(await send("GET","/platform-admin/api/restaurants?includeTotal=true&limit=1",undefined,adminCookie)).json();
+  assert.equal(list.restaurants.length,1);assert.equal(list.totalCount,2);
   // A login that verified the old hash before a reset cannot mint a new session afterward.
   await assert.rejects(createPostgresAuthRepository(control).createSession({userId:restaurant.owner.id,expectedPasswordHash:beforeHash,
     tokenHash:hashOpaqueToken("stale-login-operation"),ipAddress:"198.51.100.100",userAgent:"test",expiresAt:new Date(Date.now()+60000)}),error=>error.code==="INVALID_CREDENTIALS");

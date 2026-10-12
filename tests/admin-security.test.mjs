@@ -38,15 +38,12 @@ test("admin CSP blocks inline scripts without changing legacy POS CSP", async t 
 
 test("actual admin restaurant renderer treats stored markup as text", async () => {
   const source = await readFile(new URL("../platform-admin/app.js",import.meta.url),"utf8");
-  const rows=[];const canary='<img src=x onerror=alert(1)>';
-  const tbody={innerHTML:"",appendChild:row=>rows.push(row.innerHTML)};
-  const context=vm.createContext({apiCall:async()=>[{code:canary,name:canary,status:canary,subscriptionStatus:canary,id:canary,usedStorageBytes:0}],
-    document:{getElementById:id=>id==="restaurants-tbody"?tbody:{value:""},createElement:()=>({}),querySelectorAll:()=>[]}});
+  const canary='<img src=x onerror=alert(1)>';
+  const context=vm.createContext({record:{code:canary,name:canary,status:canary,subscriptionStatus:canary,id:canary,planName:canary,usedStorageBytes:0,maxStorageBytes:100}});
   const helper=source.slice(0,source.indexOf("async function apiCall"));
-  const renderer=source.slice(source.indexOf("let searchReqId"),source.indexOf("document.getElementById('search-input').addEventListener"));
-  await vm.runInContext(helper+renderer+"\nloadRestaurants();",context);
-  assert.equal(rows.length,1);
-  assert.ok(!rows[0].includes("<img"));assert.ok(rows[0].includes("&lt;img"));
+  const row=vm.runInContext(helper+"\nrenderRestaurantRow(record);",context);
+  assert.ok(!row.includes("<img"));assert.ok(row.includes("&lt;img"));
+  assert.ok(row.includes("0 B / 100 B"));
 });
 
 test("all password schemas share boundaries and password-layer errors have HTTP status", async t => {

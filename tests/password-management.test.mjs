@@ -25,7 +25,7 @@ test("forgot-password renderer treats a configured contact as text",async()=>{
 test("password reset rejects invalid admin sessions and ambiguous or weak requests",async t=>{
   let authenticated=false;let called=0;
   const app=await buildHttpApp({authService:{authenticate:async()=>null},platformAdminService:{authenticate:async()=>authenticated?{admin:{id:"admin"}}:null},
-    platformAdminPortalService:{resetUserPassword:async()=>{called++;return {reset:true}}},trustedOrigin:"http://localhost:3000",serveClient:false});
+    platformAdminPortalService:{resetUserPassword:async()=>{called++;return {reset:true}}},billingWebhookService:{handle:async()=>({accepted:false})},trustedOrigin:"http://localhost:3000",serveClient:false});
   t.after(()=>app.close());
   const url="/platform-admin/api/restaurants/11111111-1111-4111-8111-111111111111/users/22222222-2222-4222-8222-222222222222/reset-password";
   assert.equal((await app.inject({method:"POST",url,payload:{generateTemporary:true}})).statusCode,403);
