@@ -13609,9 +13609,16 @@
           >
             Sign in
           </button>
+          <button type="button" id="cloud-forgot-password" onclick="showCloudPasswordHelp()" style="margin-top:10px;background:none;border:0;color:#2563eb;cursor:pointer">Forgot password?</button>
+          <p id="cloud-password-help" class="hidden" role="status" style="font-size:13px;line-height:1.5"></p>
         </div>
 
         <div id="cloud-restaurant-panel" class="hidden" style="margin-top: 18px">
+          <details style="margin-bottom:16px"><summary>Change password</summary>
+            <label for="cloud-current-password">Current password</label><input id="cloud-current-password" type="password" autocomplete="current-password" maxlength="200" style="width:100%" />
+            <label for="cloud-new-password">New password (10–200 characters)</label><input id="cloud-new-password" type="password" autocomplete="new-password" minlength="10" maxlength="200" style="width:100%" />
+            <button type="button" id="cloud-change-password-button" onclick="submitCloudPasswordChange()">Change password</button>
+          </details>
           <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-restaurant-select">
             Restaurant
           </label>
@@ -13745,6 +13752,32 @@
           cloudRenderState(null);
           cloudSetStatus(error.message || "Could not reach the cloud service.", "error");
         }
+      }
+
+      async function showCloudPasswordHelp() {
+        const help = document.getElementById("cloud-password-help");
+        help.classList.remove("hidden");
+        let contact = "Contact your restaurant owner or Billz customer support.";
+        try {
+          const response = await fetch("/api/public/config", { credentials: "same-origin" });
+          if (response.ok) contact = (await response.json()).supportContact || contact;
+        } catch {}
+        help.textContent = "Contact customer support to have your password reset. " + contact;
+      }
+
+      async function submitCloudPasswordChange() {
+        const button = document.getElementById("cloud-change-password-button");
+        const current = document.getElementById("cloud-current-password");
+        const next = document.getElementById("cloud-new-password");
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/auth/change-password", { method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: current.value, newPassword: next.value }) });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Password change failed.");
+          cloudSetStatus("Password changed. Other devices have been signed out.");
+        } catch (error) { cloudSetStatus(error.message, true); }
+        finally { current.value = ""; next.value = ""; button.disabled = false; }
       }
 
       async function submitCloudSignIn() {

@@ -175,12 +175,44 @@ export function createPostgresAuthRepository(pool) {
       return mapUser(result.rows[0]);
     },
 
-    async createSession({ userId, tokenHash, ipAddress, userAgent, expiresAt }) {
-      await pool.query(
+    async createSession({ userId, tokenHash, ipAddress, userAgent, expiresAt, expectedPasswordHash }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const row = (await client.query("SELECT password_hash, status FROM users WHERE id = $1 FOR SHARE", [userId])).rows[0];
+        if (!row || row.status !== "active" || row.password_hash !== expectedPasswordHash) {
+          throw Object.assign(new Error("Credentials changed. Please sign in again."), { code: "INVALID_CREDENTIALS", statusCode: 401 });
+        }
+        await client.query(
         `INSERT INTO sessions (user_id, token_hash, ip_address, user_agent, expires_at)
          VALUES ($1, $2, $3, $4, $5)`,
         [userId, tokenHash, ipAddress, userAgent, expiresAt],
       );
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback(client, error);
+        throw error;
+      } finally { client.release(); }
+    },
+
+    async changePassword({ userId, sessionTokenHash, passwordHash, verifyCurrentPassword, now }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const user = (await client.query("SELECT id, restaurant_id, password_hash FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId])).rows[0];
+        const session = (await client.query(`SELECT id FROM sessions WHERE user_id = $1 AND token_hash = $2
+          AND revoked_at IS NULL AND expires_at > $3 FOR UPDATE`, [userId, sessionTokenHash, now])).rows[0];
+        if (!user || !session) throw Object.assign(new Error("Authentication is required."), { code: "UNAUTHENTICATED", statusCode: 401 });
+        if (!(await verifyCurrentPassword(user.password_hash))) throw Object.assign(new Error("Current password is incorrect."), { code: "INVALID_CURRENT_PASSWORD", statusCode: 400 });
+        await client.query("UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1", [userId, passwordHash, now]);
+        await client.query("UPDATE sessions SET revoked_at = $3 WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL", [userId, sessionTokenHash, now]);
+        await client.query(`INSERT INTO audit_logs(restaurant_id, actor_user_id, actor_type, action, resource_type, resource_id, metadata)
+          VALUES($1,$2,'user','user.password_changed','user',$2::text,$3)`, [user.restaurant_id, userId, JSON.stringify({ otherSessionsRevoked: true })]);
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback(client, error);
+        throw error;
+      } finally { client.release(); }
     },
 
     async findActiveSession(tokenHash, now) {
@@ -190,7 +222,7 @@ export function createPostgresAuthRepository(pool) {
             WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > $2
           RETURNING user_id, expires_at
          )
-         SELECT u.id, u.email, u.display_name, u.platform_role, u.status,
+         SELECT u.id, u.email, u.username, u.restaurant_id, u.display_name, u.platform_role, u.status,
                 u.email_verified_at, u.password_hash, s.expires_at
            FROM active_session s JOIN users u ON u.id = s.user_id
           WHERE u.status = 'active'`,

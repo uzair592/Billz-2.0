@@ -53,6 +53,7 @@ export async function createServer({
   logger = { info() {}, warn() {}, error() {} },
   pool = null,
   controlPool = null,
+  loginThrottle = null,
   migrationsDir = "auto",
   verifyMigrations = true,
 } = {}) {
@@ -166,7 +167,8 @@ export async function createServer({
 
   const app = await buildHttpApp({
     authService,
-    loginThrottle: createLoginThrottle(controlDatabase),
+    loginThrottle: loginThrottle ?? createLoginThrottle(controlDatabase),
+    supportContact: config.supportContact,
     platformAdminService,
     platformAdminPortalService,
     entitlementService,

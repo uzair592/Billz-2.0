@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 import { hashPassword } from "../auth/passwords.mjs";
 
 export function createPlatformAdminPortalService({ pool, passwordPepper, clock = () => new Date() }) {
@@ -15,6 +15,28 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
   }
 
   return Object.freeze({
+    async resetUserPassword({ adminId, restaurantId, userId, newPassword, generateTemporary = false }) {
+      const password = generateTemporary ? randomBytes(24).toString("base64url") : newPassword;
+      const passwordHash = await hashPassword(password, passwordPepper);
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const restaurant = (await client.query("SELECT id FROM restaurants WHERE id = $1 FOR SHARE", [restaurantId])).rows[0];
+        const user = (await client.query(`SELECT id FROM users WHERE id = $1 AND restaurant_id = $2
+          AND EXISTS(SELECT 1 FROM restaurant_memberships WHERE restaurant_id = $2 AND user_id = $1) FOR UPDATE`, [userId, restaurantId])).rows[0];
+        if (!restaurant || !user) throw Object.assign(new Error("Restaurant user not found."), { code: "USER_NOT_FOUND", statusCode: 404 });
+        const now = clock();
+        await client.query("UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1 AND restaurant_id = $4", [userId, passwordHash, now, restaurantId]);
+        await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, now]);
+        await recordAudit({ client, restaurantId, adminId, action: "user.password_reset", resourceType: "user", resourceId: userId,
+          metadata: { userId, generatedTemporary: generateTemporary, allSessionsRevoked: true } });
+        await client.query("COMMIT");
+        return { reset: true, userId, ...(generateTemporary ? { temporaryPassword: password } : {}) };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally { client.release(); }
+    },
     async getDashboardStats() {
       const client = await pool.connect();
       try {

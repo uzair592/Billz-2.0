@@ -28,8 +28,10 @@ services:
         sync: false
       - key: PAYMENT_PROVIDER
         value: manual
+      - key: SUPPORT_CONTACT
+        sync: false
       - key: TRUST_PROXY
-        value: true
+        value: "true"
       - key: TRUSTED_PROXY_CIDRS
         sync: false
       - key: CONTROL_DATABASE_URL

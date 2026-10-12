@@ -254,5 +254,6 @@ export function loadServerConfiguration(env = process.env) {
     logLevel,
     trustProxy: trustProxyEnabled ? trustedProxyCidrs : false,
     mailProvider,
+    supportContact: String(env.SUPPORT_CONTACT ?? "").trim().slice(0, 300) || "Contact your restaurant owner or Billz customer support.",
   });
 }

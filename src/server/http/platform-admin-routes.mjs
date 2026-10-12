@@ -38,13 +38,19 @@ const updateStorageSchema = z.object({
   maxStorageBytes: z.number().int().min(0),
 });
 
+const restaurantUserParams = z.object({ id: z.uuid(), userId: z.uuid() });
+const resetPasswordSchema = z.union([
+  z.object({ newPassword: passwordSchema }).strict(),
+  z.object({ generateTemporary: z.literal(true) }).strict(),
+]);
+
 export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true, loginThrottle = null }) {
   // Authentication Guard Helper for Platform Admin Routes
   async function requirePlatformAdmin(request, reply) {
     const token = request.cookies[PLATFORM_COOKIE_NAME];
     const session = await platformAdminService.authenticate(token);
     if (!session) {
-      return reply.code(401).send({ error: "Platform administrator authentication is required.", code: "UNAUTHENTICATED" });
+      return reply.code(request.url.split("?")[0].endsWith("/reset-password") ? 403 : 401).send({ error: "Platform administrator authentication is required.", code: "UNAUTHENTICATED" });
     }
     request.adminSession = session;
   }
@@ -107,6 +113,13 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   app.get("/platform-admin/api/dashboard", async () => {
     return platformAdminPortalService.getDashboardStats();
   });
+
+  app.post("/platform-admin/api/restaurants/:id/users/:userId/reset-password",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async request => {
+      const { id, userId } = restaurantUserParams.parse(request.params);
+      const input = resetPasswordSchema.parse(request.body);
+      return platformAdminPortalService.resetUserPassword({ adminId: request.adminSession.admin.id, restaurantId: id, userId, ...input });
+    });
 
   app.get("/platform-admin/api/restaurants", async (request) => {
     const query = request.query || {};

@@ -415,6 +415,7 @@ export async function buildHttpApp({
   nodeEnv = "development",
   trustProxy = false,
   loginThrottle = null,
+  supportContact = "Contact your restaurant owner or Billz customer support.",
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
@@ -663,6 +664,16 @@ export async function buildHttpApp({
       sameSite: "lax",
     });
     return reply.code(204).send();
+  });
+
+  app.get("/api/public/config", async () => ({ supportContact }));
+
+  app.post("/api/auth/change-password", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
+    const sessionToken = request.cookies[SESSION_COOKIE_NAME];
+    const session = await authService.authenticate(sessionToken);
+    if (!session) return reply.code(401).send({ error: "Authentication is required.", code: "UNAUTHENTICATED" });
+    const input = z.object({ currentPassword: passwordSchema, newPassword: passwordSchema }).strict().parse(request.body);
+    return authService.changePassword({ userId: session.user.id, sessionToken, ...input });
   });
 
   app.get("/api/auth/me", async (request, reply) => {

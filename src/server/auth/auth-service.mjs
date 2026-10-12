@@ -36,6 +36,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
     const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS);
     await repository.createSession({
       userId: user.id,
+      expectedPasswordHash: user.passwordHash,
       tokenHash: session.tokenHash,
       ipAddress,
       userAgent,
@@ -161,6 +162,15 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
     async authenticate(token) {
       if (!token) return null;
       return repository.findActiveSession(hashOpaqueToken(token), clock());
+    },
+
+    async changePassword({ userId, sessionToken, currentPassword, newPassword }) {
+      const passwordHash = await hashPassword(newPassword, passwordPepper);
+      await repository.changePassword({
+        userId, sessionTokenHash: hashOpaqueToken(sessionToken), passwordHash, now: clock(),
+        verifyCurrentPassword: hash => verifyPassword(hash, currentPassword, passwordPepper),
+      });
+      return { changed: true };
     },
 
     async logout(token) {
