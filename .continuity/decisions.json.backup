@@ -794,5 +794,62 @@
       "source": "cli",
       "timestamp": "2026-10-14T19:07:54.003Z"
     }
+  },
+  {
+    "id": "71456053-0d8b-48bc-a0b7-38ff10b631f6",
+    "question": "How were PostgreSQL error 42P08 and timezone date flakiness in integration tests resolved?",
+    "answer": "Replaced untyped CASE WHEN  with explicit parameter  for completed_at in src/server/pos/order-service.mjs and queried CURRENT_DATE::text from the database in tests/refund-sales-report-postgres.test.mjs.",
+    "timestamp": "2026-10-14T19:41:14.765Z",
+    "tags": [
+      "bugfix",
+      "ci",
+      "database",
+      "how",
+      "postgres",
+      "testing"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-14T19:41:14.764Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-14T19:41:14.771Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "postgres",
+        "postgresql"
+      ],
+      "patterns": [],
+      "concepts": [
+        "database"
+      ]
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-14T19:41:14.626Z"
+    }
   }
 ]

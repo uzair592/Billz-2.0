@@ -747,7 +747,9 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
       membership: { userId: tenantA.userId, role: "owner" },
     };
 
-    const todayStr = new Date().toISOString().substring(0, 10);
+    const todayStr = (
+      await admin.query("SELECT CURRENT_DATE::text AS today")
+    ).rows[0].today;
 
     // Compute the authoritative figures straight from the database so
     // the report is verified against real state, not hardcoded guesses.
