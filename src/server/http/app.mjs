@@ -826,6 +826,10 @@ export async function buildHttpApp({
       app.post(
         "/api/pos/orders",
         {
+          // Shared restaurant IPs must sustain the 200-orders/minute launch
+          // workload. Give checkout its own budget instead of consuming the
+          // general 120/minute API bucket; authentication/tenant guards still apply.
+          config: { rateLimit: { max: 600, timeWindow: "1 minute" } },
           preHandler: [
             guards.authenticate,
             guards.tenant(PERMISSION.ORDER_CREATE),
