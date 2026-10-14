@@ -37,6 +37,7 @@ import {
 } from "./database/pool.mjs";
 import { createPlatformAdminRepository } from "./auth/platform-admin-repository.mjs";
 import { createPlatformAdminService } from "./auth/platform-admin-service.mjs";
+import { createPlatformAdminMfaService } from "./auth/platform-admin-mfa-service.mjs";
 import { createPlatformAdminPortalService } from "./subscriptions/platform-admin-portal-service.mjs";
 import { createEntitlementService } from "./auth/entitlement-service.mjs";
 import { createStorageService } from "./storage/storage-service.mjs";
@@ -141,9 +142,11 @@ export async function createServer({
   });
 
   const platformAdminRepository = createPlatformAdminRepository(controlDatabase);
+  const platformAdminMfaService = createPlatformAdminMfaService({ pool: controlDatabase, sessionSecret: config.sessionSecret, passwordPepper: config.pepper });
   const platformAdminService = createPlatformAdminService({
     repository: platformAdminRepository,
     passwordPepper: config.pepper,
+    mfaService: platformAdminMfaService,
   });
   const platformAdminPortalService = createPlatformAdminPortalService({
     pool: controlDatabase,
@@ -178,6 +181,8 @@ export async function createServer({
     loginThrottle: loginThrottle ?? createLoginThrottle(controlDatabase),
     supportContact: config.supportContact,
     platformAdminService,
+    platformAdminMfaService,
+    platformAdminAllowedIps: env.PLATFORM_ADMIN_ALLOWED_IPS || "",
     platformAdminPortalService,
     entitlementService,
     storageService,

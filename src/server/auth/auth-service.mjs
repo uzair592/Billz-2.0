@@ -129,7 +129,8 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
           username,
         });
 
-        if (!restaurant || !user || !(await verifyPassword(user.passwordHash, password, passwordPepper))) {
+        const validPassword = await verifyPassword(user?.passwordHash, password, passwordPepper);
+        if (!restaurant || !user || !validPassword) {
           throw authenticationError();
         }
 
@@ -153,7 +154,8 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       }
 
       const user = await repository.findUserByEmail(normalizeEmail(email));
-      if (!user || !(await verifyPassword(user.passwordHash, password, passwordPepper))) {
+      const validPassword = await verifyPassword(user?.passwordHash, password, passwordPepper);
+      if (!user || !validPassword) {
         throw authenticationError();
       }
       if (user.status !== "active" || (user.email && !user.emailVerifiedAt)) {

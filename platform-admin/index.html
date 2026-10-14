@@ -23,10 +23,11 @@
           id="password"
           type="password"
           required
-          minlength="10"
           maxlength="200"
           autocomplete="current-password"
         />
+        <label for="admin-login-code">Authenticator or recovery code (when enabled)</label>
+        <input id="admin-login-code" autocomplete="one-time-code" maxlength="64" />
         <button type="submit" class="btn full">Sign in</button>
       </form>
     </main>
@@ -42,6 +43,7 @@
           <button data-view="plans" class="nav-item">Plans</button>
           <button data-view="payments" class="nav-item">Payments</button>
           <button data-view="audits" class="nav-item">Audit log</button>
+          <button data-view="security" class="nav-item">Security</button>
         </nav>
         <div class="sidebar-footer">
           <span id="admin-display-name"></span
@@ -56,6 +58,35 @@
           </div>
           <span class="badge good">Super admin</span>
         </header>
+        <section id="security-page" class="hidden">
+          <article class="card">
+            <h2>Administrator security</h2>
+            <p id="mfa-status" role="status">Loading…</p>
+            <p class="muted">Use an authenticator app and keep recovery codes somewhere safe. Never share them with support.</p>
+            <form id="mfa-start-form">
+              <label for="mfa-start-password">Current password</label>
+              <input id="mfa-start-password" type="password" required maxlength="200" autocomplete="current-password" />
+              <button class="btn" type="submit">Start 2FA enrollment</button>
+            </form>
+            <form id="mfa-manage-form" class="hidden">
+              <label for="mfa-action">Security change</label>
+              <select id="mfa-action"><option value="recovery-codes">Regenerate recovery codes</option><option value="disable">Disable 2FA</option></select>
+              <label for="mfa-manage-password">Current password</label><input id="mfa-manage-password" type="password" required maxlength="200" autocomplete="current-password" />
+              <label for="mfa-manage-code">Fresh authenticator code</label><input id="mfa-manage-code" required pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" inputmode="numeric" />
+              <button class="btn" type="submit">Confirm security change</button>
+            </form>
+          </article>
+          <article id="mfa-once" class="card hidden">
+            <h3>Save these before continuing</h3>
+            <p class="muted">This information is shown once. It is cleared when you leave this page. New recovery codes replace the previous set.</p>
+            <label for="mfa-uri">Authenticator enrollment URI</label><textarea id="mfa-uri" readonly rows="3"></textarea>
+            <h4>Recovery codes</h4><pre id="mfa-recovery-codes"></pre>
+            <form id="mfa-verify-form">
+              <label for="mfa-verify-code">Code from your authenticator</label><input id="mfa-verify-code" required pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" inputmode="numeric" />
+              <button class="btn" type="submit">Verify and enable 2FA</button>
+            </form>
+          </article>
+        </section>
         <section id="dashboard-page">
           <div class="stats">
             <article class="stat">

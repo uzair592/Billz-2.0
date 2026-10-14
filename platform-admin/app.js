@@ -52,6 +52,7 @@ function pager(prefix, page, count, limit) {
   $(`${prefix}-next`).disabled = page >= pages;
 }
 function closeDialogs() {
+  clearEnrollment();
   document.querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
   document.querySelectorAll('input[type="password"]').forEach((input) => {
     input.value = "";
@@ -71,7 +72,7 @@ async function apiCall(path, options = {}) {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && data?.code === "UNAUTHENTICATED") {
       closeDialogs();
       $("login-view").classList.remove("hidden");
       $("portal-view").classList.add("hidden");
@@ -89,12 +90,14 @@ let restaurantPage = 1,
   resetUser = null;
 const pageSize = 20;
 function showView(view) {
+  clearEnrollment();
   for (const id of [
     "dashboard-page",
     "restaurants-page",
     "audits-page",
     "payments-page",
     "plans-page",
+    "security-page",
     "detail-view",
   ])
     $(id).classList.add("hidden");
@@ -105,6 +108,7 @@ function showView(view) {
     audits: "Audit log",
     payments: "Payments",
     plans: "Subscription plans",
+    security: "Administrator security",
   }[view];
   document
     .querySelectorAll("[data-view]")
@@ -210,6 +214,7 @@ $("login-form").addEventListener("submit", async (event) => {
       body: JSON.stringify({
         username: $("username").value,
         password: $("password").value,
+        code: $("admin-login-code").value,
       }),
     });
     await checkAuth().catch(handleError);
@@ -219,6 +224,7 @@ $("login-form").addEventListener("submit", async (event) => {
     handleError(error);
   } finally {
     $("password").value = "";
+    $("admin-login-code").value = "";
     button.disabled = false;
   }
 });
@@ -244,6 +250,7 @@ document.querySelectorAll("[data-view]").forEach(
         audits: loadAudits,
         payments: loadPayments,
         plans: loadPlanCatalog,
+        security: loadSecurity,
       })
         [view]()
         .catch(handleError);
@@ -1128,3 +1135,44 @@ $("subscription-form").onsubmit = async (event) => {
     button.disabled = false;
   }
 };
+
+let mfaEnrollmentId = null;
+function clearEnrollment() {
+  mfaEnrollmentId = null;
+  for (const id of ['mfa-uri','mfa-verify-code','mfa-manage-code','mfa-start-password','mfa-manage-password']) $(id).value = '';
+  $('mfa-recovery-codes').textContent = '';
+  $('mfa-once').classList.add('hidden');
+}
+async function loadSecurity() {
+  const state = await apiCall('/platform-admin/api/security/2fa');
+  $('mfa-status').textContent = state.enabled ? `2FA enabled · ${state.recoveryCodesRemaining} recovery codes remaining` : '2FA is disabled. Enrollment requires your current password.';
+  $('mfa-start-form').classList.toggle('hidden', state.enabled);
+  $('mfa-manage-form').classList.toggle('hidden', !state.enabled);
+}
+function showMfaOnce(data) {
+  clearEnrollment();
+  mfaEnrollmentId = data.enrollmentId || null;
+  $('mfa-uri').value = data.otpauthUri || '';
+  $('mfa-uri').hidden = !data.otpauthUri;
+  document.querySelector('label[for="mfa-uri"]').hidden = !data.otpauthUri;
+  $('mfa-recovery-codes').textContent = data.recoveryCodes.join('\n');
+  $('mfa-verify-form').classList.toggle('hidden', !data.enrollmentId);
+  $('mfa-once').classList.remove('hidden');
+}
+for (const [id, action] of [['mfa-start-form','start'],['mfa-verify-form','verify'],['mfa-manage-form',null]]) {
+  $(id).onsubmit = async event => {
+    event.preventDefault();const button = event.submitter;button.disabled = true;
+    try {
+      const path = action || $('mfa-action').value;
+      const payload = path === 'start' ? {currentPassword:$('mfa-start-password').value}
+        : path === 'verify' ? {enrollmentId:mfaEnrollmentId,code:$('mfa-verify-code').value}
+        : {currentPassword:$('mfa-manage-password').value,code:$('mfa-manage-code').value};
+      const data = await apiCall(`/platform-admin/api/security/2fa/${path}`,{method:'POST',body:JSON.stringify(payload)});
+      if (data.recoveryCodes) showMfaOnce(data);else clearEnrollment();
+      await loadSecurity();toast(path === 'verify' ? '2FA enabled. Other administrator sessions signed out.' : 'Security settings updated.');
+    }catch(error){handleError(error);}finally{
+      $('mfa-start-password').value='';$('mfa-manage-password').value='';$('mfa-manage-code').value='';$('mfa-verify-code').value='';button.disabled=false;
+    }
+  };
+}
+window.addEventListener('pagehide',clearEnrollment);

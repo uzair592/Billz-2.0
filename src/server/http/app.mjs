@@ -19,6 +19,8 @@ import { createRequestGuards } from "./request-guards.mjs";
 import { createStaticFileHandler } from "./static-files.mjs";
 import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
 import { failedAuthLimit } from "./failed-auth-limit.mjs";
+import { safeHttpLogger } from "./safe-logging.mjs";
+import { createIpAllowlist } from "../auth/ip-allowlist.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
@@ -31,11 +33,11 @@ const loginSchema = z.union([
   z.object({
     restaurantCode: z.string().trim().min(1).max(64),
     username: z.string().trim().min(1).max(320),
-    password: passwordSchema,
+    password: z.string().min(1).max(200),
   }),
   z.object({
     email: z.string().trim().email().max(320),
-    password: passwordSchema,
+    password: z.string().min(1).max(200),
   }),
 ]);
 
@@ -422,6 +424,8 @@ export async function buildHttpApp({
   nodeEnv = "development",
   trustProxy = false,
   loginThrottle = null,
+  platformAdminMfaService = null,
+  platformAdminAllowedIps = "",
   supportContact = "Contact your restaurant owner or Billz customer support.",
 }) {
   if (!authService) throw new TypeError("authService is required.");
@@ -431,12 +435,22 @@ export async function buildHttpApp({
 
   if (trustProxy === true) throw new TypeError("Proxy trust requires an explicit IP/CIDR allowlist.");
   const app = Fastify({
-    logger,
+    logger: safeHttpLogger(logger),
     trustProxy,
     bodyLimit: 64 * 1024,
-    genReqId: (request) =>
-      request.headers["x-request-id"]
-        ?? randomUUID(),
+    // Client-controlled correlation IDs can contain credentials/secrets.
+    genReqId: () => randomUUID(),
+  });
+  const allowedAdminIp = createIpAllowlist(platformAdminAllowedIps);
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.split("?")[0].startsWith("/platform-admin/api/security/2fa")) reply.header("Cache-Control", "no-store");
+  });
+  if (allowedAdminIp) app.addHook("onRequest", async (request, reply) => {
+    let pathname;
+    try { pathname = decodeURIComponent(request.url.split("?")[0]); } catch { return; }
+    if ((pathname === "/platform-admin" || pathname.startsWith("/platform-admin/")) && !allowedAdminIp(request.ip)) {
+      return reply.code(404).send({ error: "Not found." });
+    }
   });
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) {
@@ -576,6 +590,7 @@ export async function buildHttpApp({
       platformAdminPortalService,
       secureCookies,
       loginThrottle,
+      platformAdminMfaService,
     });
   }
 
@@ -703,7 +718,7 @@ export async function buildHttpApp({
     const sessionToken = request.cookies[SESSION_COOKIE_NAME];
     const session = await authService.authenticate(sessionToken);
     if (!session) return reply.code(401).send({ error: "Authentication is required.", code: "UNAUTHENTICATED" });
-    const input = z.object({ currentPassword: passwordSchema, newPassword: passwordSchema }).strict().parse(request.body);
+    const input = z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema }).strict().parse(request.body);
     return authService.changePassword({ userId: session.user.id, sessionToken, ...input });
   });
 
