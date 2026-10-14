@@ -112,8 +112,8 @@ export function createPlatformAdminRepository(pool) {
         );
         await client.query(
           `INSERT INTO audit_logs(actor_admin_id,actor_type,action,resource_type,resource_id,metadata)
-          VALUES($1,'platform_admin','platform_admin.login','platform_administrator',$1,'{}')`,
-          [adminId],
+          VALUES($1,'platform_admin','platform_admin.login','platform_administrator',$2,'{}')`,
+          [adminId, adminId],
         );
         await client.query("COMMIT");
       } catch (error) {

@@ -27,8 +27,8 @@ export function createPlatformAdminMfaService({
   async function audit(client, adminId, action) {
     await client.query(
       `INSERT INTO audit_logs(actor_admin_id,actor_type,action,resource_type,resource_id,metadata)
-      VALUES($1,'platform_admin',$2,'platform_administrator',$1,'{}')`,
-      [adminId, `platform_admin.2fa.${action}`],
+      VALUES($1,'platform_admin',$2,'platform_administrator',$3,'{}')`,
+      [adminId, `platform_admin.2fa.${action}`, adminId],
     );
   }
   async function locked({ adminId, sessionToken }, work) {
