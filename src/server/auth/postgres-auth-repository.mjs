@@ -574,7 +574,7 @@ export function createPostgresAuthRepository(pool) {
       return withUserContextTransaction(pool, { userId }, async (client) => {
         const result = await client.query(
           `SELECT m.restaurant_id, r.name AS restaurant_name,
-                  r.status AS restaurant_status, r.currency_code,
+                  r.status AS restaurant_status, r.currency_code, r.timezone AS restaurant_timezone,
                   m.role, m.default_branch_id
              FROM restaurant_memberships m
              JOIN restaurants r ON r.id = m.restaurant_id
@@ -588,6 +588,7 @@ export function createPostgresAuthRepository(pool) {
             name: row.restaurant_name,
             status: row.restaurant_status,
             currencyCode: row.currency_code,
+            timezone: row.restaurant_timezone,
             role: row.role,
             defaultBranchId: row.defaultBranch_id ?? row.default_branch_id,
           }),

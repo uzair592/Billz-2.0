@@ -112,3 +112,14 @@ test("managed Reports use shared reports and Stock opens backend inventory", asy
   assert.equal(shared, 1); assert.equal(local, 0); assert.equal(inventory, 1);
   assert.equal(context.AppState.session.currentScreen, "inventory");
 });
+
+test("managed order dates follow the restaurant timezone across Karachi midnight", async () => {
+  const script = extractInlineScript(await readLegacyApp());
+  const declaration = extractDeclaration(script, "function getLocalDateString", "function formatTime12Hour");
+  const context = vm.createContext({ window: { BILLZ_MANAGED: true, BILLZ_TIMEZONE: "Asia/Karachi" } });
+  vm.runInContext(declaration, context);
+  const instant = new Date("2026-10-14T19:30:00Z");
+  assert.equal(context.getLocalDateString(instant), "2026-10-15");
+  context.window.BILLZ_TIMEZONE = "UTC";
+  assert.equal(context.getLocalDateString(instant), "2026-10-14");
+});

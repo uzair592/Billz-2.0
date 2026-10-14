@@ -47,7 +47,7 @@ Set `DATABASE_URL` to a non-superuser **NOBYPASSRLS** runtime role. Set `CONTROL
 
 Set production HTTPS `TRUSTED_ORIGINS`, strong `PASSWORD_PEPPER` and `SESSION_SECRET`, and `PAYMENT_PROVIDER=manual`. Use `TRUST_PROXY=true` on Render with `TRUSTED_PROXY_CIDRS` containing only verified platform proxy IPs/CIDRs. Keep it false for direct hosting. Fastify never receives unrestricted `true`. If configured, `OFFLINE_ENTITLEMENT_SECRET` must be a separate private secret of at least 32 characters; it is not shipped to the browser.
 
-Bootstrap first owner with `BOOTSTRAP_OWNER_PASSWORD` and optional `OWNER_USERNAME` (default `owner`). Platform admin bootstrap uses `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` (10+ characters), `PASSWORD_PEPPER`, and `CONTROL_DATABASE_URL`; passwords are not CLI arguments.
+Bootstrap first owner with `BOOTSTRAP_OWNER_PASSWORD` and optional globally unique `OWNER_USERNAME` (defaults to `OWNER_EMAIL`). Platform admin bootstrap uses `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` (10+ characters), `PASSWORD_PEPPER`, and `CONTROL_DATABASE_URL`; passwords are not CLI arguments.
 
 Legacy menus can be imported through the visible cloud panel after sign-in. Cloud catalog import is not a completed bidirectional menu/settings/inventory synchronization system. Managed file storage is durable, but local menu photos/receipt attachments are not automatically uploaded by this patch.
 

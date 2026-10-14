@@ -27,7 +27,10 @@ BEGIN
   -- Sorted claims give concurrent renames a consistent locking order. The
   -- unique key enforces the rule across all provisioning/reset entry points.
   FOR login_identifier IN
-    SELECT DISTINCT value FROM unnest(ARRAY[NEW.normalized_username, NEW.normalized_email]) value
+    SELECT DISTINCT value FROM unnest(ARRAY[
+      CASE WHEN TG_OP = 'INSERT' OR NEW.normalized_username IS DISTINCT FROM OLD.normalized_username THEN NEW.normalized_username END,
+      CASE WHEN TG_OP = 'INSERT' OR NEW.normalized_email IS DISTINCT FROM OLD.normalized_email THEN NEW.normalized_email END
+    ]) value
     WHERE value IS NOT NULL ORDER BY value
   LOOP
     claimed_user := NULL;

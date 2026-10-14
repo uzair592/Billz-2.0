@@ -7,7 +7,10 @@ function money(value) { return `PKR ${(Number(value) / 100).toLocaleString("en-P
 
 export function createFinanceUI({ container, request = apiRequest, timezone = "Asia/Karachi", reportOnly = false, storage = null } = {}) {
   let page = 1, attempt = null, requestId = 0;
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  function businessToday() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: typeof timezone === "function" ? timezone() : timezone,
+      year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  }
   function message(text, error = false) {
     const node = container.querySelector("[data-message]"); node.textContent = text; node.style.color = error ? "#b91c1c" : "#166534";
   }
@@ -73,6 +76,7 @@ export function createFinanceUI({ container, request = apiRequest, timezone = "A
   function mount() {
     if (!container) return;
     if (!container.dataset.mounted) {
+      const today = businessToday();
       container.dataset.mounted = "true";
       container.innerHTML = `
         <div style="background: white; border-radius: 12px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 24px;">

@@ -131,6 +131,7 @@ describe("PostgreSQL authentication repository", () => {
         restaurant_name: "Example Cafe",
         restaurant_status: "active",
         currency_code: "PKR",
+        restaurant_timezone: "Asia/Karachi",
         role: "owner",
         default_branch_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       }],
@@ -149,6 +150,7 @@ describe("PostgreSQL authentication repository", () => {
       name: "Example Cafe",
       status: "active",
       currencyCode: "PKR",
+      timezone: "Asia/Karachi",
       role: "owner",
       defaultBranchId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     }]);

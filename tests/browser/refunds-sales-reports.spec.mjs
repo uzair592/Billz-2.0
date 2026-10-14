@@ -1184,6 +1184,7 @@ test("managed Reports opens shared figures directly and cannot fall back to loca
       ? route.fulfill({ json: { netSalesMinor: 10000, costOfGoodsMinor: 2000, grossProfitMinor: 8000, operatingExpensesMinor: 1000, netProfitMinor: 7000 } })
       : route.fulfill({ json: {} }));
   await openPos(page); await configureCloud(page);
+  await expect(page.locator(".app-container")).toBeVisible();
   await page.evaluate(() => { window.BILLZ_MANAGED = true; switchScreen("reports"); });
   await expect(page.locator("#local-reports-view")).toBeHidden();
   await expect(page.locator("#cloud-sales-report-view")).toBeVisible();

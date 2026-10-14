@@ -134,8 +134,9 @@ const purchasesUI = createPurchasesUI({
 });
 globalThis.BiteTechPurchases = purchasesUI;
 
-const expenseUI = createFinanceUI({ container: document.getElementById("cloud-expenses-container"), storage });
-const profitUI = createFinanceUI({ container: document.getElementById("cloud-profit-loss-container"), reportOnly: true });
+const businessTimezone = () => globalThis.BILLZ_TIMEZONE || "Asia/Karachi";
+const expenseUI = createFinanceUI({ container: document.getElementById("cloud-expenses-container"), storage, timezone: businessTimezone });
+const profitUI = createFinanceUI({ container: document.getElementById("cloud-profit-loss-container"), reportOnly: true, timezone: businessTimezone });
 globalThis.BillzCloudExpenses = expenseUI;
 globalThis.BillzCloudProfit = profitUI;
 

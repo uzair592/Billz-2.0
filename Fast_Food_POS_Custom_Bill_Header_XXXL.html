@@ -13340,6 +13340,10 @@
 
 
       function getLocalDateString(d = new Date()) {
+        if (window.BILLZ_MANAGED) {
+          return new Intl.DateTimeFormat("en-CA", { timeZone: window.BILLZ_TIMEZONE || "Asia/Karachi",
+            year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+        }
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, "0");
         const day = String(d.getDate()).padStart(2, "0");
@@ -18952,6 +18956,8 @@
             if (!allowed) throw new Error("Choose a restaurant to continue.");
             window.BILLZ_TENANT_ID = allowed.restaurantId;
             window.BILLZ_ROLE = allowed.role;
+            window.BILLZ_TIMEZONE = allowed.timezone || "Asia/Karachi";
+            document.getElementById("new-order-date-input").value = getLocalDateString();
             AppState.session.userRole = allowed.role;
             await idbSet("pos_cloud_session_v1", { user: account.user, restaurantId: allowed.restaurantId });
             const responseMenu = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": allowed.restaurantId } });
