@@ -1,3 +1,4 @@
+import { createFinanceUI } from "./finance-ui.mjs";
 import { createCloudSessionClient } from "./cloud-session.mjs";
 import {
   createBrowserIndexedDbStorage,
@@ -125,6 +126,11 @@ const purchasesUI = createPurchasesUI({
   containerEl: purchasesContainer ?? undefined,
 });
 globalThis.BiteTechPurchases = purchasesUI;
+
+const expenseUI = createFinanceUI({ container: document.getElementById("cloud-expenses-container"), storage });
+const profitUI = createFinanceUI({ container: document.getElementById("cloud-profit-loss-container"), reportOnly: true });
+globalThis.BillzCloudExpenses = expenseUI;
+globalThis.BillzCloudProfit = profitUI;
 
 async function recoverSync() {
   try {

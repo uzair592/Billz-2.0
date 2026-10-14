@@ -17,6 +17,7 @@ import { projectRoot } from './helpers/legacy-source.mjs';
  */
 const EXCLUDED = new Set([
   'admin-launch-postgres.test.mjs',
+  'launch-readiness-postgres.test.mjs',
   'saas-core-fullstack.test.mjs',
   'launch-regressions-postgres.test.mjs',
   'billing-postgres.test.mjs',

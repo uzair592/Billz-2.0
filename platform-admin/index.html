@@ -39,6 +39,7 @@
             Overview
           </button>
           <button data-view="restaurants" class="nav-item">Restaurants</button>
+          <button data-view="payments" class="nav-item">Payments</button>
           <button data-view="audits" class="nav-item">Audit log</button>
         </nav>
         <div class="sidebar-footer">
@@ -150,6 +151,13 @@
           </div>
           <div id="detail-content"></div>
         </section>
+        <section id="payments-page" class="hidden">
+          <article class="card"><h2>Payment review queue</h2><p class="muted">Review manual payments across all restaurants.</p>
+            <label for="payment-filter">Status<select id="payment-filter"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="all">All</option></select></label>
+            <div class="table-wrap"><table><thead><tr><th>Restaurant</th><th>Reference / plan</th><th>Amount</th><th>Status</th><th>Coverage</th><th>Actions</th></tr></thead><tbody id="payments-tbody"></tbody></table></div>
+            <div class="pager"><span id="payment-page-info"></span><div><button id="payment-prev" class="btn secondary">Previous</button><button id="payment-next" class="btn secondary">Next</button></div></div>
+          </article>
+        </section>
         <section id="audits-page" class="hidden">
           <article class="card">
             <h2>Audit log</h2>
@@ -217,8 +225,7 @@
           maxlength="200"
           autocomplete="new-password"
         />
-        <label for="create-plan">Plan code</label
-        ><input id="create-plan" value="GROWTH" required maxlength="64" />
+        <label for="create-plan">Subscription plan</label><select id="create-plan" required></select>
         <div class="dialog-actions">
           <button type="button" id="cancel-create-btn" class="btn secondary">
             Cancel</button
@@ -231,6 +238,8 @@
         <h2>Edit restaurant</h2>
         <label for="edit-name">Name</label
         ><input id="edit-name" required maxlength="160" />
+        <label for="edit-code">Restaurant login code</label><input id="edit-code" required minlength="2" maxlength="64" />
+        <p class="muted">Changing the code signs out restaurant users on all devices.</p>
         <label for="edit-phone">Contact phone</label
         ><input id="edit-phone" maxlength="40" />
         <label for="edit-email">Contact email</label
@@ -244,6 +253,15 @@
         </div>
       </form>
     </dialog>
+    <dialog id="user-modal"><form id="user-form">
+      <h2 id="user-modal-title">Create user</h2>
+      <label for="user-username">Username</label><input id="user-username" required minlength="2" maxlength="64" autocomplete="off" />
+      <label for="user-display-name">Display name</label><input id="user-display-name" required maxlength="120" />
+      <label for="user-role">Role</label><select id="user-role"><option value="cashier">Cashier</option><option value="manager">Manager</option><option value="waiter">Waiter</option><option value="kitchen">Kitchen</option><option value="accountant">Accountant</option><option value="owner">Owner</option></select>
+      <label id="user-password-label" for="user-password">Password (10–200 characters)</label><input id="user-password" type="password" minlength="10" maxlength="200" autocomplete="new-password" />
+      <p class="muted">Changing a username signs out all of that user's sessions. Use Reset password to change their password.</p>
+      <div class="dialog-actions"><button type="button" data-close="user-modal" class="btn secondary">Cancel</button><button type="submit" class="btn">Save user</button></div>
+    </form></dialog>
     <dialog id="reset-modal">
       <form id="reset-password-form">
         <h2>Reset user password</h2>

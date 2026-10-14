@@ -175,12 +175,16 @@ export function createPostgresAuthRepository(pool) {
       return mapUser(result.rows[0]);
     },
 
-    async createSession({ userId, tokenHash, ipAddress, userAgent, expiresAt, expectedPasswordHash }) {
+    async createSession({ userId, tokenHash, ipAddress, userAgent, expiresAt, expectedPasswordHash, expectedUsername = null, expectedRestaurantId = null, expectedRestaurantCode = null }) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
-        const row = (await client.query("SELECT password_hash, status FROM users WHERE id = $1 FOR SHARE", [userId])).rows[0];
-        if (!row || row.status !== "active" || row.password_hash !== expectedPasswordHash) {
+        if (expectedRestaurantCode) {
+          const restaurant = (await client.query("SELECT code FROM restaurants WHERE id = $1 FOR SHARE", [expectedRestaurantId])).rows[0];
+          if (restaurant?.code !== expectedRestaurantCode) throw Object.assign(new Error("Restaurant credentials changed. Please sign in again."), { code: "INVALID_CREDENTIALS", statusCode: 401 });
+        }
+        const row = (await client.query("SELECT password_hash, status, username FROM users WHERE id = $1 FOR SHARE", [userId])).rows[0];
+        if (!row || row.status !== "active" || row.password_hash !== expectedPasswordHash || (expectedUsername && row.username !== expectedUsername)) {
           throw Object.assign(new Error("Credentials changed. Please sign in again."), { code: "INVALID_CREDENTIALS", statusCode: 401 });
         }
         await client.query(

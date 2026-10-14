@@ -35,21 +35,85 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
   }
 
   return Object.freeze({
-    async editRestaurant({ adminId, restaurantId, name, phone, address, contactEmail }) {
+    async editRestaurant({ adminId, restaurantId, name, code, phone, address, contactEmail }) {
       return transaction(async client => {
         const existing = (await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId])).rows[0];
         if (!existing) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
         const changes = {};
         if (name !== undefined) changes.name = name;
+        if (code !== undefined) changes.code = code.trim().toLowerCase();
         if (phone !== undefined) changes.phone = phone;
         if (address !== undefined) changes.address = address;
         if (contactEmail !== undefined) changes.contact_email = contactEmail;
         const keys = Object.keys(changes);
-        await client.query(`UPDATE restaurants SET ${keys.map((key, index) => `${key} = $${index + 2}`).join(", ")} WHERE id = $1`,
-          [restaurantId, ...keys.map(key => changes[key])]);
+        try {
+          await client.query(`UPDATE restaurants SET ${keys.map((key, index) => `${key} = $${index + 2}`).join(", ")} WHERE id = $1`,
+            [restaurantId, ...keys.map(key => changes[key])]);
+        } catch (error) {
+          if (error.code === "23505") throw Object.assign(new Error("Restaurant code already exists."), { code: "RESTAURANT_CODE_EXISTS", statusCode: 409 });
+          throw error;
+        }
+        if (code !== undefined) await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id IN (SELECT user_id FROM restaurant_memberships WHERE restaurant_id = $1) AND revoked_at IS NULL", [restaurantId, clock()]);
+        await client.query("UPDATE business_settings SET business_name = COALESCE($2, business_name), phone = CASE WHEN $3 THEN $4 ELSE phone END, address = CASE WHEN $5 THEN $6 ELSE address END WHERE restaurant_id = $1",
+          [restaurantId, name ?? null, phone !== undefined, phone ?? null, address !== undefined, address ?? null]);
         await recordAudit({ client, adminId, restaurantId, action: "restaurant.updated", resourceType: "restaurant", resourceId: restaurantId, metadata: { changedFields: keys } });
         return { updated: true };
       });
+    },
+
+    async listPlans() {
+      const result = await pool.query("SELECT code, name FROM plans WHERE is_active = true ORDER BY code");
+      return { plans: result.rows.map(row => ({ code: row.code, name: row.name })) };
+    },
+
+    async createUser({ adminId, restaurantId, username, displayName, role, password }) {
+      const passwordHash = await hashPassword(password, passwordPepper);
+      return transaction(async client => {
+        const branch = (await client.query("SELECT id FROM branches WHERE restaurant_id = $1 AND is_default = true LIMIT 1", [restaurantId])).rows[0];
+        if (!branch) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
+        const userId = randomUUID();
+        try {
+          await client.query(`INSERT INTO users (id, restaurant_id, username, normalized_username, display_name, password_hash, status, email_verified_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`, [userId, restaurantId, username, username.toLowerCase(), displayName, passwordHash, clock()]);
+        } catch (error) {
+          if (error.code === "23505") throw Object.assign(new Error("Username already exists in this restaurant."), { code: "USERNAME_EXISTS", statusCode: 409 });
+          throw error;
+        }
+        await client.query(`INSERT INTO restaurant_memberships (restaurant_id, user_id, default_branch_id, role, status, joined_at)
+          VALUES ($1, $2, $3, $4, 'active', $5)`, [restaurantId, userId, branch.id, role, clock()]);
+        await recordAudit({ client, adminId, restaurantId, action: "user.created", resourceType: "user", resourceId: userId, metadata: { username, role } });
+        return { user: { id: userId, username, displayName, role, status: "active" } };
+      });
+    },
+
+    async editUser({ adminId, restaurantId, userId, username, displayName }) {
+      return transaction(async client => {
+        const user = (await client.query("SELECT id FROM users WHERE id = $1 AND restaurant_id = $2 FOR UPDATE", [userId, restaurantId])).rows[0];
+        if (!user) throw Object.assign(new Error("Restaurant user not found."), { code: "USER_NOT_FOUND", statusCode: 404 });
+        try {
+          await client.query(`UPDATE users SET username = COALESCE($3, username), normalized_username = COALESCE(lower($3), normalized_username),
+            display_name = COALESCE($4, display_name) WHERE id = $1 AND restaurant_id = $2`, [userId, restaurantId, username ?? null, displayName ?? null]);
+        } catch (error) {
+          if (error.code === "23505") throw Object.assign(new Error("Username already exists in this restaurant."), { code: "USERNAME_EXISTS", statusCode: 409 });
+          throw error;
+        }
+        if (username !== undefined) await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, clock()]);
+        await recordAudit({ client, adminId, restaurantId, action: "user.updated", resourceType: "user", resourceId: userId,
+          metadata: { changedFields: [username !== undefined ? "username" : null, displayName !== undefined ? "displayName" : null].filter(Boolean), allSessionsRevoked: username !== undefined } });
+        return { updated: true, userId };
+      });
+    },
+
+    async listPayments({ status = "pending", page = 1, limit = 50 } = {}) {
+      const values = [status];
+      const total = await pool.query("SELECT count(*) AS total FROM manual_payments WHERE ($1::text IS NULL OR status = $1)", values);
+      const rows = (await pool.query(`SELECT mp.id, mp.restaurant_id, r.name AS restaurant_name, r.code AS restaurant_code,
+        mp.external_reference, mp.amount_minor, mp.currency_code, mp.status, mp.covered_from, mp.covered_until, mp.created_at, p.name AS plan_name
+        FROM manual_payments mp JOIN restaurants r ON r.id = mp.restaurant_id JOIN plans p ON p.id = mp.plan_id
+        WHERE ($1::text IS NULL OR mp.status = $1) ORDER BY mp.created_at DESC, mp.id DESC LIMIT $2 OFFSET $3`, [...values, limit, (page - 1) * limit])).rows;
+      return { payments: rows.map(row => ({ id: row.id, restaurantId: row.restaurant_id, restaurantName: row.restaurant_name, restaurantCode: row.restaurant_code,
+        externalReference: row.external_reference, amountMinor: Number(row.amount_minor), currencyCode: row.currency_code, status: row.status,
+        coveredFrom: row.covered_from, coveredUntil: row.covered_until, planName: row.plan_name })), totalCount: Number(total.rows[0].total), page, limit };
     },
 
     async setUserStatus({ adminId, restaurantId, userId, status }) {
@@ -197,14 +261,11 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
 
         // Check if plan exists
         const planResult = await client.query(
-          `SELECT id, name FROM plans WHERE code = $1 LIMIT 1`,
+          `SELECT id, name FROM plans WHERE code = $1 AND is_active = true LIMIT 1`,
           [planCode.toUpperCase()],
         );
-        let plan = planResult.rows[0];
-        if (!plan) {
-          const defaultPlan = await client.query(`SELECT id, name FROM plans LIMIT 1`);
-          plan = defaultPlan.rows[0];
-        }
+        const plan = planResult.rows[0];
+        if (!plan) throw Object.assign(new Error("Choose an available plan."), { code: "PLAN_NOT_FOUND", statusCode: 404 });
 
         const passwordHash = await hashPassword(ownerPassword, passwordPepper);
 
@@ -443,7 +504,10 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       try {
         await client.query("BEGIN");
 
-        const planResult = await client.query(`SELECT id, name FROM plans WHERE code = $1 LIMIT 1`, [planCode.toUpperCase()]);
+        const restaurant = (await client.query("SELECT id FROM restaurants WHERE id = $1 FOR SHARE", [restaurantId])).rows[0];
+        if (!restaurant) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
+
+        const planResult = await client.query(`SELECT id, name FROM plans WHERE code = $1 AND is_active = true LIMIT 1`, [planCode.toUpperCase()]);
         const plan = planResult.rows[0];
         if (!plan) {
           const err = new Error(`Plan code ${planCode} not found.`);
@@ -560,7 +624,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
         if (existingSub) {
           await client.query(
             `UPDATE subscriptions
-                SET plan_id = $2, status = 'active', current_period_start = $3, current_period_end = $4, updated_at = $5
+                SET plan_id = $2, status = 'active', status_before_suspend = NULL, current_period_start = $3, current_period_end = $4, updated_at = $5
               WHERE id = $1`,
             [existingSub.id, payment.plan_id, periodStart, periodEnd, now],
           );
@@ -651,11 +715,12 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       try {
         await client.query("BEGIN");
         const now = clock();
-        await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
+        const restaurant = await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
+        if (!restaurant.rows[0]) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
 
         await client.query(`UPDATE restaurants SET status = 'suspended', updated_at = $2 WHERE id = $1`, [restaurantId, now]);
         await client.query(
-          `UPDATE subscriptions SET status = 'suspended', updated_at = $2 WHERE restaurant_id = $1 AND status IN ('active', 'trialing', 'past_due')`,
+          `UPDATE subscriptions SET status_before_suspend = status, status = 'suspended', updated_at = $2 WHERE restaurant_id = $1 AND status IN ('active', 'trialing', 'past_due', 'cancel_at_period_end')`,
           [restaurantId, now],
         );
 
@@ -684,11 +749,13 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       try {
         await client.query("BEGIN");
         const now = clock();
-        await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
+        const restaurant = await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId]);
+        if (!restaurant.rows[0]) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
 
         await client.query(`UPDATE restaurants SET status = 'active', updated_at = $2 WHERE id = $1`, [restaurantId, now]);
         await client.query(
-          `UPDATE subscriptions SET status = 'active', updated_at = $2 WHERE restaurant_id = $1 AND status = 'suspended'`,
+          `UPDATE subscriptions SET status = COALESCE(status_before_suspend, CASE WHEN trial_ends_at IS NOT NULL THEN 'trialing' ELSE 'active' END),
+            status_before_suspend = NULL, updated_at = $2 WHERE restaurant_id = $1 AND status = 'suspended'`,
           [restaurantId, now],
         );
 

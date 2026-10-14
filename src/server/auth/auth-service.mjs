@@ -31,12 +31,15 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
     throw new TypeError("A verification mailer is required.");
   }
 
-  async function createSessionForUser(user, { ipAddress, userAgent, now }) {
+  async function createSessionForUser(user, { ipAddress, userAgent, now, restaurantCode }) {
     const session = createTokenPair();
     const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS);
     await repository.createSession({
       userId: user.id,
       expectedPasswordHash: user.passwordHash,
+      expectedUsername: user.username ?? null,
+      expectedRestaurantId: user.restaurantId ?? null,
+      expectedRestaurantCode: restaurantCode ?? null,
       tokenHash: session.tokenHash,
       ipAddress,
       userAgent,
@@ -143,7 +146,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
           throw error;
         }
 
-        return createSessionForUser(user, { ipAddress, userAgent, now: clock() });
+        return createSessionForUser(user, { ipAddress, userAgent, now: clock(), restaurantCode: restaurant.code });
       }
 
       const user = await repository.findUserByEmail(normalizeEmail(email));

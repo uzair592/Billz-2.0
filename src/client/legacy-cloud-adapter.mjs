@@ -3,6 +3,7 @@ import {
   buildLegacyCatalogSnapshot,
   readLegacyCollections,
 } from "./legacy-catalog-snapshot.mjs";
+import { catalogFingerprint } from "./cloud-catalog.mjs";
 
 export const CLOUD_CONTEXT_KEY = "pos_cloud_context_v1";
 export const CLOUD_OUTBOX_KEY = "pos_cloud_order_outbox_v1";
@@ -128,6 +129,8 @@ export function createLegacyCloudAdapter({
       const body = snapshot ?? buildLegacyCatalogSnapshot(
         await readLegacyCollections(storage),
       );
+      const previous = await storage.get(CLOUD_CONTEXT_KEY);
+      body.expectedRevision = previous?.restaurantId === targetRestaurant ? (previous.revision ?? 0) : 0;
       const response = await fetchImpl("/api/pos/import/legacy-catalog", {
         method: "POST",
         credentials: "same-origin",
@@ -149,6 +152,7 @@ export function createLegacyCloudAdapter({
         version: 1,
         restaurantId: targetRestaurant,
         importedAt: new Date().toISOString(),
+        revision: result.revision ?? 0,
         mappings: {
           menuItems: result.menuItems ?? {},
           tables: result.tables ?? {},
@@ -156,6 +160,7 @@ export function createLegacyCloudAdapter({
         },
       };
       await storage.set(CLOUD_CONTEXT_KEY, context);
+      await storage.set("pos_catalog_baseline", catalogFingerprint(body));
       return { result, context };
     },
 

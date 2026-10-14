@@ -80,6 +80,9 @@ async function apiCall(path, options = {}) {
 }
 let restaurantPage = 1,
   auditPage = 1,
+  paymentPage = 1,
+  editingUser = null,
+  plans = [],
   currentRestaurant = null,
   resetUser = null;
 const pageSize = 20;
@@ -88,6 +91,7 @@ function showView(view) {
     "dashboard-page",
     "restaurants-page",
     "audits-page",
+    "payments-page",
     "detail-view",
   ])
     $(id).classList.add("hidden");
@@ -96,6 +100,7 @@ function showView(view) {
     dashboard: "Overview",
     restaurants: "Restaurants",
     audits: "Audit log",
+    payments: "Payments",
   }[view];
   document
     .querySelectorAll("[data-view]")
@@ -113,7 +118,7 @@ async function checkAuth() {
     return;
   }
   showView("dashboard");
-  await Promise.all([loadDashboard(), loadRestaurants()]).catch(handleError);
+  await Promise.all([loadDashboard(), loadRestaurants(), loadPlans()]).catch(handleError);
 }
 async function loadDashboard() {
   const stats = await apiCall("/platform-admin/api/dashboard");
@@ -198,7 +203,7 @@ $("login-form").addEventListener("submit", async (event) => {
         password: $("password").value,
       }),
     });
-    await checkAuth();
+    await checkAuth().catch(handleError);
   } catch (error) {
     $("login-error").textContent = error.message;
     $("login-error").classList.remove("hidden");
@@ -228,6 +233,7 @@ document.querySelectorAll("[data-view]").forEach(
         dashboard: loadDashboard,
         restaurants: loadRestaurants,
         audits: loadAudits,
+        payments: loadPayments,
       })
         [view]()
         .catch(handleError);
@@ -237,7 +243,9 @@ $("dashboard-restaurants").onclick = () => {
   showView("restaurants");
   loadRestaurants().catch(handleError);
 };
-$("open-create-modal").onclick = () => {
+$("open-create-modal").onclick = async () => {
+  try { await loadPlans(); } catch (error) { handleError(error); return; }
+  if (!plans.length) { toast("No active plans are configured.", true); return; }
   $("create-error").classList.add("hidden");
   $("create-modal").showModal();
 };
@@ -311,7 +319,7 @@ function usersMarkup(users) {
           (
             user,
           ) => `<tr><td><strong>${escapeHtml(user.username || "—")}</strong></td><td>${escapeHtml(user.displayName)}</td><td>${escapeHtml(user.role)}</td><td>${badge(user.status)}</td>
-    <td><div class="action-row"><button class="btn secondary user-reset" data-user="${escapeHtml(user.id)}">Reset password</button>
+    <td><div class="action-row"><button class="btn secondary user-edit" data-user="${escapeHtml(user.id)}">Edit user</button><button class="btn secondary user-reset" data-user="${escapeHtml(user.id)}">Reset password</button>
     <button class="btn ${user.status === "active" ? "danger" : "secondary"} user-status" data-user="${escapeHtml(user.id)}" data-status="${user.status === "active" ? "disabled" : "active"}">${user.status === "active" ? "Disable" : "Enable"}</button></div></td></tr>`,
         )
         .join("")
@@ -366,13 +374,14 @@ async function viewRestaurant(id) {
     <article class="card"><h3>Subscription</h3>${badge(s.status)}<p><strong>${escapeHtml(s.planName)}</strong> · ${escapeHtml(s.planCode || "—")}</p><p class="muted">${date(s.currentPeriodStart)} – ${date(s.currentPeriodEnd)}</p></article>
     <article class="card"><h3>File storage</h3><strong>${bytes(storage.usedStorageBytes)} / ${bytes(storage.maxStorageBytes)}</strong><progress max="100" value="${percentage}" aria-label="Storage used"></progress>
       <form id="storage-form"><label for="storage-limit">Allowance (GB)</label><input id="storage-limit" type="number" min="0" step="any" value="${Number(storage.maxStorageBytes) / 1073741824}" required /><button class="btn secondary" type="submit">Update allowance</button></form></article></div>
-    <article class="card"><h3>Restaurant users</h3><p class="muted">Password resets and disabling users sign out their active devices.</p><div class="table-wrap"><table><thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users-tbody">${usersMarkup(data.users)}</tbody></table></div></article>
+    <article class="card"><div class="section-heading"><h3>Restaurant users</h3><button id="create-user-btn" class="btn secondary">+ Create user</button></div><p class="muted">Password resets and disabling users sign out their active devices.</p><div class="table-wrap"><table><thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users-tbody">${usersMarkup(data.users)}</tbody></table></div></article>
     <article class="card"><h3>Record manual payment</h3><form id="record-pay-form" class="form-grid">
-      <label for="pay-plan">Plan code<input id="pay-plan" value="${escapeHtml(s.planCode || "GROWTH")}" required maxlength="64" /></label>
+      <label for="pay-plan">Subscription plan<select id="pay-plan" required>${planOptions(s.planCode)}</select></label>
       <label for="pay-amount">Amount (PKR)<input id="pay-amount" type="number" min="0" step="0.01" value="5000" required /></label>
       <label for="pay-from">Covered from<input id="pay-from" type="date" required /></label><label for="pay-until">Covered until<input id="pay-until" type="date" required /></label>
       <label for="pay-ref" class="span-two">Transaction reference<input id="pay-ref" required maxlength="200" /></label><div class="span-two"><button type="submit" class="btn">Record payment</button></div></form></article>
     <article class="card"><h3>Payment history</h3><div class="table-wrap"><table><thead><tr><th>Reference / plan</th><th>Amount</th><th>Status</th><th>Coverage</th><th>Actions</th></tr></thead><tbody>${paymentsMarkup(data.payments)}</tbody></table></div></article>`;
+  $("create-user-btn").onclick = () => openUserModal();
   const start = new Date(),
     end = new Date(Date.now() + 30 * 86400000);
   $("pay-from").value = start.toISOString().slice(0, 10);
@@ -455,6 +464,8 @@ $("detail-content").addEventListener("click", (event) => {
     ).catch(handleError);
     return;
   }
+  const edit = event.target.closest(".user-edit");
+  if (edit) { openUserModal(currentRestaurant.users.find(user => user.id === edit.dataset.user)); return; }
   const reset = event.target.closest(".user-reset");
   if (reset) {
     resetUser = currentRestaurant.users.find(
@@ -486,6 +497,7 @@ $("edit-restaurant-btn").onclick = () => {
   const r = currentRestaurant.restaurant;
   for (const [id, key] of [
     ["edit-name", "name"],
+    ["edit-code", "code"],
     ["edit-phone", "phone"],
     ["edit-email", "contactEmail"],
     ["edit-address", "address"],
@@ -498,10 +510,12 @@ $("edit-restaurant-form").onsubmit = async (event) => {
   event.submitter.disabled = true;
   try {
     const id = currentRestaurant.restaurant.id;
+    if ($("edit-code").value.trim().toLowerCase() !== currentRestaurant.restaurant.code && !(await confirmAction("Change restaurant code?", "All restaurant users must sign in again with the new code."))) return;
     await apiCall(`/platform-admin/api/restaurants/${id}`, {
       method: "PATCH",
       body: JSON.stringify({
         name: $("edit-name").value,
+        ...($("edit-code").value.trim().toLowerCase() !== currentRestaurant.restaurant.code ? { code: $("edit-code").value } : {}),
         phone: $("edit-phone").value || null,
         contactEmail: $("edit-email").value || null,
         address: $("edit-address").value || null,
@@ -613,4 +627,69 @@ $("audit-next").onclick = () => {
   auditPage++;
   loadAudits().catch(handleError);
 };
-checkAuth();
+checkAuth().catch(handleError);
+
+function planOptions(selected) {
+  return plans.map(plan => `<option value="${escapeHtml(plan.code)}" ${plan.code === selected ? "selected" : ""}>${escapeHtml(plan.name)} (${escapeHtml(plan.code)})</option>`).join("");
+}
+async function loadPlans() {
+  plans = (await apiCall("/platform-admin/api/plans")).plans;
+  $("create-plan").innerHTML = planOptions("GROWTH");
+}
+function openUserModal(user = null) {
+  editingUser = user;
+  $("user-modal-title").textContent = user ? "Edit user" : "Create user";
+  $("user-username").value = user?.username || "";
+  $("user-display-name").value = user?.displayName || "";
+  $("user-role").value = user?.role || "cashier";
+  $("user-role").disabled = Boolean(user);
+  $("user-password").value = "";
+  $("user-password").hidden = Boolean(user);
+  $("user-password-label").hidden = Boolean(user);
+  $("user-password").required = !user;
+  $("user-modal").showModal();
+}
+$("user-modal").addEventListener("close", () => { $("user-password").value = ""; editingUser = null; });
+$("user-form").onsubmit = async event => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  const id = currentRestaurant.restaurant.id, user = editingUser;
+  try {
+    const payload = { displayName: $("user-display-name").value };
+    if (!user || $("user-username").value !== user.username) payload.username = $("user-username").value;
+    if (user && payload.username && !(await confirmAction("Change username?", "All active sessions for this user will be revoked."))) return;
+    if (!user) Object.assign(payload, { role: $("user-role").value, password: $("user-password").value });
+    await apiCall(`/platform-admin/api/restaurants/${id}/users${user ? `/${user.id}` : ""}`, { method: user ? "PATCH" : "POST", body: JSON.stringify(payload) });
+    $("user-modal").close(); toast(user ? "User updated." : "User created."); await viewRestaurant(id);
+  } catch (error) { handleError(error); }
+  finally { $("user-password").value = ""; button.disabled = false; }
+};
+let paymentReqId = 0;
+async function loadPayments() {
+  const req = ++paymentReqId;
+  $("payments-tbody").innerHTML = '<tr><td colspan="6" class="empty">Loading payments…</td></tr>';
+  try {
+    const data = await apiCall(`/platform-admin/api/payments?${new URLSearchParams({ status: $("payment-filter").value, page: paymentPage, limit: pageSize })}`);
+    if (req !== paymentReqId) return;
+    $("payments-tbody").innerHTML = data.payments.length ? data.payments.map(payment => `<tr><td><button class="btn secondary payment-restaurant" data-id="${escapeHtml(payment.restaurantId)}">${escapeHtml(payment.restaurantName)}</button><p class="muted">${escapeHtml(payment.restaurantCode)}</p></td>${paymentsMarkup([payment]).replace(/^<tr>|<\/tr>$/g, "")}</tr>`).join("") : '<tr><td colspan="6" class="empty">No payments match this filter.</td></tr>';
+    pager("payment", paymentPage, data.totalCount, pageSize);
+  } catch (error) {
+    if (req !== paymentReqId) return;
+    $("payments-tbody").innerHTML = '<tr><td colspan="6" class="empty">Could not load payments. Change the filter to retry.</td></tr>'; throw error;
+  }
+}
+$("payment-filter").onchange = () => { paymentPage = 1; loadPayments().catch(handleError); };
+$("payment-prev").onclick = () => { paymentPage--; loadPayments().catch(handleError); };
+$("payment-next").onclick = () => { paymentPage++; loadPayments().catch(handleError); };
+$("payments-tbody").onclick = async event => {
+  const manage = event.target.closest(".payment-restaurant");
+  if (manage) { viewRestaurant(manage.dataset.id).catch(handleError); return; }
+  const payment = event.target.closest(".btn-approve,.btn-reject"); if (!payment) return;
+  const approve = payment.classList.contains("btn-approve");
+  payment.disabled = true;
+  try {
+    if (!(await confirmAction(approve ? "Approve payment?" : "Reject payment?", approve ? "Extend access once; administrative suspension stays in place." : "This payment will not grant access."))) return;
+    await apiCall(`/platform-admin/api/payments/${payment.dataset.pid}/${approve ? "approve" : "reject"}`, { method: "POST", body: "{}" });
+    toast("Payment reviewed."); await Promise.all([loadPayments(), loadDashboard()]);
+  } catch (error) { handleError(error); }
+  finally { payment.disabled = false; }
+};

@@ -11,7 +11,8 @@ import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { passwordSchema } from "../auth/password-policy.mjs";
-import { PERMISSION } from "../authorization/permissions.mjs";
+import { registerFinanceRoutes } from "./finance-routes.mjs";
+import { PERMISSION, requirePermission } from "../authorization/permissions.mjs";
 import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
@@ -401,6 +402,7 @@ export async function buildHttpApp({
   inventoryService = null,
   recipeService = null,
   purchaseService = null,
+  financeService = null,
   catalogImportService = null,
   subscriptionService = null,
   billingWebhookService = null,
@@ -723,9 +725,10 @@ export async function buildHttpApp({
       && (menuService || businessSettingsService || orderService
         || orderHistoryService || orderCancellationService || orderRefundService
         || salesReportService || supplierService || inventoryService
-        || recipeService || purchaseService || catalogImportService
+        || recipeService || purchaseService || financeService || catalogImportService
         || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
+    if (financeService) await registerFinanceRoutes(app, { guards, financeService });
 
     if (menuService) {
       app.get(
@@ -745,6 +748,10 @@ export async function buildHttpApp({
     }
 
     if (businessSettingsService) {
+      app.get("/api/pos/receipt-business", { preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_CREATE)] }, async request => {
+        const settings = await businessSettingsService.get({ restaurantId: request.tenant.restaurant.id, userId: request.auth.user.id });
+        return { businessName: settings?.businessName, phone: settings?.phone, address: settings?.address };
+      });
       app.get(
         "/api/pos/settings/business",
         {
@@ -787,10 +794,12 @@ export async function buildHttpApp({
           ],
         },
         async (request, reply) => {
+          const input = orderSchema.parse(request.body);
+          if (input.payment?.amountReceivedMinor > 0) requirePermission(request.tenant.membership.role, PERMISSION.PAYMENT_PROCESS);
           const result = await orderService.create({
             tenant: request.tenant,
             userId: request.auth.user.id,
-            input: orderSchema.parse(request.body),
+            input,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
         },
@@ -1325,6 +1334,8 @@ export async function buildHttpApp({
     }
 
     if (catalogImportService) {
+      app.get("/api/pos/catalog", { preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_CREATE)] }, async request =>
+        catalogImportService.read({ restaurantId: request.tenant.restaurant.id, branchId: request.tenant.membership.defaultBranchId, userId: request.auth.user.id, includeCosts: ["owner", "manager"].includes(request.tenant.membership.role) }));
       app.post(
         "/api/pos/import/legacy-catalog",
         {
@@ -1339,6 +1350,7 @@ export async function buildHttpApp({
           branchId: request.tenant.membership.defaultBranchId,
           userId: request.auth.user.id,
           snapshot: legacyCatalogSchema.parse(request.body),
+          expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().parse(request.body?.expectedRevision),
         }),
       );
     }

@@ -160,7 +160,7 @@ async function resolveRestaurantId() {
   return document.querySelector('meta[name="restaurant-id"]')?.content || null;
 }
 
-async function apiRequest(path, options = {}) {
+export async function apiRequest(path, options = {}) {
   const restaurantId = await resolveRestaurantId();
   const headers = { "Content-Type": "application/json" };
   if (restaurantId) headers["x-restaurant-id"] = restaurantId;

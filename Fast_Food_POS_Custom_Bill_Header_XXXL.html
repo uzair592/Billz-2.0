@@ -11281,7 +11281,7 @@
           <div id="ledger-movement-modal" class="modal-overlay hidden" style="z-index:9999;"><div class="modal-card" style="max-width:430px;"><h2>Record Money Movement</h2><div style="display:grid; gap:8px;"><select id="ledger-movement-destination"></select><select id="ledger-movement-type"><option value="opening">Opening balance / Adjustment In</option><option value="deposit">Deposit / Other Income</option><option value="withdrawal">Withdrawal / Other Expense</option></select><input id="ledger-movement-amount" type="number" min="0.01" step="0.01" placeholder="Amount"><input id="ledger-movement-date" type="date"><input id="ledger-movement-description" placeholder="Description"><div style="display:flex; gap:8px;"><button type="button" class="btn-sm primary" onclick="saveLedgerMovement()">Save</button><button type="button" class="btn-sm" onclick="closeLedgerMovementModal()">Cancel</button></div></div></div></div>
         </section>
 
-        <section id="screen-expenses" class="screen-view hidden">
+        <section id="screen-expenses" class="screen-view hidden"><div id="cloud-expenses-container" class="hidden"></div><div id="local-expenses-container">
           <div
             style="
               display: flex;
@@ -11760,9 +11760,9 @@
               </div>
             </div>
           </div>
-        </section>
+        </div></section>
 
-        <section id="screen-reports" class="screen-view hidden">
+        <section id="screen-reports" class="screen-view hidden"><div id="cloud-profit-loss-container" class="hidden" style="margin-bottom:24px"></div>
           <div
             style="
               display: flex;
@@ -13643,7 +13643,8 @@
             style="width: 100%; padding: 11px 14px; border: none; border-radius: 8px; background: #059669; color: white; font-size: 14px; font-weight: 700; cursor: pointer"
           >
             Copy this till's menu, tables &amp; stock to the cloud
-          </button>
+          </button><button type="button" id="cloud-refresh-button" onclick="submitCloudRefresh()">Refresh shared menu</button>
+          <p style="font-size:12px;color:#475569">Publish menu edits from this device to share them. New devices load the published menu automatically. Conflicting edits require a refresh. Checkout needs an internet connection.</p>
           <p style="margin: 8px 0 0; font-size: 11px; color: #94a3b8; line-height: 1.5">
             This copies your current menu, tables, halls, bank accounts and kitchen
             stock. Nothing on this device is deleted, and you can repeat it safely.
@@ -13817,6 +13818,22 @@
         } catch (error) {
           cloudSetStatus(error.message || "That restaurant could not be selected.", "error");
         }
+      }
+
+      async function refreshCloudCatalog(force = false) {
+        if (!window.BILLZ_MANAGED || !window.BILLZ_TENANT_ID) return;
+        const { refreshSharedCatalog } = await import("/src/client/cloud-catalog.mjs");
+        return refreshSharedCatalog({ storage: Storage, restaurantId: window.BILLZ_TENANT_ID, force });
+      }
+
+      async function submitCloudRefresh() {
+        if (cart.length) { cloudSetStatus("Finish or clear the current bill before refreshing the menu.", "error"); return; }
+        if (!confirm("Replace this device's unpublished menu edits with the shared menu?")) return;
+        try {
+          const result = await refreshCloudCatalog(true);
+          if (result?.status === "refreshed") { await initSystemData(); renderDynamicCategoryTabsRow(); renderFoodGridOrderingUI(); cloudSetStatus("Shared menu refreshed on this device."); }
+          else cloudSetStatus("The owner must publish the first menu from this restaurant's setup device.");
+        } catch (error) { cloudSetStatus(error.message, "error"); }
       }
 
       async function submitCloudImport() {
@@ -15753,7 +15770,12 @@
           }
         }
 
-        if (screenId === "expenses") {
+        if (screenId === "expenses" && window.BILLZ_MANAGED) {
+          document.getElementById("local-expenses-container").classList.add("hidden");
+          document.getElementById("cloud-expenses-container").classList.remove("hidden");
+          window.BillzCloudExpenses?.mount();
+        }
+        if (screenId === "expenses" && !window.BILLZ_MANAGED) {
           populateExpenseFieldSelect();
           populateExpenseFieldFilter();
           populateExpenseLedgerDestinations();
@@ -15770,7 +15792,11 @@
         }
 
         if (screenId === "reports") {
-          calculateAndRenderBusinessReports();
+          if (window.BILLZ_MANAGED) {
+            document.getElementById("cloud-profit-loss-container").classList.remove("hidden");
+            window.BillzCloudProfit?.mount();
+            window.showCloudSalesReport?.();
+          } else calculateAndRenderBusinessReports();
         }
 
         if (screenId === "ledger") {
@@ -19963,6 +19989,8 @@
               || (account.restaurants?.length === 1 ? account.restaurants[0] : null);
             if (!allowed) throw new Error("Choose a restaurant to continue.");
             window.BILLZ_TENANT_ID = allowed.restaurantId;
+            window.BILLZ_ROLE = allowed.role;
+            AppState.session.userRole = allowed.role;
             await idbSet("pos_cloud_session_v1", { user: account.user, restaurantId: allowed.restaurantId });
             const responseMenu = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": allowed.restaurantId } });
             if (!responseMenu.ok) {
@@ -19982,6 +20010,13 @@
         applySavedSidebarCollapseState();
 
         bootStep(2, "loading your data");
+        if (window.BILLZ_MANAGED) {
+          await refreshCloudCatalog();
+          const response = await fetch("/api/pos/receipt-business", { credentials: "same-origin", cache: "no-store", headers: { "x-restaurant-id": window.BILLZ_TENANT_ID } });
+          if (!response.ok) throw new Error("Could not load this restaurant's receipt details.");
+          const settings = await response.json();
+          await Storage.setMany({ pos_business_name: settings.businessName, pos_business_name_provided: true, pos_business_phone: settings.phone || "", pos_business_address: settings.address || "" });
+        }
         await initSystemData();
         // 🏪 Both of these MUST run after initSystemData, since businessName/businessPhone/businessAddress
         // are only loaded from storage in there — running them earlier would paint the defaults instead.
@@ -26261,6 +26296,7 @@
 
       let expenseEntrySaving = false;
       async function saveExpenseEntry(event) {
+        if (window.BILLZ_MANAGED) { event?.preventDefault(); window.BillzCloudExpenses?.mount(); return; }
         event.preventDefault();
         if (expenseEntrySaving) return;
 

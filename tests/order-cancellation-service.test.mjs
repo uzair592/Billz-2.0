@@ -158,7 +158,7 @@ describe("order cancellation service", () => {
     assert.match(reversal.text, /idempotency_key/);
     assert.match(reversal.text, /DO NOTHING/);
     assert.deepEqual(reversal.values, [
-      restaurantId, orderId, branchId, now, userId,
+      restaurantId, orderId, branchId, now, userId, "[]",
     ]);
     assert.equal(
       pool.calls.filter((call) => call.text.startsWith("UPDATE inventory_balances")).length,

@@ -24,6 +24,7 @@ import { createSupplierService } from "./pos/supplier-service.mjs";
 import { createInventoryService } from "./pos/inventory-service.mjs";
 import { createRecipeService } from "./pos/recipe-service.mjs";
 import { createPurchaseService } from "./pos/purchase-service.mjs";
+import { createFinanceService } from "./pos/finance-service.mjs";
 import { createInventoryConsumptionService } from "./pos/inventory-consumption-service.mjs";
 import {
   loadBillingConfiguration,
@@ -164,6 +165,7 @@ export async function createServer({
   const inventoryService = createInventoryService(database);
   const recipeService = createRecipeService(database);
   const purchaseService = createPurchaseService(database);
+  const financeService = createFinanceService(database);
 
   const app = await buildHttpApp({
     authService,
@@ -188,6 +190,7 @@ export async function createServer({
     inventoryService,
     recipeService,
     purchaseService,
+    financeService,
     trustedOrigin: config.trustedOrigin,
     trustedOrigins: config.trustedOrigins,
     secureCookies: config.secureCookies,

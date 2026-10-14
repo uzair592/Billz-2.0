@@ -172,6 +172,7 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           });
           const refundsSummaryRes = await client.query(
             `SELECT COALESCE(SUM(r.total_refunded_minor), 0) AS refund_total,
+                    COALESCE(SUM(CASE WHEN o.order_status = 'completed' THEN r.total_refunded_minor ELSE 0 END), 0) AS completed_refund_total,
                     COUNT(DISTINCT r.order_id)::int AS refunded_order_count
                FROM order_refunds r
                JOIN orders o ON o.id = r.order_id AND o.restaurant_id = r.restaurant_id
@@ -183,7 +184,9 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const refundTotalMinor = minor(refundsSummaryRes.rows[0].refund_total);
           const refundedOrderCount = Number(refundsSummaryRes.rows[0].refunded_order_count);
 
-          const netSalesMinor = Math.max(0, completedSalesMinor - refundTotalMinor);
+          const completedRefundMinor = refundsSummaryRes.rows[0].completed_refund_total === undefined
+            ? refundTotalMinor : minor(refundsSummaryRes.rows[0].completed_refund_total);
+          const netSalesMinor = Math.max(0, completedSalesMinor - completedRefundMinor);
           const averageOrderValueMinor = completedOrderCount > 0
             ? Math.round(netSalesMinor / completedOrderCount)
             : 0;
