@@ -21,6 +21,7 @@ import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
 import { failedAuthLimit } from "./failed-auth-limit.mjs";
 import { safeHttpLogger } from "./safe-logging.mjs";
 import { createIpAllowlist } from "../auth/ip-allowlist.mjs";
+import { POS_CSP_REPORT_ONLY, summarizeCspReport } from "./csp-report.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
@@ -474,15 +475,22 @@ export async function buildHttpApp({
 
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
+  app.addContentTypeParser("application/csp-report", { parseAs: "string", bodyLimit: 8192 }, (_request, body, done) => {
+    try { done(null, JSON.parse(body)); }
+    catch { done(Object.assign(new Error("Invalid CSP report."), { statusCode: 400 })); }
+  });
   const rateLimitMax = nodeEnv === "test" ? 100_000 : 120;
   await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute",
     allowList: nodeEnv === "test" && process.env.DISABLE_RATE_LIMIT === "true" ? () => true : undefined });
 
-  // Security headers that do not depend on helmet's CSP. The legacy POS
-  // uses inline event handlers and inline scripts, so a restrictive CSP
-  // would break it; CSP is deliberately left off and this limitation is
-  // documented.
+  // The POS still has inline scripts/handlers. Report violations first;
+  // docs/audit/XSS_AUDIT.md describes the prerequisites for enforcement.
   app.addHook("onSend", async (_request, reply) => {
+    let path;
+    try { path = decodeURIComponent(_request.url.split("?")[0]); } catch { path = ""; }
+    if (path === "/" || path === "/Fast_Food_POS_Custom_Bill_Header_XXXL.html") {
+      reply.header("Content-Security-Policy-Report-Only", POS_CSP_REPORT_ONLY);
+    }
     if (new URL(_request.url, "http://internal").pathname === "/platform-admin" || _request.url.startsWith("/platform-admin/")) {
       reply.header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
       reply.header("Cache-Control", "no-store");
@@ -533,6 +541,13 @@ export async function buildHttpApp({
   // query the database or expose any configuration, so a database outage
   // does not cause the orchestrator to restart a healthy process.
   app.get("/health/live", async () => ({ status: "ok" }));
+
+  app.post("/api/csp-report", { bodyLimit: 8192, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
+    const report = summarizeCspReport(request.body);
+    if (!report) return reply.code(400).send({ error: "Invalid CSP report." });
+    request.log.warn(report);
+    return reply.code(204).send();
+  });
 
   // Readiness: confirms the application can safely receive traffic. It
   // verifies PostgreSQL connectivity with a short timeout and that the

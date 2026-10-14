@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: ["saas-core-acceptance.spec.mjs", "launch-readiness-acceptance.spec.mjs", "admin-control-acceptance.spec.mjs", "admin-mfa-acceptance.spec.mjs"],
+  testMatch: ["saas-core-acceptance.spec.mjs", "launch-readiness-acceptance.spec.mjs", "admin-control-acceptance.spec.mjs", "admin-mfa-acceptance.spec.mjs", "pos-xss-acceptance.spec.mjs"],
   timeout: 60_000,
   expect: { timeout: 10_000 },
   retries: 0,

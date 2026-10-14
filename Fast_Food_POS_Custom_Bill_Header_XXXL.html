@@ -14695,8 +14695,8 @@
         let balance = ledgerMoney(opening);
         const openingDate = accountId ? (bankAccountById(accountId)?.asOfDate || "") : "";
         const html = [];
-        if (opening || accountId) { html.push(`<tr><td>${openingDate || "Opening"}</td><td>Opening balance</td><td>${opening > 0 ? `Rs. ${opening.toFixed(2)}` : "—"}</td><td>—</td><td>Rs. ${balance.toFixed(2)}</td></tr>`); }
-        list.forEach((row) => { balance = ledgerMoney(balance + Number(row.moneyIn || 0) - Number(row.moneyOut || 0)); html.push(`<tr><td>${escapeHtmlForExport(row.date || "")}</td><td>${escapeHtmlForExport(row.description || "")}${row.orderId ? ` <small>#${row.orderId}</small>` : ""}</td><td>${row.moneyIn ? `Rs. ${Number(row.moneyIn).toFixed(2)}` : "—"}</td><td>${row.moneyOut ? `Rs. ${Number(row.moneyOut).toFixed(2)}` : "—"}</td><td>Rs. ${balance.toFixed(2)}</td></tr>`); });
+        if (opening || accountId) { html.push(`<tr><td>${escapeHtmlForExport(openingDate || "Opening")}</td><td>Opening balance</td><td>${opening > 0 ? `Rs. ${opening.toFixed(2)}` : "—"}</td><td>—</td><td>Rs. ${balance.toFixed(2)}</td></tr>`); }
+        list.forEach((row) => { balance = ledgerMoney(balance + Number(row.moneyIn || 0) - Number(row.moneyOut || 0)); html.push(`<tr><td>${escapeHtmlForExport(row.date || "")}</td><td>${escapeHtmlForExport(row.description || "")}${row.orderId ? ` <small>#${escapeHtmlForExport(row.orderId)}</small>` : ""}</td><td>${row.moneyIn ? `Rs. ${Number(row.moneyIn).toFixed(2)}` : "—"}</td><td>${row.moneyOut ? `Rs. ${Number(row.moneyOut).toFixed(2)}` : "—"}</td><td>Rs. ${balance.toFixed(2)}</td></tr>`); });
         target.innerHTML = html.join("") || `<tr><td colspan="5" style="color:#64748b;">No transactions yet.</td></tr>`;
       }
       function getBankRows(accountId) { return bankTransactions.filter((row) => String(row.accountId) === String(accountId)); }
@@ -14714,11 +14714,11 @@
           accountCards.innerHTML = bankAccounts.map((account, index) => {
             const balance = ledgerBalance(getBankRows(account.id), ledgerMoney(account.openingBalance));
             const selected = selectedAccount && String(selectedAccount.id) === String(account.id);
-            return `<div class="bank-account-card" data-bank-index="${index}" role="button" tabindex="0" aria-labelledby="bank-account-name-${index}" aria-pressed="${selected ? "true" : "false"}" style="border:2px solid ${selected ? "#2563eb" : "#cbd5e1"}; background:${selected ? "#eff6ff" : "#fff"}; border-radius:8px; padding:10px; cursor:pointer;">
-              <div style="display:flex; justify-content:space-between; gap:4px;"><strong id="bank-account-name-${index}">${escapeHtmlForExport(account.displayName)}</strong><span style="font-size:11px; color:${account.active === false ? "#dc2626" : "#16a34a"}">${account.active === false ? "Inactive" : "Active"}</span></div>
+            return `<div class="bank-account-card" data-bank-index="${escapeHtmlForExport(index)}" role="button" tabindex="0" aria-labelledby="bank-account-name-${escapeHtmlForExport(index)}" aria-pressed="${selected ? "true" : "false"}" style="border:2px solid ${selected ? "#2563eb" : "#cbd5e1"}; background:${selected ? "#eff6ff" : "#fff"}; border-radius:8px; padding:10px; cursor:pointer;">
+              <div style="display:flex; justify-content:space-between; gap:4px;"><strong id="bank-account-name-${escapeHtmlForExport(index)}">${escapeHtmlForExport(account.displayName)}</strong><span style="font-size:11px; color:${account.active === false ? "#dc2626" : "#16a34a"}">${account.active === false ? "Inactive" : "Active"}</span></div>
               <div style="font-size:12px; color:#64748b;">${escapeHtmlForExport(account.bankName)}${account.accountNumber ? ` · ${escapeHtmlForExport(account.accountNumber)}` : ""}</div>
               <div style="font-size:18px; font-weight:800; margin:4px 0;">Rs. ${balance.toFixed(2)}</div>
-              <div style="display:flex; gap:8px; align-items:center;"><span style="color:#2563eb; font-size:12px; font-weight:700;">View statement →</span><button type="button" class="btn-sm" data-bank-edit-index="${index}">Edit</button></div>
+              <div style="display:flex; gap:8px; align-items:center;"><span style="color:#2563eb; font-size:12px; font-weight:700;">View statement →</span><button type="button" class="btn-sm" data-bank-edit-index="${escapeHtmlForExport(index)}">Edit</button></div>
             </div>`;
           }).join("") || `<p style="color:#64748b;">No bank accounts added.</p>`;
           accountCards.onclick = (event) => {
@@ -14770,7 +14770,7 @@
       function saveBankAccount() { const id = document.getElementById("bank-edit-id").value; const data = { displayName: document.getElementById("bank-display-name").value.trim(), bankName: document.getElementById("bank-name").value.trim(), accountNumber: document.getElementById("bank-account-number").value.trim(), openingBalance: ledgerMoney(document.getElementById("bank-opening-balance").value), asOfDate: document.getElementById("bank-as-of-date").value || getLocalDateString(), active: document.getElementById("bank-active").checked }; if (!data.displayName || !data.bankName) return alert("Enter a display name and bank name."); if (id) Object.assign(bankAccountById(id), data); else { data.id = ledgerNextId(bankAccounts); bankAccounts.push(data); selectedBankAccountId = data.id; } saveToStorage(); populatePaymentBankAccounts(); renderCashBankScreen(); closeBankAccountForm(); }
       function openLedgerMovementModal() { populateLedgerMovementDestinations(); document.getElementById("ledger-movement-date").value = getLocalDateString(); document.getElementById("ledger-movement-modal").classList.remove("hidden"); }
       function closeLedgerMovementModal() { document.getElementById("ledger-movement-modal")?.classList.add("hidden"); }
-      function populateLedgerMovementDestinations() { const select = document.getElementById("ledger-movement-destination"); if (!select) return; select.innerHTML = `<option value="cash">Cash</option>` + bankAccounts.filter((a) => a.active !== false).map((a) => `<option value="bank:${a.id}">🏦 ${escapeHtmlForExport(a.displayName)}</option>`).join(""); }
+      function populateLedgerMovementDestinations() { const select = document.getElementById("ledger-movement-destination"); if (!select) return; select.innerHTML = `<option value="cash">Cash</option>` + bankAccounts.filter((a) => a.active !== false).map((a) => `<option value="bank:${escapeHtmlForExport(a.id)}">🏦 ${escapeHtmlForExport(a.displayName)}</option>`).join(""); }
       function saveLedgerMovement() { const destination = document.getElementById("ledger-movement-destination").value; const amount = ledgerMoney(document.getElementById("ledger-movement-amount").value); const type = document.getElementById("ledger-movement-type").value; const date = document.getElementById("ledger-movement-date").value || getLocalDateString(); const description = document.getElementById("ledger-movement-description").value.trim() || (type === "opening" ? "Opening balance adjustment" : type === "deposit" ? "Other deposit" : "Other withdrawal"); if (amount <= 0) return alert("Enter a valid amount."); const [destinationType, accountId] = destination.split(":"); const row = makeLedgerRow({ date, description, type: type === "withdrawal" ? "out" : "in", amount, source: type }); row.accountId = accountId || null; row.destinationType = destinationType; row.sourceKey = `manual:${row.id}`; addLedgerRow(row); saveToStorage(); closeLedgerMovementModal(); renderCashBankScreen(); }
       let ledgerTransferSaving = false;
 
@@ -15512,7 +15512,7 @@
         return tableNumbers
           .map(
             (n) =>
-              `<option value="${n}" ${selectedValue === n ? "selected" : ""}>Table ${n}</option>`,
+              `<option value="${escapeHtmlForExport(n)}" ${selectedValue === n ? "selected" : ""}>Table ${escapeHtmlForExport(n)}</option>`,
           )
           .join("");
       }
@@ -15610,10 +15610,10 @@
           .map(
             (hall, idx) => `
                 <div style="display:flex; gap:8px; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px;">
-                    <input type="text" value="${escapeHtmlForExport(hall)}" data-hall-index="${idx}"
-                           onchange="renameHall(${idx}, this.value)"
+                    <input type="text" value="${escapeHtmlForExport(hall)}" data-hall-index="${escapeHtmlForExport(idx)}"
+                           onchange="renameHall(${htmlJsValue(idx)}, this.value)"
                            style="flex:1; padding:7px 9px; border:1px solid #cbd5e1; border-radius:5px; font-size:14px;">
-                    <button type="button" onclick="deleteHall(${idx})" title="Delete this hall"
+                    <button type="button" onclick="deleteHall(${htmlJsValue(idx)})" title="Delete this hall"
                             style="background:#fee2e2; color:#dc2626; border:none; padding:7px 11px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️</button>
                 </div>
             `,
@@ -15753,7 +15753,7 @@
         if (!select) return;
         const active = bankAccounts.filter((account) => account.active !== false);
         if (!active.some((account) => String(account.id) === String(currentPaymentAccountId))) currentPaymentAccountId = null;
-        select.innerHTML = `<option value="">Select bank account</option>` + active.map((account) => `<option value="${account.id}" ${String(account.id) === String(currentPaymentAccountId) ? "selected" : ""}>${escapeHtmlForExport(account.displayName)} — ${escapeHtmlForExport(account.bankName)}</option>`).join("");
+        select.innerHTML = `<option value="">Select bank account</option>` + active.map((account) => `<option value="${escapeHtmlForExport(account.id)}" ${String(account.id) === String(currentPaymentAccountId) ? "selected" : ""}>${escapeHtmlForExport(account.displayName)} — ${escapeHtmlForExport(account.bankName)}</option>`).join("");
         if (!currentPaymentAccountId && active.length === 1) { currentPaymentAccountId = String(active[0].id); select.value = currentPaymentAccountId; }
       }
 
@@ -15815,17 +15815,14 @@
           const row = document.createElement("tr");
           row.dataset.cartItemId = String(item.id);
           // Custom ice cream lines use a string ID — needs to be quoted in the onclick, unlike normal numeric IDs
-          const idArg =
-            typeof item.id === "string"
-              ? `'${String(item.id).replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
-              : item.id;
+          const idArg = htmlJsValue(item.id);
 
 
 
 
-          const priceInputHtml = `<input type="number" min="0" step="any" value="${item.price}" class="cart-price-input" style="width:72px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right;" onchange="updateCartItemPrice(${idArg}, this.value)">`;
+          const priceInputHtml = `<input type="number" min="0" step="any" value="${escapeHtmlForExport(item.price)}" class="cart-price-input" style="width:72px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right;" onchange="updateCartItemPrice(${idArg}, this.value)">`;
 
-          let priceCellHtml = `${priceInputHtml}<div class="cart-line-total">${formatRs(MoneyEngine.calculate({items:[item]}).total)}</div>`;
+          let priceCellHtml = `${priceInputHtml}<div class="cart-line-total">${escapeHtmlForExport(formatRs(MoneyEngine.calculate({items:[item]}).total))}</div>`;
           if (item.originalPrice) {
             const isManualOverride = item.offerLabel === "✏️ Custom Price";
             const isCatOffer =
@@ -15845,9 +15842,9 @@
                         ${priceInputHtml}
                         <div class="offer-price-wrap" style="margin-top:3px;">
                             <span class="offer-price-strike">Rs. ${item.originalPrice * item.qty}</span>
-                            <strong class="${priceClass}">Rs. ${item.price * item.qty}</strong>
+                            <strong class="${escapeHtmlForExport(priceClass)}">Rs. ${item.price * item.qty}</strong>
                         </div>
-                        <div class="offer-note-line ${noteClass}">${escapeHtmlForExport(item.offerLabel)}</div>
+                        <div class="offer-note-line ${escapeHtmlForExport(noteClass)}">${escapeHtmlForExport(item.offerLabel)}</div>
                     `;
           }
 
@@ -15857,14 +15854,14 @@
             .map((extra, idx) => {
               const def = stockItemDefs[extra.key];
               const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromCartItem(${idArg}, ${idx})" title="Remove">✕</button></span>`;
+              return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)}<button type="button" onclick="removeExtraFromCartItem(${idArg}, ${htmlJsValue(idx)})" title="Remove">✕</button></span>`;
             })
             .join("");
           const nameCell = `<span class="cart-item-name">${escapeHtmlForExport(item.name)}</span><br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openCartExtrasModal(${idArg})">➕ Add Extra</span>`;
 
           row.innerHTML = `
                     <td>${nameCell}</td>
-                    <td><input type="number" min="1" step="1" value="${item.qty}" class="cart-qty-input" style="width:56px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="updateCartItemQty(${idArg}, this.value)"></td>
+                    <td><input type="number" min="1" step="1" value="${escapeHtmlForExport(item.qty)}" class="cart-qty-input" style="width:56px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="updateCartItemQty(${idArg}, this.value)"></td>
                     <td>${priceCellHtml}</td>
                     <td><button type="button" class="delete-item-btn" onclick="removeFromCart(${idArg})">❌</button></td>
                 `;
@@ -16026,7 +16023,7 @@
             ? ` (Rs. ${(getSellUnitCost(key) * qty).toFixed(2)} × ${lineQty} qty)`
             : "";
         document.getElementById("cart-extra-cost-preview").innerHTML =
-          `≈ Cost: <strong>Rs. ${cost.toFixed(2)}</strong>${perUnitNote}`;
+          `≈ Cost: <strong>Rs. ${cost.toFixed(2)}</strong>${escapeHtmlForExport(perUnitNote)}`;
       }
 
       // Clears the form back to a blank "Add" state (used on open, and after Add/Update/Cancel)
@@ -16122,10 +16119,10 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
-                            <button type="button" onclick="startEditExtraInCartItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
-                            <button type="button" onclick="removeExtraFromCartItem(${cartExtrasModalTargetId}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
+                            <button type="button" onclick="startEditExtraInCartItem(${htmlJsValue(idx)})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
+                            <button type="button" onclick="removeExtraFromCartItem(${htmlJsValue(cartExtrasModalTargetId)}, ${htmlJsValue(idx)})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
                         </span>
                     </div>
                 `;
@@ -16158,10 +16155,10 @@
         charges.forEach((charge, index) => {
           const row = document.createElement("div");
           row.style.cssText = "display:grid; grid-template-columns:minmax(110px,1fr) 92px 82px 28px; gap:5px; align-items:center; margin-bottom:6px;";
-          row.innerHTML = `<input type="text" value="${escapeHtmlForExport(charge.name).replace(/"/g, "&quot;")}" placeholder="Charge name" oninput="updateAdditionalCharge(${index}, 'name', this.value)">
-            <select onchange="updateAdditionalCharge(${index}, 'type', this.value)"><option value="percent" ${charge.type === "percent" ? "selected" : ""}>Percent %</option><option value="flat" ${charge.type === "flat" ? "selected" : ""}>Flat Rs.</option></select>
-            <input type="number" min="0" step="0.01" value="${charge.value}" oninput="updateAdditionalCharge(${index}, 'value', this.value)">
-            <button type="button" class="delete-item-btn" title="Remove charge" onclick="removeAdditionalCharge(${index})">×</button>`;
+          row.innerHTML = `<input type="text" value="${escapeHtmlForExport(charge.name).replace(/"/g, "&quot;")}" placeholder="Charge name" oninput="updateAdditionalCharge(${htmlJsValue(index)}, 'name', this.value)">
+            <select onchange="updateAdditionalCharge(${htmlJsValue(index)}, 'type', this.value)"><option value="percent" ${charge.type === "percent" ? "selected" : ""}>Percent %</option><option value="flat" ${charge.type === "flat" ? "selected" : ""}>Flat Rs.</option></select>
+            <input type="number" min="0" step="0.01" value="${escapeHtmlForExport(charge.value)}" oninput="updateAdditionalCharge(${htmlJsValue(index)}, 'value', this.value)">
+            <button type="button" class="delete-item-btn" title="Remove charge" onclick="removeAdditionalCharge(${htmlJsValue(index)})">×</button>`;
           rows.appendChild(row);
         });
       }
@@ -16246,7 +16243,7 @@
           if (!isNaN(received) && receivedInput.value !== "") {
             const remaining = totals.due;
             if (remaining > 0) {
-              balancePreview.innerHTML = `<span style="color:#dc2626; font-weight:700;">Remaining Due: ${formatRs(remaining)}</span>`;
+              balancePreview.innerHTML = `<span style="color:#dc2626; font-weight:700;">Remaining Due: ${escapeHtmlForExport(formatRs(remaining))}</span>`;
             } else {
               balancePreview.innerHTML = `<span style="color:#16a34a; font-weight:700;">Fully covered — consider marking this Paid instead</span>`;
             }
@@ -16672,11 +16669,11 @@
             ? `${escapeHtmlForExport(item.name)}<span class="receipt-offer-tag">${escapeHtmlForExport(item.offerLabel)}</span>`
             : escapeHtmlForExport(item.name);
           const unitPriceHtml = item.originalPrice
-            ? `<span class="receipt-strike">Rs.${item.originalPrice}</span> Rs.${item.price}`
+            ? `<span class="receipt-strike">Rs.${escapeHtmlForExport(item.originalPrice)}</span> Rs.${escapeHtmlForExport(item.price)}`
             : item.price;
           tr.innerHTML = `
                     <td>${nameHtml}</td>
-                    <td class="text-right">${item.qty}</td>
+                    <td class="text-right">${escapeHtmlForExport(item.qty)}</td>
                     <td class="text-right">${unitPriceHtml}</td>
                     <td class="text-right">Rs. ${item.price * item.qty}</td>
                 `;
@@ -16728,11 +16725,11 @@
             .map((extra) => {
               const def = stockItemDefs[extra.key];
               const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}</div>`;
+              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(def ? def.label : extra.key)} ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)}</div>`;
             })
             .join("");
           tr.innerHTML = `
-                    <td class="kitchen-qty">${item.qty}x</td>
+                    <td class="kitchen-qty">${escapeHtmlForExport(item.qty)}x</td>
                     <td>${escapeHtmlForExport(item.name)}${extrasHtml}</td>
                 `;
           kTbody.appendChild(tr);
@@ -17780,7 +17777,7 @@
             ) {
               return `
                         <div style="margin-bottom: 14px;">
-                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
+                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${escapeHtmlForExport(cartItem.qty)})</span></strong>
                             <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">⚠️ No ingredients found for this item (it may have been changed or removed from the menu since this order was placed) — nothing to restock here.</div>
                         </div>
                     `;
@@ -17800,8 +17797,8 @@
                                 ${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
-                                <input type="number" class="cancel-restock-amount" min="0" max="${displayAmount}" step="any" value="${displayAmount}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
-                                <span style="font-size:12px; color:#64748b;">${unitLabel}</span>
+                                <input type="number" class="cancel-restock-amount" min="0" max="${escapeHtmlForExport(displayAmount)}" step="any" value="${escapeHtmlForExport(displayAmount)}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
+                                <span style="font-size:12px; color:#64748b;">${escapeHtmlForExport(unitLabel)}</span>
                             </span>
                         </div>
                     `;
@@ -17813,10 +17810,10 @@
                         <div class="cancel-restock-item-row" data-type="softdrink" data-key="${escapeHtmlForExport(sd.key)}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                🥤 ${escapeHtmlForExport(brand)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${size}</span>
+                                🥤 ${escapeHtmlForExport(brand)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${escapeHtmlForExport(size)}</span>
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
-                                <input type="number" class="cancel-restock-amount" min="0" max="${sd.units}" step="1" value="${sd.units}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
+                                <input type="number" class="cancel-restock-amount" min="0" max="${escapeHtmlForExport(sd.units)}" step="1" value="${escapeHtmlForExport(sd.units)}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
                                 <span style="font-size:12px; color:#64748b;">Units</span>
                             </span>
                         </div>
@@ -17829,10 +17826,10 @@
                         <div class="cancel-restock-item-row" data-type="icecream" data-key="${escapeHtmlForExport(ic.key)}" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:#f8fafc; border-radius:6px;">
                             <span style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;">
                                 <input type="checkbox" class="cancel-restock-row" checked onchange="this.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked;" style="width:16px; height:16px;">
-                                🍦 ${escapeHtmlForExport(name)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${size}g</span>
+                                🍦 ${escapeHtmlForExport(name)} ${escapeHtmlForExport(flavor)} <span style="color:#94a3b8; font-weight:400;">${escapeHtmlForExport(size)}g</span>
                             </span>
                             <span style="display:flex; align-items:center; gap:4px;">
-                                <input type="number" class="cancel-restock-amount" min="0" max="${ic.servings}" step="1" value="${ic.servings}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
+                                <input type="number" class="cancel-restock-amount" min="0" max="${escapeHtmlForExport(ic.servings)}" step="1" value="${escapeHtmlForExport(ic.servings)}" style="width:80px; padding:4px 6px; border:1px solid #cbd5e1; border-radius:4px; text-align:right; font-size:13px;">
                                 <span style="font-size:12px; color:#64748b;">Servings</span>
                             </span>
                         </div>
@@ -17842,13 +17839,13 @@
             return `
                     <div style="margin-bottom: 14px;">
                         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
-                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${cartItem.qty})</span></strong>
+                            <strong style="font-size: 14px;">${escapeHtmlForExport(cartItem.name)} <span style="font-weight:400; color:#64748b;">(Qty: ${escapeHtmlForExport(cartItem.qty)})</span></strong>
                             <label style="font-size:12px; color:#64748b; display:flex; align-items:center; gap:4px; cursor:pointer;">
-                                <input type="checkbox" checked onchange="document.getElementById('cancel-restock-group-${itemIdx}').querySelectorAll('.cancel-restock-row').forEach(cb => { cb.checked = this.checked; cb.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked; })">
+                                <input type="checkbox" checked onchange="document.getElementById('cancel-restock-group-${htmlJsValue(itemIdx)}').querySelectorAll('.cancel-restock-row').forEach(cb => { cb.checked = this.checked; cb.closest('.cancel-restock-item-row').querySelector('.cancel-restock-amount').disabled = !this.checked; })">
                                 Select All
                             </label>
                         </div>
-                        <div id="cancel-restock-group-${itemIdx}" style="display:flex; flex-direction:column; gap:6px;">
+                        <div id="cancel-restock-group-${escapeHtmlForExport(itemIdx)}" style="display:flex; flex-direction:column; gap:6px;">
                             ${[...ingredientRows, ...softDrinkRows, ...iceCreamRows].join("")}
                         </div>
                     </div>
@@ -19222,7 +19219,7 @@
           const soldCount = salesCounts[item.id] || 0;
           let soldTagHtml =
             soldCount > 0
-              ? `<div style="font-size: 10px; color: #16a34a; font-weight: 700; margin-top: 2px;">🔥 ${soldCount} sold</div>`
+              ? `<div style="font-size: 10px; color: #16a34a; font-weight: 700; margin-top: 2px;">🔥 ${escapeHtmlForExport(soldCount)} sold</div>`
               : "";
 
 
@@ -19230,23 +19227,23 @@
 
           const imgElId = `food-img-${item.id}`;
           const imageHtml = item.hasImage
-            ? `<img id="${imgElId}" src="${menuImageObjectUrlCache[item.id] || ""}" alt="" style="width:100%; height:64px; object-fit:cover; border-radius:6px; margin-bottom:6px; background:#f1f5f9;">`
+            ? `<img id="${escapeHtmlForExport(imgElId)}" src="${escapeHtmlForExport(menuImageObjectUrlCache[item.id] || "")}" alt="" style="width:100%; height:64px; object-fit:cover; border-radius:6px; margin-bottom:6px; background:#f1f5f9;">`
             : "";
 
           // 🔥🏷️ Offer badge + price — orange "flame" pill for an item's own offer, purple "tag" pill for a category-wide offer
           let offerBadgeHtml = "";
-          let priceHtml = `<span class="price-tag">Rs. ${item.price}</span>`;
+          let priceHtml = `<span class="price-tag">Rs. ${escapeHtmlForExport(item.price)}</span>`;
           if (isItemOffer) {
             offerBadgeHtml = `<div class="offer-pill offer-pill-item" style="margin-top:3px;">🔥 ITEM OFFER</div>`;
-            priceHtml = `<span class="offer-price-wrap"><span class="price-tag offer-price-new-item">Rs. ${effectivePrice}</span><span class="offer-price-strike">Rs. ${item.price}</span></span>`;
+            priceHtml = `<span class="offer-price-wrap"><span class="price-tag offer-price-new-item">Rs. ${escapeHtmlForExport(effectivePrice)}</span><span class="offer-price-strike">Rs. ${escapeHtmlForExport(item.price)}</span></span>`;
           } else if (isCatOffer) {
             offerBadgeHtml = `<div class="offer-pill offer-pill-category" style="margin-top:3px;">🏷️ CATEGORY OFFER</div>`;
-            priceHtml = `<span class="offer-price-wrap"><span class="price-tag offer-price-new-category">Rs. ${effectivePrice}</span><span class="offer-price-strike">Rs. ${item.price}</span></span>`;
+            priceHtml = `<span class="offer-price-wrap"><span class="price-tag offer-price-new-category">Rs. ${escapeHtmlForExport(effectivePrice)}</span><span class="offer-price-strike">Rs. ${escapeHtmlForExport(item.price)}</span></span>`;
           }
 
           card.innerHTML = `
                     ${imageHtml}
-                    <div style="font-size:10px; color:#94a3b8; font-weight:700;">#${item.itemNumber ?? item.id}</div>
+                    <div style="font-size:10px; color:#94a3b8; font-weight:700;">#${escapeHtmlForExport(item.itemNumber ?? item.id)}</div>
                     <span class="menu-cart-count hidden"></span>
                     <div class="menu-item-title">${escapeHtmlForExport(item.name)}</div>
                     <div style="font-size:10px; color:var(--accent-amber); font-weight:600; margin-top:2px;">${escapeHtmlForExport(item.category)}${item.subcategory ? ` · ${escapeHtmlForExport(item.subcategory)}` : ""}</div>
@@ -19647,7 +19644,7 @@
               offer.discountType === "percent"
                 ? `${offer.discountValue}% off`
                 : `Rs. ${offer.discountValue} off`;
-            statusHtml = `<span class="offer-pill ${activeNow ? "offer-pill-category" : "offer-pill-inactive"}" style="margin-left:auto;">🏷️ ${discountLabel} — ${activeNow ? "Active" : "Scheduled"}</span>`;
+            statusHtml = `<span class="offer-pill ${activeNow ? "offer-pill-category" : "offer-pill-inactive"}" style="margin-left:auto;">🏷️ ${escapeHtmlForExport(discountLabel)} — ${activeNow ? "Active" : "Scheduled"}</span>`;
           }
           row.innerHTML = `<input type="checkbox" class="category-offer-checkbox" data-category="${escapeHtmlForExport(cat)}" style="width:16px; height:16px; flex-shrink:0;"> <span style="font-weight:600;">${escapeHtmlForExport(cat)}</span> ${statusHtml}`;
           list.appendChild(row);
@@ -19831,7 +19828,7 @@
           if (item.offerActive) {
             const activeNow = isOfferActive(item);
             priceCellHtml = `
-                        <div class="offer-price-wrap"><span class="offer-price-strike">Rs. ${item.price}</span><strong class="offer-price-new-item">Rs. ${item.offerPrice}</strong></div>
+                        <div class="offer-price-wrap"><span class="offer-price-strike">Rs. ${escapeHtmlForExport(item.price)}</span><strong class="offer-price-new-item">Rs. ${escapeHtmlForExport(item.offerPrice)}</strong></div>
                         <span class="offer-pill ${activeNow ? "offer-pill-item" : "offer-pill-inactive"}" style="margin-top:2px;">🔥 ${activeNow ? "Active" : "Scheduled/Inactive"}</span>
                     `;
           } else if (categoryOffers[item.category]) {
@@ -19843,8 +19840,8 @@
                 ? `${catOffer.discountValue}% off`
                 : `Rs. ${catOffer.discountValue} off`;
             priceCellHtml = `
-                        <div class="offer-price-wrap"><span class="offer-price-strike">Rs. ${item.price}</span><strong class="offer-price-new-category">Rs. ${catPrice}</strong></div>
-                        <span class="offer-pill ${catActiveNow ? "offer-pill-category" : "offer-pill-inactive"}" style="margin-top:2px;">🏷️ ${discountLabel} — ${catActiveNow ? "Active" : "Scheduled/Inactive"}</span>
+                        <div class="offer-price-wrap"><span class="offer-price-strike">Rs. ${escapeHtmlForExport(item.price)}</span><strong class="offer-price-new-category">Rs. ${escapeHtmlForExport(catPrice)}</strong></div>
+                        <span class="offer-pill ${catActiveNow ? "offer-pill-category" : "offer-pill-inactive"}" style="margin-top:2px;">🏷️ ${escapeHtmlForExport(discountLabel)} — ${catActiveNow ? "Active" : "Scheduled/Inactive"}</span>
                     `;
           }
 
@@ -20196,16 +20193,16 @@
             ? matches
                 .map(
                   (m) => `
-                    <div class="deal-component-option" onmousedown="chooseDealComponentItem(${m.id})"
+                    <div class="deal-component-option" onmousedown="chooseDealComponentItem(${htmlJsValue(m.id)})"
                          style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9;"
                          onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='white'">
-                        <strong>#${m.itemNumber ?? m.id}</strong> — ${escapeHtmlForExport(m.name)} <span style="color:#94a3b8;">(Rs. ${m.price})</span>
+                        <strong>#${escapeHtmlForExport(m.itemNumber ?? m.id)}</strong> — ${escapeHtmlForExport(m.name)} <span style="color:#94a3b8;">(Rs. ${escapeHtmlForExport(m.price)})</span>
                     </div>`,
                 )
                 .join("")
             : dealComponentSelectableItems.length === 0
               ? `<div style="padding: 8px 12px; color: #94a3b8;">No regular menu items yet — add one first</div>`
-              : `<div style="padding: 8px 12px; color: #94a3b8;">No items match "${document.getElementById("deal-component-search-input").value}"</div>`;
+              : `<div style="padding: 8px 12px; color: #94a3b8;">No items match "${escapeHtmlForExport(document.getElementById("deal-component-search-input").value)}"</div>`;
 
         list.classList.remove("hidden");
       }
@@ -20288,8 +20285,8 @@
             const name = item ? item.name : "(deleted item)";
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:6px 10px;">
-                        <span style="font-size:13px; font-weight:600;">${comp.qty} × ${escapeHtmlForExport(name)}</span>
-                        <button type="button" onclick="removeDealComponent(${comp.itemId})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-weight:700; font-size:14px;">✕</button>
+                        <span style="font-size:13px; font-weight:600;">${escapeHtmlForExport(comp.qty)} × ${escapeHtmlForExport(name)}</span>
+                        <button type="button" onclick="removeDealComponent(${htmlJsValue(comp.itemId)})" style="background:none; border:none; color:#dc2626; cursor:pointer; font-weight:700; font-size:14px;">✕</button>
                     </div>
                 `;
           })
@@ -20331,9 +20328,9 @@
             : `<option value="pcs">pcs</option>`;
           return `
                     <div class="form-group" style="flex: 1; margin-bottom: 10px;">
-                        <label style="font-size: 12px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)} (${unitLabel}) <span class="custom-recipe-hint" data-key="${escapeHtmlForExport(key)}" style="color: #94a3b8; font-weight: 400;"></span></label>
+                        <label style="font-size: 12px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)} (${escapeHtmlForExport(unitLabel)}) <span class="custom-recipe-hint" data-key="${escapeHtmlForExport(key)}" style="color: #94a3b8; font-weight: 400;"></span></label>
                         <div style="display:flex; gap:5px;"><input type="number" class="custom-recipe-input" data-key="${escapeHtmlForExport(key)}" min="0" step="any" value="0" oninput="updateCostPricePreview()" style="min-width:0; flex:1;">
-                        <select class="custom-recipe-unit" data-key="${escapeHtmlForExport(key)}" data-previous-unit="${unitLabel}" onchange="changeRecipeInputUnit(this)" style="width:58px;">${unitOptions}</select></div>
+                        <select class="custom-recipe-unit" data-key="${escapeHtmlForExport(key)}" data-previous-unit="${escapeHtmlForExport(unitLabel)}" onchange="changeRecipeInputUnit(this)" style="width:58px;">${unitOptions}</select></div>
                     </div>`;
         });
         cells.push(`<div id="others-slot-manual" style="flex: 1;"></div>`);
@@ -20343,7 +20340,7 @@
           html += `<p style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">No cost fields enabled for this category yet — tap "⚙️ Manage Cost Fields" above to choose some.</p>`;
         }
         for (let i = 0; i < cells.length; i += 2) {
-          html += `<div style="display: flex; gap: 10px;">${cells[i]}${cells[i + 1] || '<div style="flex:1;"></div>'}</div>`;
+          html += `<div style="display: flex; gap: 10px;">${escapeHtmlForExport(cells[i])}${escapeHtmlForExport(cells[i + 1] || '<div style="flex:1;"></div>')}</div>`;
         }
         const availableKeys = Object.keys(stockItemDefs).filter((key) => key !== "IceCream" && !stockItemDefs[key].deleted && !enabledKeys.includes(key));
         html += `<div style="display:flex; gap:6px; align-items:center; margin:4px 0 10px;"><select id="recipe-ingredient-select" class="styled-form-select" style="flex:1; min-width:0;"><option value="">Select another inventory ingredient</option>${availableKeys.map((key) => `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(stockItemDefs[key].label)}</option>`).join("")}</select><button type="button" class="btn-sm" onclick="addRecipeIngredientField()">+ Add ingredient</button></div>`;
@@ -20518,7 +20515,7 @@
             const checked = config[key] ? "checked" : "";
             return `
                     <label style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
-                        <input type="checkbox" class="cost-field-checkbox" data-key="${escapeHtmlForExport(key)}" ${checked} style="width: 16px; height: 16px;">
+                        <input type="checkbox" class="cost-field-checkbox" data-key="${escapeHtmlForExport(key)}" ${escapeHtmlForExport(checked)} style="width: 16px; height: 16px;">
                         <span style="font-weight: 600;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                         <span style="font-size: 11px; color: #94a3b8; margin-left: auto;">${def.sellUnit === "kg" ? "grams" : "pieces"}</span>
                     </label>
@@ -21272,7 +21269,7 @@
                             <span style="font-size: 20px;">${escapeHtmlForExport(def ? def.icon : "📦")}</span>
                             <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(def ? def.label : key)} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
-                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${qtyLabel} left <span style="font-weight: 500; color: #94a3b8;">(min ${minLabel})</span></span>
+                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(qtyLabel)} left <span style="font-weight: 500; color: #94a3b8;">(min ${escapeHtmlForExport(minLabel)})</span></span>
                     </div>
                 `;
           })
@@ -21291,7 +21288,7 @@
                             <span style="font-size: 20px;">🥤</span>
                             <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(brand)} ${escapeHtmlForExport(flavor)} ${escapeHtmlForExport(size)} ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
-                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${displayUnits} left <span style="font-weight: 500; color: #94a3b8;">(min ${threshold})</span></span>
+                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(displayUnits)} left <span style="font-weight: 500; color: #94a3b8;">(min ${escapeHtmlForExport(threshold)})</span></span>
                     </div>
                 `;
           })
@@ -21310,7 +21307,7 @@
                             <span style="font-size: 20px;">🍦</span>
                             <span style="font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(name)} ${escapeHtmlForExport(flavor)} (${escapeHtmlForExport(size)}g) ${isOut ? "is OUT OF STOCK" : "is Running Low"}</span>
                         </div>
-                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${Math.round(displayGrams).toLocaleString()}g left <span style="font-weight: 500; color: #94a3b8;">(min ${Math.round(threshold).toLocaleString()}g)</span></span>
+                        <span style="font-size: 13px; font-weight: 700; color: ${isOut ? "#dc2626" : "#d97706"};">${escapeHtmlForExport(Math.round(displayGrams).toLocaleString())}g left <span style="font-weight: 500; color: #94a3b8;">(min ${escapeHtmlForExport(Math.round(threshold).toLocaleString())}g)</span></span>
                     </div>
                 `;
           })
@@ -21407,7 +21404,7 @@
         }
         box.classList.remove("hidden");
         box.innerHTML = `
-                <div style="font-weight:800; color:#991b1b; margin-bottom:6px;">🚨 ${broken.length} ingredient${broken.length === 1 ? "" : "s"} can't reduce stock when sold</div>
+                <div style="font-weight:800; color:#991b1b; margin-bottom:6px;">🚨 ${escapeHtmlForExport(broken.length)} ingredient${broken.length === 1 ? "" : "s"} can't reduce stock when sold</div>
                 <p style="margin:0 0 8px; font-size:13px; color:#7f1d1d;">
                     ${broken.length === 1 ? "This item is" : "These items are"} bought and used in different units, and the app doesn't know what one piece weighs — so orders using ${broken.length === 1 ? "it" : "them"} <strong>require stock setup before checkout</strong>.
                     Open 📦 Manage Stock Items, edit ${broken.length === 1 ? "it" : "each one"}, and enter the average weight of one piece.
@@ -21416,7 +21413,7 @@
                     ${broken
                       .map(
                         (b) =>
-                          `<li><strong>${escapeHtmlForExport(b.label)}</strong> — used by ${b.usedBy.length} menu item${b.usedBy.length === 1 ? "" : "s"} (${escapeHtmlForExport(
+                          `<li><strong>${escapeHtmlForExport(b.label)}</strong> — used by ${escapeHtmlForExport(b.usedBy.length)} menu item${b.usedBy.length === 1 ? "" : "s"} (${escapeHtmlForExport(
                             b.usedBy
                               .slice(0, 4)
                               .map((i) => i.name)
@@ -21512,7 +21509,7 @@
               const minLabel = isPieceThreshold
                 ? `${Math.round(s.thresholdPieces || 0).toLocaleString()} pieces`
                 : formatStockQtyDisplay(key, s.minThresholdGrams);
-              warningHtml = `<div style="font-size: 11px; color: #d97706; font-weight: 700; margin-top: 6px;">⚠ Running Low (min ${minLabel})</div>`;
+              warningHtml = `<div style="font-size: 11px; color: #d97706; font-weight: 700; margin-top: 6px;">⚠ Running Low (min ${escapeHtmlForExport(minLabel)})</div>`;
             }
 
 
@@ -21545,7 +21542,7 @@
               mainDisplay = showWeightFirst ? weightText : piecesText;
               secondaryHtml = piecesUnreliable
                 ? ""
-                : `<div style="font-size: 12px; color: #64748b;">${showWeightFirst ? piecesText : weightText}</div>`;
+                : `<div style="font-size: 12px; color: #64748b;">${escapeHtmlForExport(showWeightFirst ? piecesText : weightText)}</div>`;
               toggleBtnHtml = piecesUnreliable
                 ? ""
                 : `<button type="button" onclick="toggleCardDisplayMode(${htmlJsValue(key)})" title="Switch between pieces and weight view" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">🔁</button>`;
@@ -21570,7 +21567,7 @@
               : `<button type="button" onclick="hideIngredientCard(${htmlJsValue(key)})" title="Hide this card (bring it back anytime via Manage Stock Items)" style="background: #f1f5f9; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px; color: #94a3b8;">✕</button>`;
 
             return `
-                    <div class="ingredient-card" style="border-left-color: ${def.color};">
+                    <div class="ingredient-card" style="border-left-color: ${safeCssColor(def.color)};">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span style="font-weight: 700; font-size: 15px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                             <div style="display: flex; gap: 4px;">
@@ -21579,11 +21576,11 @@
                             </div>
                         </div>
                         <div id="stock-display-${escapeHtmlForExport(key)}">
-                            <div style="font-size: 24px; font-weight: 800; color: ${stockColor}; margin-top: 8px;">${mainDisplay}</div>
+                            <div style="font-size: 24px; font-weight: 800; color: ${escapeHtmlForExport(stockColor)}; margin-top: 8px;">${escapeHtmlForExport(mainDisplay)}</div>
                             ${secondaryHtml}
                             ${avgWeightHtml}
                             ${unreliablePiecesNoteHtml}
-                            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Avg Cost: Rs. ${s.avgCostPerGram.toFixed(3)}/${unitShort}</div>
+                            <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Avg Cost: Rs. ${s.avgCostPerGram.toFixed(3)}/${escapeHtmlForExport(unitShort)}</div>
                             <div style="font-size: 12px; color: #64748b;">Stock Value: Rs. ${value.toFixed(0)}</div>
                             ${warningHtml}
                         </div>
@@ -21668,7 +21665,7 @@
           const unitLabel = mode === "pieces" ? "Pieces" : "Kg";
           const step = mode === "pieces" ? 1 : 0.1;
           return `
-                    <div style="display: flex; flex-direction: column; gap: 8px; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${def.color};">
+                    <div style="display: flex; flex-direction: column; gap: 8px; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${safeCssColor(def.color)};">
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                             <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                             <select id="threshold-mode-${escapeHtmlForExport(key)}" onchange="onThresholdModeChange(${htmlJsValue(key)})" style="font-size: 12px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 600; color: #475569;">
@@ -21677,8 +21674,8 @@
                             </select>
                         </div>
                         <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px;">
-                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${inputValue}" min="0" step="${step}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
-                            <span id="threshold-unit-${escapeHtmlForExport(key)}" style="font-size: 13px; color: #64748b; font-weight: 600;">${unitLabel}</span>
+                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${escapeHtmlForExport(inputValue)}" min="0" step="${escapeHtmlForExport(step)}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
+                            <span id="threshold-unit-${escapeHtmlForExport(key)}" style="font-size: 13px; color: #64748b; font-weight: 600;">${escapeHtmlForExport(unitLabel)}</span>
                         </div>
                     </div>
                 `;
@@ -21697,10 +21694,10 @@
             ? stock.minThresholdGrams
             : stock.minThresholdGrams / 1000;
           return `
-                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${def.color};">
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: #f8fafc; border-radius: 8px; padding: 12px 14px; border-left: 4px solid ${safeCssColor(def.color)};">
                         <span style="font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;">${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</span>
                         <div style="display: flex; align-items: center; gap: 6px;">
-                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${thresholdValue}" min="0" step="${isNumberBased ? 1 : 0.1}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
+                            <input type="number" id="threshold-input-${escapeHtmlForExport(key)}" value="${escapeHtmlForExport(thresholdValue)}" min="0" step="${isNumberBased ? 1 : 0.1}" style="width: 90px; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 14px; text-align: right;">
                             <span style="font-size: 13px; color: #64748b; font-weight: 600;">${isNumberBased ? "Units" : "Kg"}</span>
                         </div>
                     </div>
@@ -21830,9 +21827,9 @@
 
         display.innerHTML = `
                 <div style="margin-top: 8px; display: flex; gap: 6px; align-items: center;">
-                    <input type="number" id="adjust-input-${ingredient}" value="${current}" step="any" style="width: 100px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
-                    <span style="font-size: 12px; color: #64748b;">${unitShort}</span>
-                    <button type="button" onclick="confirmAdjustStock('${ingredient}')" style="background: #16a34a; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">✔</button>
+                    <input type="number" id="adjust-input-${escapeHtmlForExport(ingredient)}" value="${escapeHtmlForExport(current)}" step="any" style="width: 100px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;">
+                    <span style="font-size: 12px; color: #64748b;">${escapeHtmlForExport(unitShort)}</span>
+                    <button type="button" onclick="confirmAdjustStock(${htmlJsValue(ingredient)})" style="background: #16a34a; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">✔</button>
                     <button type="button" onclick="renderIngredientStockCards('kitchen'); renderIngredientStockCards('juices')" style="background: #64748b; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">✕</button>
                 </div>
                 <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Correct the actual ${unitShort === "pcs" ? "pieces" : "grams"} on hand. Average cost/${unitShort === "pcs" ? "piece" : "gram"} won't change.</div>
@@ -22415,7 +22412,7 @@
             selected.length > 0
               ? "No purchases logged for the selected ingredient(s)."
               : "No purchases logged yet.";
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${emptyMsg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${escapeHtmlForExport(emptyMsg)}</td></tr>`;
           return;
         }
 
@@ -22448,11 +22445,11 @@
             tr.title = `${def.label} was deleted from Manage Stock Items — this record is kept for history but can no longer be edited.`;
           }
           tr.innerHTML = `
-                    <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small></td>
+                    <td>${escapeHtmlForExport(p.date)}<br><small style="color:gray;">${escapeHtmlForExport(p.time || "")}</small></td>
                     <td>${escapeHtmlForExport(displayName)}</td>
-                    <td style="color:#43a047;">+${qtyDisplay}</td>
-                    <td>Rs. ${p.amountPaid}</td>
-                    <td>Rs. ${p.costPerGram.toFixed(3)}/${unitShort}</td>
+                    <td style="color:#43a047;">+${escapeHtmlForExport(qtyDisplay)}</td>
+                    <td>Rs. ${escapeHtmlForExport(p.amountPaid)}</td>
+                    <td>Rs. ${p.costPerGram.toFixed(3)}/${escapeHtmlForExport(unitShort)}</td>
                     <td style="text-align:center; white-space:nowrap;">
                         ${actionCell}
                     </td>
@@ -22893,8 +22890,8 @@
             return `
                     <tr style="cursor:pointer; ${isEditing ? "background:#fef9c3;" : ""}" onclick="startEditStockItem(${htmlJsValue(key)})">
                         <td><strong>${escapeHtmlForExport(def.icon)} ${escapeHtmlForExport(def.label)}</strong>${coreBadge}</td>
-                        <td>${unitLabel(def.buyUnit)}</td>
-                        <td>${unitLabel(def.sellUnit)}${weightNote}</td>
+                        <td>${escapeHtmlForExport(unitLabel(def.buyUnit))}</td>
+                        <td>${escapeHtmlForExport(unitLabel(def.sellUnit))}${escapeHtmlForExport(weightNote)}</td>
                         <td style="text-align:center; white-space:nowrap;">${actionCell}</td>
                     </tr>
                 `;
@@ -22911,7 +22908,7 @@
         select.innerHTML =
           brandNames.length > 0
             ? brandNames
-                .map((b) => `<option value="${b}">${b}</option>`)
+                .map((b) => `<option value="${escapeHtmlForExport(b)}">${escapeHtmlForExport(b)}</option>`)
                 .join("")
             : `<option value="">No brands yet — add one via 🏷️ Manage Brands</option>`;
         populateSoftDrinkFlavorSelect();
@@ -22931,13 +22928,13 @@
         flavorSelect.innerHTML =
           brandData.flavors.length > 0
             ? brandData.flavors
-                .map((f) => `<option value="${f}">${f}</option>`)
+                .map((f) => `<option value="${escapeHtmlForExport(f)}">${escapeHtmlForExport(f)}</option>`)
                 .join("")
             : `<option value="Regular">Regular</option>`; // brands added with no specific flavors still need something to log against
         sizeSelect.innerHTML =
           brandData.sizes.length > 0
             ? brandData.sizes
-                .map((s) => `<option value="${s}">${s}</option>`)
+                .map((s) => `<option value="${escapeHtmlForExport(s)}">${escapeHtmlForExport(s)}</option>`)
                 .join("")
             : `<option value="">No sizes set for this brand</option>`;
         updateSoftDrinkPurchasePreview();
@@ -22980,7 +22977,7 @@
         const row = document.createElement("div");
         row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px;";
         row.innerHTML = `
-                <input type="text" class="softdrink-brand-flavor-input" placeholder="e.g., Cola" value="${String(value).replace(/"/g, "&quot;")}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                <input type="text" class="softdrink-brand-flavor-input" placeholder="e.g., Cola" value="${escapeHtmlForExport(value)}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
                 <button type="button" onclick="this.parentElement.remove()" title="Remove this flavor" style="background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 16px; padding: 0 6px;">✕</button>
             `;
         container.appendChild(row);
@@ -22996,7 +22993,7 @@
         const row = document.createElement("div");
         row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px;";
         row.innerHTML = `
-                <input type="text" class="softdrink-brand-size-input" placeholder="e.g., 300ml" value="${String(value).replace(/"/g, "&quot;")}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                <input type="text" class="softdrink-brand-size-input" placeholder="e.g., 300ml" value="${escapeHtmlForExport(value)}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
                 <button type="button" onclick="this.parentElement.remove()" title="Remove this size" style="background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 16px; padding: 0 6px;">✕</button>
             `;
         container.appendChild(row);
@@ -23213,15 +23210,15 @@
           .map((brand) => {
             const data = softDrinkBrandsData[brand];
             const isEditing = brand === editingBrand;
-            const safeBrand = brand.replace(/'/g, "\\'");
+            const safeBrand = htmlJsValue(brand);
             return `
-                    <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditSoftDrinkBrand('${safeBrand}')">
+                    <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditSoftDrinkBrand(${safeBrand})">
                         <td><strong>${escapeHtmlForExport(brand)}</strong></td>
-                        <td>${data.flavors.length > 0 ? data.flavors.join(", ") : '<span style="color:#94a3b8;">— none —</span>'}</td>
-                        <td>${data.sizes.join(", ")}</td>
+                        <td>${data.flavors.length > 0 ? escapeHtmlForExport(data.flavors.join(", ")) : '<span style="color:#94a3b8;">— none —</span>'}</td>
+                        <td>${escapeHtmlForExport(data.sizes.join(", "))}</td>
                         <td style="text-align: center; white-space: nowrap;">
-                            <button type="button" onclick="event.stopPropagation(); startEditSoftDrinkBrand('${safeBrand}')" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
-                            <button type="button" onclick="event.stopPropagation(); deleteSoftDrinkBrand('${safeBrand}')" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>
+                            <button type="button" onclick="event.stopPropagation(); startEditSoftDrinkBrand(${safeBrand})" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
+                            <button type="button" onclick="event.stopPropagation(); deleteSoftDrinkBrand(${safeBrand})" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>
                         </td>
                     </tr>
                 `;
@@ -23571,13 +23568,13 @@
 
         brandSelect.innerHTML =
           `<option value="">All Brands</option>` +
-          brands.map((b) => `<option value="${b}">${b}</option>`).join("");
+          brands.map((b) => `<option value="${escapeHtmlForExport(b)}">${escapeHtmlForExport(b)}</option>`).join("");
         flavorSelect.innerHTML =
           `<option value="">All Flavors</option>` +
-          flavors.map((f) => `<option value="${f}">${f}</option>`).join("");
+          flavors.map((f) => `<option value="${escapeHtmlForExport(f)}">${escapeHtmlForExport(f)}</option>`).join("");
         sizeSelect.innerHTML =
           `<option value="">All Sizes</option>` +
-          sizes.map((s) => `<option value="${s}">${s}</option>`).join("");
+          sizes.map((s) => `<option value="${escapeHtmlForExport(s)}">${escapeHtmlForExport(s)}</option>`).join("");
 
         if (brands.includes(selectedBrand)) brandSelect.value = selectedBrand;
         if (flavors.includes(selectedFlavor))
@@ -23645,7 +23642,7 @@
             activeKeys.length === 0
               ? "No soft drinks purchased yet."
               : "No items match the selected filters.";
-          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:gray; padding:20px;">${msg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:gray; padding:20px;">${escapeHtmlForExport(msg)}</td></tr>`;
           return;
         }
 
@@ -23666,13 +23663,13 @@
             return `
                     <tr>
                         <td><strong>${escapeHtmlForExport(brand)}</strong> — ${escapeHtmlForExport(flavor)}<br><small style="color:gray;">${escapeHtmlForExport(size)}</small></td>
-                        <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${sd.stockUnits}</td>
+                        <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${escapeHtmlForExport(sd.stockUnits)}</td>
                         <td>Rs. ${sd.avgCostPerUnit.toFixed(2)}</td>
                         <td>
-                            <input type="number" id="softdrink-price-${btoa(key)}" value="${sd.sellPrice || 0}" min="0" step="1" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateSoftDrinkSellPrice('${key.replace(/'/g, "\\'")}')">
+                            <input type="number" id="softdrink-price-${escapeHtmlForExport(btoa(key))}" value="${escapeHtmlForExport(sd.sellPrice || 0)}" min="0" step="1" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateSoftDrinkSellPrice(${htmlJsValue(key)})">
                         </td>
                         <td>
-                            <input type="number" value="${threshold}" min="0" step="1" style="width: 60px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateSoftDrinkThreshold('${key.replace(/'/g, "\\'")}', this.value)">
+                            <input type="number" value="${escapeHtmlForExport(threshold)}" min="0" step="1" style="width: 60px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateSoftDrinkThreshold(${htmlJsValue(key)}, this.value)">
                         </td>
                         <td>${statusHtml}</td>
                     </tr>
@@ -23721,7 +23718,7 @@
           const emptyMsg = anyFilterActive
             ? "No purchases match your search/filters."
             : "No purchases logged yet.";
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${emptyMsg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${escapeHtmlForExport(emptyMsg)}</td></tr>`;
           return;
         }
 
@@ -23738,11 +23735,11 @@
               : "";
 
             return `
-                    <tr${rowClass}>
-                        <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small>${editedBadge}</td>
+                    <tr${escapeHtmlForExport(rowClass)}>
+                        <td>${escapeHtmlForExport(p.date)}<br><small style="color:gray;">${escapeHtmlForExport(p.time || "")}</small>${editedBadge}</td>
                         <td>${escapeHtmlForExport(p.brand)} ${escapeHtmlForExport(p.flavor)} <small style="color:gray;">${escapeHtmlForExport(p.size)}</small></td>
-                        <td style="color:#43a047;">+${p.unitsPurchased}</td>
-                        <td>Rs. ${p.amountPaid}</td>
+                        <td style="color:#43a047;">+${escapeHtmlForExport(p.unitsPurchased)}</td>
+                        <td>Rs. ${escapeHtmlForExport(p.amountPaid)}</td>
                         <td>Rs. ${p.costPerUnit.toFixed(2)}</td>
                         <td style="text-align:center; white-space:nowrap;">
                             <button type="button" class="edit-item-btn" onclick="startEditSoftDrinkPurchase(${htmlJsValue(p.id)})">✏️ Edit</button>
@@ -23814,7 +23811,7 @@
         const names = Object.keys(iceCreamNamesData);
         select.innerHTML =
           names.length > 0
-            ? names.map((n) => `<option value="${n}">${n}</option>`).join("")
+            ? names.map((n) => `<option value="${escapeHtmlForExport(n)}">${escapeHtmlForExport(n)}</option>`).join("")
             : `<option value="">No names yet — add one via 🏷️ Manage Ice Cream Names</option>`;
         populateIceCreamFlavorSelect();
       }
@@ -23829,13 +23826,13 @@
         flavorSelect.innerHTML =
           nameData.flavors.length > 0
             ? nameData.flavors
-                .map((f) => `<option value="${f}">${f}</option>`)
+                .map((f) => `<option value="${escapeHtmlForExport(f)}">${escapeHtmlForExport(f)}</option>`)
                 .join("")
             : `<option value="Regular">Regular</option>`; // names added with no specific flavors still need something to log against
         sizeSelect.innerHTML =
           nameData.sizes.length > 0
             ? nameData.sizes
-                .map((s) => `<option value="${s}">${s}g</option>`)
+                .map((s) => `<option value="${escapeHtmlForExport(s)}">${escapeHtmlForExport(s)}g</option>`)
                 .join("")
             : `<option value="">No sizes set for this name</option>`;
         updateIceCreamPurchasePreview();
@@ -23876,7 +23873,7 @@
         const row = document.createElement("div");
         row.style.cssText = "display: flex; gap: 6px; margin-bottom: 6px;";
         row.innerHTML = `
-                <input type="text" class="icecream-name-flavor-input" placeholder="e.g., Vanilla" value="${String(value).replace(/"/g, "&quot;")}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                <input type="text" class="icecream-name-flavor-input" placeholder="e.g., Vanilla" value="${escapeHtmlForExport(value)}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
                 <button type="button" onclick="this.parentElement.remove()" title="Remove this flavor" style="background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 16px; padding: 0 6px;">✕</button>
             `;
         container.appendChild(row);
@@ -23892,7 +23889,7 @@
         row.style.cssText =
           "display: flex; gap: 6px; align-items: center; margin-bottom: 6px;";
         row.innerHTML = `
-                <input type="number" min="1" step="1" class="icecream-name-size-input" placeholder="e.g., 100" value="${String(value).replace(/"/g, "&quot;")}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                <input type="number" min="1" step="1" class="icecream-name-size-input" placeholder="e.g., 100" value="${escapeHtmlForExport(value)}" style="flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;">
                 <span style="font-size:12px; color:#94a3b8;">grams</span>
                 <button type="button" onclick="this.parentElement.remove()" title="Remove this size" style="background: none; border: none; color: #dc2626; font-weight: 700; cursor: pointer; font-size: 16px; padding: 0 6px;">✕</button>
             `;
@@ -24102,8 +24099,8 @@
             return `
                     <tr style="cursor: pointer; ${isEditing ? "background: #fef9c3;" : ""}" onclick="startEditIceCreamName(${htmlJsValue(name)})">
                         <td><strong>${escapeHtmlForExport(name)}</strong></td>
-                        <td>${data.flavors.length > 0 ? data.flavors.join(", ") : '<span style="color:#94a3b8;">— none —</span>'}</td>
-                        <td>${data.sizes.map((s) => s + "g").join(", ")}</td>
+                        <td>${data.flavors.length > 0 ? escapeHtmlForExport(data.flavors.join(", ")) : '<span style="color:#94a3b8;">— none —</span>'}</td>
+                        <td>${escapeHtmlForExport(data.sizes.map((s) => s + "g").join(", "))}</td>
                         <td style="text-align: center; white-space: nowrap;">
                             <button type="button" onclick="event.stopPropagation(); startEditIceCreamName(${htmlJsValue(name)})" title="Edit" style="background:#e2e8f0; border:none; padding:5px 10px; border-radius:5px; cursor:pointer; margin-right:4px;">✏️</button>
                             <button type="button" onclick="event.stopPropagation(); deleteIceCreamName(${htmlJsValue(name)})" title="Delete" style="background:#fee2e2; color:#dc2626; border:none; padding:5px 10px; border-radius:5px; cursor:pointer;">🗑️</button>
@@ -24434,13 +24431,13 @@
 
         nameSelect.innerHTML =
           `<option value="">All Names</option>` +
-          names.map((n) => `<option value="${n}">${n}</option>`).join("");
+          names.map((n) => `<option value="${escapeHtmlForExport(n)}">${escapeHtmlForExport(n)}</option>`).join("");
         flavorSelect.innerHTML =
           `<option value="">All Flavors</option>` +
-          flavors.map((f) => `<option value="${f}">${f}</option>`).join("");
+          flavors.map((f) => `<option value="${escapeHtmlForExport(f)}">${escapeHtmlForExport(f)}</option>`).join("");
         sizeSelect.innerHTML =
           `<option value="">All Sizes</option>` +
-          sizes.map((s) => `<option value="${s}">${s}g</option>`).join("");
+          sizes.map((s) => `<option value="${escapeHtmlForExport(s)}">${escapeHtmlForExport(s)}g</option>`).join("");
 
         if (names.includes(selectedName)) nameSelect.value = selectedName;
         if (flavors.includes(selectedFlavor))
@@ -24506,7 +24503,7 @@
             activeKeys.length === 0
               ? "No ice cream purchased yet."
               : "No items match the selected filters.";
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${msg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${escapeHtmlForExport(msg)}</td></tr>`;
           return;
         }
 
@@ -24533,13 +24530,13 @@
             return `
                     <tr>
                         <td><strong>${escapeHtmlForExport(name)}</strong> — ${escapeHtmlForExport(flavor)}<br><small style="color:gray;">${escapeHtmlForExport(size)}g / serving</small></td>
-                        <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${stockDisplay}</td>
+                        <td style="color:${isOut ? "#dc2626" : isLow ? "#d97706" : "#1e293b"}; font-weight:700;">${escapeHtmlForExport(stockDisplay)}</td>
                         <td>Rs. ${ic.avgCostPerGram.toFixed(3)}/g</td>
                         <td>
-                            <input type="number" id="icecream-price-${btoa(key)}" value="${ic.sellPrice || 0}" min="0" step="1" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateIceCreamSellPrice('${key.replace(/'/g, "\\'")}')">
+                            <input type="number" id="icecream-price-${escapeHtmlForExport(btoa(key))}" value="${escapeHtmlForExport(ic.sellPrice || 0)}" min="0" step="1" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateIceCreamSellPrice(${htmlJsValue(key)})">
                         </td>
                         <td>
-                            <input type="number" value="${threshold}" min="0" step="10" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateIceCreamThreshold('${key.replace(/'/g, "\\'")}', this.value)">
+                            <input type="number" value="${escapeHtmlForExport(threshold)}" min="0" step="10" style="width: 70px; padding: 5px 6px; border: 1px solid #cbd5e1; border-radius: 4px;" onchange="updateIceCreamThreshold(${htmlJsValue(key)}, this.value)">
                         </td>
                         <td>${statusHtml}</td>
                     </tr>
@@ -24588,7 +24585,7 @@
           const emptyMsg = anyFilterActive
             ? "No purchases match your search/filters."
             : "No purchases logged yet.";
-          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${emptyMsg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:gray; padding:20px;">${escapeHtmlForExport(emptyMsg)}</td></tr>`;
           return;
         }
 
@@ -24609,11 +24606,11 @@
                 : `${p.gramsPurchased} g`;
 
             return `
-                    <tr${rowClass}>
-                        <td>${p.date}<br><small style="color:gray;">${p.time || ""}</small>${editedBadge}</td>
+                    <tr${escapeHtmlForExport(rowClass)}>
+                        <td>${escapeHtmlForExport(p.date)}<br><small style="color:gray;">${escapeHtmlForExport(p.time || "")}</small>${editedBadge}</td>
                         <td>${escapeHtmlForExport(p.name)} ${escapeHtmlForExport(p.flavor)} <small style="color:gray;">${escapeHtmlForExport(p.size)}g</small></td>
-                        <td style="color:#43a047;">+${weightDisplay}</td>
-                        <td>Rs. ${p.amountPaid}</td>
+                        <td style="color:#43a047;">+${escapeHtmlForExport(weightDisplay)}</td>
+                        <td>Rs. ${escapeHtmlForExport(p.amountPaid)}</td>
                         <td>Rs. ${p.costPerGram.toFixed(3)}</td>
                         <td style="text-align:center; white-space:nowrap;">
                             <button type="button" class="edit-item-btn" onclick="startEditIceCreamPurchase(${htmlJsValue(p.id)})">✏️ Edit</button>
@@ -25319,7 +25316,7 @@
         const select = document.getElementById("expense-ledger-destination");
         if (!select) return;
         const current = select.value || "none";
-        select.innerHTML = `<option value="none">Do not post to Cash/Bank</option><option value="cash">💵 Cash</option>` + bankAccounts.filter((account) => account.active !== false).map((account) => `<option value="bank:${account.id}">🏦 ${escapeHtmlForExport(account.displayName)}</option>`).join("");
+        select.innerHTML = `<option value="none">Do not post to Cash/Bank</option><option value="cash">💵 Cash</option>` + bankAccounts.filter((account) => account.active !== false).map((account) => `<option value="bank:${escapeHtmlForExport(account.id)}">🏦 ${escapeHtmlForExport(account.displayName)}</option>`).join("");
         select.value = current;
       }
 
@@ -25396,9 +25393,9 @@
             const field = expenseFields.find((f) => f.key === e.fieldKey);
             const label = field ? field.label : e.fieldKey;
             return `<tr>
-                    <td>${e.date}</td>
+                    <td>${escapeHtmlForExport(e.date)}</td>
                     <td>${escapeHtmlForExport(label)}</td>
-                    <td>${e.amount || 0}</td>
+                    <td>${escapeHtmlForExport(e.amount || 0)}</td>
                     <td>${escapeHtmlForExport(e.note || "")}</td>
                 </tr>`;
           })
@@ -25409,11 +25406,11 @@
                 <table border="1">
                     <tr><td colspan="4" style="font-size:16px; font-weight:bold;">Expense History Report</td></tr>
                     <tr><td colspan="4">${escapeHtmlForExport(filterSummary)}</td></tr>
-                    <tr><td colspan="4">Generated: ${new Date().toLocaleString()}</td></tr>
+                    <tr><td colspan="4">Generated: ${escapeHtmlForExport(new Date().toLocaleString())}</td></tr>
                     <tr><td colspan="4"></td></tr>
-                    <tr><td colspan="4" style="font-weight:bold;">Total Entries: ${filtered.length}   |   Total Expenses: Rs. ${totalAmount}</td></tr>
+                    <tr><td colspan="4" style="font-weight:bold;">Total Entries: ${escapeHtmlForExport(filtered.length)}   |   Total Expenses: Rs. ${escapeHtmlForExport(totalAmount)}</td></tr>
                     <tr><td colspan="4"></td></tr>
-                    <tr style="background:#1e293b; color:white; font-weight:bold;">${headers.map((h) => `<td>${h}</td>`).join("")}</tr>
+                    <tr style="background:#1e293b; color:white; font-weight:bold;">${headers.map((h) => `<td>${escapeHtmlForExport(h)}</td>`).join("")}</tr>
                     ${rowsHtml}
                 </table>
 
@@ -25478,9 +25475,9 @@
             const field = expenseFields.find((f) => f.key === e.fieldKey);
             const label = field ? field.label : e.fieldKey;
             return `<tr>
-                    <td style="border:1px solid #999; padding:4px;">${e.date}</td>
+                    <td style="border:1px solid #999; padding:4px;">${escapeHtmlForExport(e.date)}</td>
                     <td style="border:1px solid #999; padding:4px;">${escapeHtmlForExport(label)}</td>
-                    <td style="border:1px solid #999; padding:4px; text-align:right;">Rs. ${e.amount || 0}</td>
+                    <td style="border:1px solid #999; padding:4px; text-align:right;">Rs. ${escapeHtmlForExport(e.amount || 0)}</td>
                     <td style="border:1px solid #999; padding:4px;">${escapeHtmlForExport(e.note || "-")}</td>
                 </tr>`;
           })
@@ -25498,10 +25495,10 @@
                     ${businessPhone ? `<p style="margin:2px 0; font-size:11px;">📞 ${escapeHtmlForExport(businessPhone)}</p>` : ""}
                 </div>
                 <p style="font-size:11px; color:#333; margin:4px 0;"><strong>Filters applied:</strong> ${escapeHtmlForExport(filterSummary)}</p>
-                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${new Date().toLocaleString()}</p>
+                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${escapeHtmlForExport(new Date().toLocaleString())}</p>
                 <div style="display:flex; justify-content:space-between; gap:10px; font-size:12px; font-weight:bold; border-top:1.5px solid #000; border-bottom:1.5px solid #000; padding:6px 2px; margin-bottom:10px;">
-                    <span>Total Entries: ${filtered.length}</span>
-                    <span>Total Expenses: Rs. ${totalAmount}</span>
+                    <span>Total Entries: ${escapeHtmlForExport(filtered.length)}</span>
+                    <span>Total Expenses: Rs. ${escapeHtmlForExport(totalAmount)}</span>
                 </div>
                 <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
                     <thead>
@@ -25563,10 +25560,10 @@
                         ? (totalsByField[key] / totalAmount) * 100
                         : 0;
                     return `
-                            <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; border-left: 4px solid ${color};">
+                            <div style="background: #f8f9fa; padding: 10px; border-radius: 6px; border-left: 4px solid ${safeCssColor(color)};">
                                 <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;">
-                                    <span>${label}</span>
-                                    <span>${formatRs(totalsByField[key])}</span>
+                                    <span>${escapeHtmlForExport(label)}</span>
+                                    <span>${escapeHtmlForExport(formatRs(totalsByField[key]))}</span>
                                 </div>
                                 <div style="font-size: 12px; color: gray;">${pct.toFixed(0)}% of total</div>
                             </div>
@@ -25598,10 +25595,10 @@
               : `<span style="color:#cbd5e1; font-size:12px;">—</span>`;
             return `
                     <tr ${rowStyle}>
-                        <td>${e.date}</td>
-                        <td>${label}</td>
-                        <td style="color:#dc2626; font-weight:700;">${formatRs(e.amount)}</td>
-                        <td>${e.note || "—"}</td>
+                        <td>${escapeHtmlForExport(e.date)}</td>
+                        <td>${escapeHtmlForExport(label)}</td>
+                        <td style="color:#dc2626; font-weight:700;">${escapeHtmlForExport(formatRs(e.amount))}</td>
+                        <td>${escapeHtmlForExport(e.note || "—")}</td>
                         <td style="text-align:center;">${receiptCell}</td>
                         <td style="text-align:center; white-space:nowrap;">${actionCell}</td>
                     </tr>
@@ -25768,7 +25765,7 @@
         );
 
         if (matchedItems.length === 0) {
-          resultBox.innerHTML = `<p style="color:#94a3b8; font-size:13px; margin:6px 0 0;">No menu item matches "${queryInput.value}".</p>`;
+          resultBox.innerHTML = `<p style="color:#94a3b8; font-size:13px; margin:6px 0 0;">No menu item matches "${escapeHtmlForExport(queryInput.value)}".</p>`;
           return;
         }
 
@@ -25777,8 +25774,8 @@
             const totalQty = computeTotalSoldQtyForItem(m.id, scopedOrders);
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:#f8fafc; border-radius:8px; margin-bottom:6px;">
-                        <span style="font-weight:600;">#${m.itemNumber ?? m.id} — ${escapeHtmlForExport(m.name)} <span style="font-weight:400; color:#94a3b8; font-size:12px;">(${m.category})</span></span>
-                        <span style="font-weight:800; color:#16a34a; font-size:16px; white-space:nowrap;">${totalQty} sold</span>
+                        <span style="font-weight:600;">#${escapeHtmlForExport(m.itemNumber ?? m.id)} — ${escapeHtmlForExport(m.name)} <span style="font-weight:400; color:#94a3b8; font-size:12px;">(${escapeHtmlForExport(m.category)})</span></span>
+                        <span style="font-weight:800; color:#16a34a; font-size:16px; white-space:nowrap;">${escapeHtmlForExport(totalQty)} sold</span>
                     </div>
                 `;
           })
@@ -25955,19 +25952,19 @@
             const profit = c.sales - c.cost;
             return `
                 <tr>
-                    <td style="font-weight:700;"><span style="color:${c.color};">${c.icon}</span> ${c.label}</td>
+                    <td style="font-weight:700;"><span style="color:${escapeHtmlForExport(c.color)};">${escapeHtmlForExport(c.icon)}</span> ${escapeHtmlForExport(c.label)}</td>
                     <td>${Math.round(c.qty * 100) / 100}</td>
-                    <td style="font-weight:700;">Rs. ${Math.round(c.sales).toLocaleString()}</td>
+                    <td style="font-weight:700;">Rs. ${escapeHtmlForExport(Math.round(c.sales).toLocaleString())}</td>
                     <td>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:44px; height:6px; background:#f1f5f9; border-radius:3px; overflow:hidden;">
-                                <div style="width:${total > 0 ? (c.sales / total) * 100 : 0}%; height:100%; background:${c.color};"></div>
+                                <div style="width:${total > 0 ? (c.sales / total) * 100 : 0}%; height:100%; background:${escapeHtmlForExport(c.color)};"></div>
                             </div>
-                            <span style="font-size:12px; color:#64748b; white-space:nowrap;">${pct(c.sales)}</span>
+                            <span style="font-size:12px; color:#64748b; white-space:nowrap;">${escapeHtmlForExport(pct(c.sales))}</span>
                         </div>
                     </td>
-                    <td>Rs. ${Math.round(c.cost).toLocaleString()}</td>
-                    <td style="color:${profit >= 0 ? "#16a34a" : "#dc2626"}; font-weight:700;">Rs. ${Math.round(profit).toLocaleString()}</td>
+                    <td>Rs. ${escapeHtmlForExport(Math.round(c.cost).toLocaleString())}</td>
+                    <td style="color:${profit >= 0 ? "#16a34a" : "#dc2626"}; font-weight:700;">Rs. ${escapeHtmlForExport(Math.round(profit).toLocaleString())}</td>
                 </tr>`;
           })
           .join("");
@@ -25978,17 +25975,17 @@
                 <tr>
                     <td style="font-weight:700; color:#6d28d9;">🛵 Delivery Charges</td>
                     <td style="color:#94a3b8;">—</td>
-                    <td style="font-weight:700;">Rs. ${Math.round(breakdown.delivery).toLocaleString()}</td>
+                    <td style="font-weight:700;">Rs. ${escapeHtmlForExport(Math.round(breakdown.delivery).toLocaleString())}</td>
                     <td>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <div style="flex:1; min-width:44px; height:6px; background:#f1f5f9; border-radius:3px; overflow:hidden;">
                                 <div style="width:${total > 0 ? (breakdown.delivery / total) * 100 : 0}%; height:100%; background:#6d28d9;"></div>
                             </div>
-                            <span style="font-size:12px; color:#64748b; white-space:nowrap;">${pct(breakdown.delivery)}</span>
+                            <span style="font-size:12px; color:#64748b; white-space:nowrap;">${escapeHtmlForExport(pct(breakdown.delivery))}</span>
                         </div>
                     </td>
                     <td style="color:#94a3b8;">—</td>
-                    <td style="color:#16a34a; font-weight:700;">Rs. ${Math.round(breakdown.delivery).toLocaleString()}</td>
+                    <td style="color:#16a34a; font-weight:700;">Rs. ${escapeHtmlForExport(Math.round(breakdown.delivery).toLocaleString())}</td>
                 </tr>`;
 
         const totalCost = Object.values(breakdown.channels).reduce(
@@ -25999,10 +25996,10 @@
                 <tr style="background:#f8fafc; border-top:2px solid #cbd5e1;">
                     <td style="font-weight:800;">💵 Total Sales</td>
                     <td style="font-weight:800;">${Math.round(Object.values(breakdown.channels).reduce((s, c) => s + c.qty, 0) * 100) / 100}</td>
-                    <td style="font-weight:800;">Rs. ${Math.round(total).toLocaleString()}</td>
+                    <td style="font-weight:800;">Rs. ${escapeHtmlForExport(Math.round(total).toLocaleString())}</td>
                     <td style="font-size:12px; color:#64748b;">matches View Orders</td>
-                    <td style="font-weight:800;">Rs. ${Math.round(totalCost).toLocaleString()}</td>
-                    <td style="font-weight:800; color:${total - totalCost >= 0 ? "#16a34a" : "#dc2626"};">Rs. ${Math.round(total - totalCost).toLocaleString()}</td>
+                    <td style="font-weight:800;">Rs. ${escapeHtmlForExport(Math.round(totalCost).toLocaleString())}</td>
+                    <td style="font-weight:800; color:${total - totalCost >= 0 ? "#16a34a" : "#dc2626"};">Rs. ${escapeHtmlForExport(Math.round(total - totalCost).toLocaleString())}</td>
                 </tr>`;
 
         tbody.innerHTML = channelRows + deliveryRow + totalRow;
@@ -26398,10 +26395,10 @@
             Object.values(split.channels)
               .map(
                 (c) =>
-                  `<div style="display:flex; justify-content:space-between; gap:10px;"><span>${c.icon} ${c.label}</span><strong>Rs. ${Math.round(c.sales).toLocaleString()}</strong></div>`,
+                  `<div style="display:flex; justify-content:space-between; gap:10px;"><span>${escapeHtmlForExport(c.icon)} ${escapeHtmlForExport(c.label)}</span><strong>Rs. ${escapeHtmlForExport(Math.round(c.sales).toLocaleString())}</strong></div>`,
               )
               .join("") +
-            `<div style="display:flex; justify-content:space-between; gap:10px;"><span>🛵 Delivery</span><strong>Rs. ${Math.round(split.delivery).toLocaleString()}</strong></div>`;
+            `<div style="display:flex; justify-content:space-between; gap:10px;"><span>🛵 Delivery</span><strong>Rs. ${escapeHtmlForExport(Math.round(split.delivery).toLocaleString())}</strong></div>`;
         }
         document.getElementById("ledger-total-cost").innerText =
           `Rs. ${Math.round(summary.totalCost).toLocaleString()}`;
@@ -26446,7 +26443,7 @@
 
             return `
                 <tr>
-                    <td><strong>#${r.itemNumber}</strong> ${escapeHtmlForExport(r.name)}${goneTag}${unlinkedDealTag}</td>
+                    <td><strong>#${escapeHtmlForExport(r.itemNumber)}</strong> ${escapeHtmlForExport(r.name)}${goneTag}${unlinkedDealTag}</td>
                     <td style="font-weight:800; color:#16a34a;">${Math.round(r.qtySold * 100) / 100}</td>
                     <td>Rs. ${r.totalCost.toFixed(2)}${r.costIsEstimate ? '<div style="font-size:9px;color:#b45309;">legacy estimate</div>' : ""}</td>
                     <td>Rs. ${r.totalGross.toFixed(0)}</td>
@@ -26616,7 +26613,7 @@
                   : `${e.qty} ${e.unit}`;
               return `
                         <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border-radius:8px; padding:10px 14px;">
-                            <span style="font-weight:600;">${e.icon} ${e.label} <span style="color:#94a3b8; font-weight:400;">— ${qtyDisplay}</span></span>
+                            <span style="font-weight:600;">${escapeHtmlForExport(e.icon)} ${escapeHtmlForExport(e.label)} <span style="color:#94a3b8; font-weight:400;">— ${escapeHtmlForExport(qtyDisplay)}</span></span>
                             <span style="font-weight:800; color:#b91c1c;">Rs. ${e.cost.toFixed(0)}</span>
                         </div>
                     `;
@@ -26726,7 +26723,7 @@
             .map(
               (e) => `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; border-radius:8px; padding:10px 14px;">
-                        <span style="font-weight:600;">${e.label}</span>
+                        <span style="font-weight:600;">${escapeHtmlForExport(e.label)}</span>
                         <span style="font-weight:800; color:#9a3412;">Rs. ${e.amount.toFixed(0)}</span>
                     </div>
                 `,
@@ -26820,30 +26817,30 @@
             .map(
               (c) => `
                 <tr>
-                    <td style="border:1px solid #999; padding:3px;">${c.icon} ${c.label}</td>
+                    <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(c.icon)} ${escapeHtmlForExport(c.label)}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">${Math.round(c.qty * 100) / 100}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(c.sales).toLocaleString()}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">${summary.totalRevenue > 0 ? ((c.sales / summary.totalRevenue) * 100).toFixed(1) + "%" : "—"}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(c.cost).toLocaleString()}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(c.sales - c.cost).toLocaleString()}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(c.sales).toLocaleString())}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">${escapeHtmlForExport(summary.totalRevenue > 0 ? ((c.sales / summary.totalRevenue) * 100).toFixed(1) + "%" : "—")}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(c.cost).toLocaleString())}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(c.sales - c.cost).toLocaleString())}</td>
                 </tr>`,
             )
             .join("") +
           `<tr>
                     <td style="border:1px solid #999; padding:3px;">🛵 Delivery Charges</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">—</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(pdfSplit.delivery).toLocaleString()}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">${summary.totalRevenue > 0 ? ((pdfSplit.delivery / summary.totalRevenue) * 100).toFixed(1) + "%" : "—"}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(pdfSplit.delivery).toLocaleString())}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">${escapeHtmlForExport(summary.totalRevenue > 0 ? ((pdfSplit.delivery / summary.totalRevenue) * 100).toFixed(1) + "%" : "—")}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">—</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(pdfSplit.delivery).toLocaleString()}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(pdfSplit.delivery).toLocaleString())}</td>
                 </tr>
                 <tr style="font-weight:bold; background:#f1f5f9;">
                     <td style="border:1px solid #999; padding:3px;">💵 Total Sales</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">${Math.round(Object.values(pdfSplit.channels).reduce((a, c) => a + c.qty, 0) * 100) / 100}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(summary.totalRevenue).toLocaleString()}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(summary.totalRevenue).toLocaleString())}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">100%</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(summary.totalCost).toLocaleString()}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${Math.round(summary.totalRevenue - summary.totalCost).toLocaleString()}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(summary.totalCost).toLocaleString())}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${escapeHtmlForExport(Math.round(summary.totalRevenue - summary.totalCost).toLocaleString())}</td>
                 </tr>`;
 
         const channelTableHtml = `
@@ -26866,7 +26863,7 @@
           .map(
             (r) => `
                 <tr>
-                    <td style="border:1px solid #999; padding:3px;">#${r.itemNumber} ${escapeHtmlForExport(r.name)}${r.item ? "" : " (removed from menu)"}</td>
+                    <td style="border:1px solid #999; padding:3px;">#${escapeHtmlForExport(r.itemNumber)} ${escapeHtmlForExport(r.name)}${r.item ? "" : " (removed from menu)"}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">${Math.round(r.qtySold * 100) / 100}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${r.totalCost.toFixed(0)}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">Rs. ${r.totalGross.toFixed(0)}</td>
@@ -26890,15 +26887,15 @@
                     ${businessPhone ? `<p style="margin:2px 0; font-size:11px;">📞 ${escapeHtmlForExport(businessPhone)}</p>` : ""}
                 </div>
                 <p style="font-size:11px; color:#333; margin:4px 0;"><strong>Period:</strong> ${escapeHtmlForExport(rangeText)}${searchTerm ? ` &nbsp;|&nbsp; <strong>Search:</strong> "${escapeHtmlForExport(searchTerm)}"` : ""}</p>
-                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${new Date().toLocaleString()}</p>
+                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${escapeHtmlForExport(new Date().toLocaleString())}</p>
                 <div style="display:flex; justify-content:space-between; gap:10px; font-size:11px; font-weight:bold; border-top:1.5px solid #000; border-bottom:1.5px solid #000; padding:6px 2px; margin-bottom:10px; flex-wrap:wrap;">
-                    <span>Items Sale: Rs. ${Math.round(summary.itemsRevenue).toLocaleString()}</span>
-                    <span>Discount: Rs. ${Math.round(summary.totalDiscount).toLocaleString()}</span>
-                    <span>Delivery: Rs. ${Math.round(summary.delivery).toLocaleString()}</span>
-                    <span>Total Sales: Rs. ${Math.round(summary.totalRevenue).toLocaleString()}</span>
-                    <span>Raw Material Cost: Rs. ${Math.round(summary.totalCost).toLocaleString()}</span>
-                    <span>Expenses: Rs. ${Math.round(summary.expenses).toLocaleString()}</span>
-                    <span>Profit/Loss: Rs. ${Math.round(summary.profit).toLocaleString()}</span>
+                    <span>Items Sale: Rs. ${escapeHtmlForExport(Math.round(summary.itemsRevenue).toLocaleString())}</span>
+                    <span>Discount: Rs. ${escapeHtmlForExport(Math.round(summary.totalDiscount).toLocaleString())}</span>
+                    <span>Delivery: Rs. ${escapeHtmlForExport(Math.round(summary.delivery).toLocaleString())}</span>
+                    <span>Total Sales: Rs. ${escapeHtmlForExport(Math.round(summary.totalRevenue).toLocaleString())}</span>
+                    <span>Raw Material Cost: Rs. ${escapeHtmlForExport(Math.round(summary.totalCost).toLocaleString())}</span>
+                    <span>Expenses: Rs. ${escapeHtmlForExport(Math.round(summary.expenses).toLocaleString())}</span>
+                    <span>Profit/Loss: Rs. ${escapeHtmlForExport(Math.round(summary.profit).toLocaleString())}</span>
                 </div>
                 ${channelTableHtml}
                 <h3 style="margin:14px 0 6px; font-size:14px;">📒 Item-by-Item Detail</h3>
@@ -27138,7 +27135,7 @@
           sortedItems.slice(0, 5).forEach((item) => {
             // Render Tabular view row
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${escapeHtmlForExport(item.name)}</td><td style="text-align:center; font-weight:bold;">${item.qty}</td>`;
+            tr.innerHTML = `<td>${escapeHtmlForExport(item.name)}</td><td style="text-align:center; font-weight:bold;">${escapeHtmlForExport(item.qty)}</td>`;
             topItemsTbody.appendChild(tr);
 
             // Render Graphical view bar
@@ -27146,8 +27143,8 @@
             const barRow = document.createElement("div");
             barRow.className = "custom-chart-bar-row";
             barRow.innerHTML = `
-                        <div class="chart-label-container"><span>${escapeHtmlForExport(item.name)}</span><span>${item.qty} pcs</span></div>
-                        <div class="chart-track-bg"><div class="chart-fill-color" style="width: ${pct}%; background: var(--accent-amber);"></div></div>
+                        <div class="chart-label-container"><span>${escapeHtmlForExport(item.name)}</span><span>${escapeHtmlForExport(item.qty)} pcs</span></div>
+                        <div class="chart-track-bg"><div class="chart-fill-color" style="width: ${escapeHtmlForExport(pct)}%; background: var(--accent-amber);"></div></div>
                     `;
             topItemsGraphBox.appendChild(barRow);
           });
@@ -27173,7 +27170,7 @@
           sortedHours.slice(0, 5).forEach((h) => {
             // Render Tabular view row
             const tr = document.createElement("tr");
-            tr.innerHTML = `<td>⏰ ${h.hour}</td><td style="text-align:center; font-weight:bold; color:#3498db;">${h.count}</td>`;
+            tr.innerHTML = `<td>⏰ ${escapeHtmlForExport(h.hour)}</td><td style="text-align:center; font-weight:bold; color:#3498db;">${escapeHtmlForExport(h.count)}</td>`;
             peakHoursTbody.appendChild(tr);
 
             // Render Graphical view bar
@@ -27181,8 +27178,8 @@
             const barRow = document.createElement("div");
             barRow.className = "custom-chart-bar-row";
             barRow.innerHTML = `
-                        <div class="chart-label-container"><span>⏰ ${h.hour}</span><span>${h.count} orders</span></div>
-                        <div class="chart-track-bg"><div class="chart-fill-color" style="width: ${pct}%; background: #3498db;"></div></div>
+                        <div class="chart-label-container"><span>⏰ ${escapeHtmlForExport(h.hour)}</span><span>${escapeHtmlForExport(h.count)} orders</span></div>
+                        <div class="chart-track-bg"><div class="chart-fill-color" style="width: ${escapeHtmlForExport(pct)}%; background: #3498db;"></div></div>
                     `;
             peakHoursGraphBox.appendChild(barRow);
           });
@@ -27295,19 +27292,19 @@
 
             const tr = document.createElement("tr");
             tr.innerHTML = `
-              <td style="font-weight:bold;">#${o.id}</td>
-              <td>${o.date} <small style="color:#64748b;">${o.time || ""}</small></td>
+              <td style="font-weight:bold;">#${escapeHtmlForExport(o.id)}</td>
+              <td>${escapeHtmlForExport(o.date)} <small style="color:#64748b;">${escapeHtmlForExport(o.time || "")}</small></td>
               <td>${escapeHtmlForExport(o.customerName || "Walk-In")}</td>
-              <td><span class="badge" style="margin:0;">${o.orderType}</span></td>
-              <td><span class="badge" style="margin:0; background:#e0e7ff; color:#3730a3;">${o.paymentMethod || "Cash"}</span></td>
-              <td style="text-align:right;">Rs. ${sub.toLocaleString()}</td>
-              <td style="text-align:right; color:#16a34a;">${disc > 0 ? `- Rs. ${disc.toLocaleString()}` : "—"}</td>
-              <td style="text-align:right; color:#ef4444;">${del > 0 ? `Rs. ${del.toLocaleString()}` : "—"}</td>
-              <td style="text-align:right; font-weight:bold; color:#0f172a;">Rs. ${rev.toLocaleString()}</td>
+              <td><span class="badge" style="margin:0;">${escapeHtmlForExport(o.orderType)}</span></td>
+              <td><span class="badge" style="margin:0; background:#e0e7ff; color:#3730a3;">${escapeHtmlForExport(o.paymentMethod || "Cash")}</span></td>
+              <td style="text-align:right;">Rs. ${escapeHtmlForExport(sub.toLocaleString())}</td>
+              <td style="text-align:right; color:#16a34a;">${escapeHtmlForExport(disc > 0 ? `- Rs. ${disc.toLocaleString()}` : "—")}</td>
+              <td style="text-align:right; color:#ef4444;">${escapeHtmlForExport(del > 0 ? `Rs. ${del.toLocaleString()}` : "—")}</td>
+              <td style="text-align:right; font-weight:bold; color:#0f172a;">Rs. ${escapeHtmlForExport(rev.toLocaleString())}</td>
               <td style="text-align:right; color:#e74c3c;">Rs. ${cost.toFixed(2)}</td>
               <td style="text-align:right; font-weight:bold; color:${grossProfit >= 0 ? "#166534" : "#dc2626"};">Rs. ${grossProfit.toFixed(2)}${profitObj.isHistoricalEstimate ? ' <small title="Cost estimated from current/legacy data">~</small>' : ''}</td>
               <td style="text-align:right; font-weight:bold; color:${margin >= 0 ? "#166534" : "#dc2626"};">${margin.toFixed(1)}%</td>
-              <td style="text-align:center;"><button type="button" class="btn-sm" onclick="viewInvoice(${o.id})" style="padding:3px 8px; font-size:12px;">👁️ View</button></td>
+              <td style="text-align:center;"><button type="button" class="btn-sm" onclick="viewInvoice(${htmlJsValue(o.id)})" style="padding:3px 8px; font-size:12px;">👁️ View</button></td>
             `;
             tbody.appendChild(tr);
           });
@@ -27374,10 +27371,10 @@
               row.innerHTML = `
                 <div style="display:flex; justify-content:space-between; font-size:12.5px; font-weight:600; color:#334155; margin-bottom:3px;">
                   <span>${escapeHtmlForExport(label)}</span>
-                  <span>Rs. ${amt.toLocaleString()} (${pct.toFixed(1)}%)</span>
+                  <span>Rs. ${escapeHtmlForExport(amt.toLocaleString())} (${pct.toFixed(1)}%)</span>
                 </div>
                 <div style="background:#e2e8f0; height:8px; border-radius:4px; overflow:hidden;">
-                  <div style="background:#ef4444; width:${pct}%; height:100%; border-radius:4px;"></div>
+                  <div style="background:#ef4444; width:${escapeHtmlForExport(pct)}%; height:100%; border-radius:4px;"></div>
                 </div>
               `;
               progBox.appendChild(row);
@@ -27397,11 +27394,11 @@
               const label = fieldDef ? fieldDef.label : e.fieldKey;
               const tr = document.createElement("tr");
               tr.innerHTML = `
-                <td>${idx + 1}</td>
-                <td>${e.date} <small style="color:#64748b;">${e.time || ""}</small></td>
+                <td>${escapeHtmlForExport(idx + 1)}</td>
+                <td>${escapeHtmlForExport(e.date)} <small style="color:#64748b;">${escapeHtmlForExport(e.time || "")}</small></td>
                 <td><span class="badge" style="background:#fee2e2; color:#991b1b; margin:0;">${escapeHtmlForExport(label)}</span></td>
                 <td>${escapeHtmlForExport(e.note || "N/A")}</td>
-                <td style="text-align:right; font-weight:bold; color:#b91c1c;">Rs. ${(parseFloat(e.amount) || 0).toLocaleString()}</td>
+                <td style="text-align:right; font-weight:bold; color:#b91c1c;">Rs. ${escapeHtmlForExport((parseFloat(e.amount) || 0).toLocaleString())}</td>
               `;
               tbody.appendChild(tr);
             });
@@ -27492,13 +27489,13 @@
             filtered.forEach((p, idx) => {
               const tr = document.createElement("tr");
               tr.innerHTML = `
-                <td>${idx + 1}</td>
-                <td>${p.date} <small style="color:#64748b;">${p.time || ""}</small></td>
-                <td><span class="badge" style="background:#e0e7ff; color:#3730a3; margin:0;">${p.type}</span></td>
+                <td>${escapeHtmlForExport(idx + 1)}</td>
+                <td>${escapeHtmlForExport(p.date)} <small style="color:#64748b;">${escapeHtmlForExport(p.time || "")}</small></td>
+                <td><span class="badge" style="background:#e0e7ff; color:#3730a3; margin:0;">${escapeHtmlForExport(p.type)}</span></td>
                 <td style="font-weight:bold;">${escapeHtmlForExport(p.itemName)}</td>
-                <td>${p.qtyDisplay}</td>
-                <td>${p.unitPrice}</td>
-                <td style="text-align:right; font-weight:bold; color:#16a34a;">Rs. ${p.totalCost.toLocaleString()}</td>
+                <td>${escapeHtmlForExport(p.qtyDisplay)}</td>
+                <td>${escapeHtmlForExport(p.unitPrice)}</td>
+                <td style="text-align:right; font-weight:bold; color:#16a34a;">Rs. ${escapeHtmlForExport(p.totalCost.toLocaleString())}</td>
               `;
               tbody.appendChild(tr);
             });
@@ -27622,11 +27619,11 @@
 
               const tr = document.createElement("tr");
               tr.innerHTML = `
-                <td>${idx + 1}</td>
+                <td>${escapeHtmlForExport(idx + 1)}</td>
                 <td style="font-weight:bold;">${escapeHtmlForExport(s.name)}</td>
-                <td><span class="badge" style="margin:0;">${s.group}</span></td>
-                <td>${s.qtyDisplay}</td>
-                <td>${s.rateDisplay}</td>
+                <td><span class="badge" style="margin:0;">${escapeHtmlForExport(s.group)}</span></td>
+                <td>${escapeHtmlForExport(s.qtyDisplay)}</td>
+                <td>${escapeHtmlForExport(s.rateDisplay)}</td>
                 <td style="text-align:right; font-weight:bold; color:#0f766e;">Rs. ${s.totalVal.toFixed(2)}</td>
                 <td>${badgeHtml}</td>
               `;
@@ -27774,16 +27771,16 @@
               const pct = totalUsageCost > 0 ? (r.cost / totalUsageCost) * 100 : 0;
               const tr = document.createElement("tr");
               tr.innerHTML = `
-                <td>${idx + 1}</td>
+                <td>${escapeHtmlForExport(idx + 1)}</td>
                 <td style="font-weight:bold;">${escapeHtmlForExport(r.name)}</td>
-                <td><span class="badge" style="margin:0;">${r.type}</span></td>
-                <td>${r.rateDisplay}</td>
-                <td>${r.consumedDisplay}</td>
+                <td><span class="badge" style="margin:0;">${escapeHtmlForExport(r.type)}</span></td>
+                <td>${escapeHtmlForExport(r.rateDisplay)}</td>
+                <td>${escapeHtmlForExport(r.consumedDisplay)}</td>
                 <td style="text-align:right; font-weight:bold; color:#e74c3c;">Rs. ${r.cost.toFixed(2)}</td>
                 <td style="text-align:right;">
                   <div style="font-size:12px; font-weight:bold;">${pct.toFixed(1)}%</div>
                   <div style="background:#e2e8f0; height:6px; border-radius:3px; overflow:hidden; width:80px; margin-left:auto;">
-                    <div style="background:#e67e22; width:${pct}%; height:100%;"></div>
+                    <div style="background:#e67e22; width:${escapeHtmlForExport(pct)}%; height:100%;"></div>
                   </div>
                 </td>
               `;
@@ -27848,7 +27845,7 @@
           <div style="text-align:center; margin-bottom:12px;">
             <h2 style="margin:0;">${escapeHtmlForExport(restaurantName)}</h2>
             <h3 style="margin:4px 0;">🧾 Bill-Wise Profit Report</h3>
-            <p style="font-size:11px; margin:2px 0;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size:11px; margin:2px 0;">Generated on ${escapeHtmlForExport(new Date().toLocaleString())}</p>
           </div>
           <table style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead>
@@ -27901,7 +27898,7 @@
           <div style="text-align:center; margin-bottom:12px;">
             <h2 style="margin:0;">${escapeHtmlForExport(restaurantName)}</h2>
             <h3 style="margin:4px 0;">💸 Expenses Report</h3>
-            <p style="font-size:11px; margin:2px 0;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size:11px; margin:2px 0;">Generated on ${escapeHtmlForExport(new Date().toLocaleString())}</p>
           </div>
           <table style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead>
@@ -27946,7 +27943,7 @@
           <div style="text-align:center; margin-bottom:12px;">
             <h2 style="margin:0;">${escapeHtmlForExport(restaurantName)}</h2>
             <h3 style="margin:4px 0;">🛍️ Stock Purchase Register Report</h3>
-            <p style="font-size:11px; margin:2px 0;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size:11px; margin:2px 0;">Generated on ${escapeHtmlForExport(new Date().toLocaleString())}</p>
           </div>
           <table style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead>
@@ -27992,7 +27989,7 @@
           <div style="text-align:center; margin-bottom:12px;">
             <h2 style="margin:0;">${escapeHtmlForExport(restaurantName)}</h2>
             <h3 style="margin:4px 0;">📦 Inventory Stock Valuation Report</h3>
-            <p style="font-size:11px; margin:2px 0;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size:11px; margin:2px 0;">Generated on ${escapeHtmlForExport(new Date().toLocaleString())}</p>
           </div>
           <table style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead>
@@ -28039,7 +28036,7 @@
           <div style="text-align:center; margin-bottom:12px;">
             <h2 style="margin:0;">${escapeHtmlForExport(restaurantName)}</h2>
             <h3 style="margin:4px 0;">🥘 Ingredient Usage & Costing Report</h3>
-            <p style="font-size:11px; margin:2px 0;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size:11px; margin:2px 0;">Generated on ${escapeHtmlForExport(new Date().toLocaleString())}</p>
           </div>
           <table style="width:100%; border-collapse:collapse; font-size:11px;">
             <thead>
@@ -29214,6 +29211,12 @@
 
 
 
+      // Safe text/attribute values share the same five-character HTML encoder.
+      function escapeHtml(value) { return escapeHtmlForExport(value); }
+      function safeCssColor(value) {
+        const color = String(value || "");
+        return /^(?:#[a-f0-9]{3,8}|[a-z]{1,20})$/i.test(color) ? color : "#64748b";
+      }
       function htmlJsValue(value) {
         return escapeHtmlForExport(JSON.stringify(value ?? null));
       }
@@ -29288,24 +29291,24 @@
                 : 0;
             const profit = ProfitEngine.order(o);
             return `<tr>
-                    <td>${o.id}</td>
-                    <td>${o.date}</td>
-                    <td>${o.time ? formatTime12Hour(o.time) : ""}</td>
+                    <td>${escapeHtmlForExport(o.id)}</td>
+                    <td>${escapeHtmlForExport(o.date)}</td>
+                    <td>${escapeHtmlForExport(o.time ? formatTime12Hour(o.time) : "")}</td>
                     <td>${escapeHtmlForExport(o.customerName || "Walk-In Customer")}</td>
                     <td>${escapeHtmlForExport(o.orderType || "")}</td>
-                    <td>${o.orderType === "Dine-In" && o.tableNumber ? o.tableNumber : ""}</td>
+                    <td>${escapeHtmlForExport(o.orderType === "Dine-In" && o.tableNumber ? o.tableNumber : "")}</td>
                     <td>${escapeHtmlForExport(itemsStr)}</td>
-                    <td>${o.subtotal || 0}</td>
-                    <td>${o.discountAmount || 0}</td>
-                    <td>${o.deliveryCharges || 0}</td>
-                    <td>${o.totalBill || 0}</td>
-                    <td>${isOrderRevenueCounted(o) ? profit.costOfGoods : 0}</td>
-                    <td>${isOrderRevenueCounted(o) ? profit.grossProfit : 0}</td>
-                    <td>${getOrderStatus(o)}</td>
-                    <td>${status}</td>
+                    <td>${escapeHtmlForExport(o.subtotal || 0)}</td>
+                    <td>${escapeHtmlForExport(o.discountAmount || 0)}</td>
+                    <td>${escapeHtmlForExport(o.deliveryCharges || 0)}</td>
+                    <td>${escapeHtmlForExport(o.totalBill || 0)}</td>
+                    <td>${escapeHtmlForExport(isOrderRevenueCounted(o) ? profit.costOfGoods : 0)}</td>
+                    <td>${escapeHtmlForExport(isOrderRevenueCounted(o) ? profit.grossProfit : 0)}</td>
+                    <td>${escapeHtmlForExport(getOrderStatus(o))}</td>
+                    <td>${escapeHtmlForExport(status)}</td>
                     <td>${escapeHtmlForExport(o.paymentMethod || "")}</td>
-                    <td>${o.amountReceived != null ? o.amountReceived : ""}</td>
-                    <td>${balance}</td>
+                    <td>${escapeHtmlForExport(o.amountReceived != null ? o.amountReceived : "")}</td>
+                    <td>${escapeHtmlForExport(balance)}</td>
                 </tr>`;
           })
           .join("");
@@ -29315,11 +29318,11 @@
                 <table border="1">
                     <tr><td colspan="18" style="font-size:16px; font-weight:bold;">Orders History Report</td></tr>
                     <tr><td colspan="18">${escapeHtmlForExport(filterSummary)}</td></tr>
-                    <tr><td colspan="18">Generated: ${new Date().toLocaleString()}</td></tr>
+                    <tr><td colspan="18">Generated: ${escapeHtmlForExport(new Date().toLocaleString())}</td></tr>
                     <tr><td colspan="18"></td></tr>
-                    <tr><td colspan="18" style="font-weight:bold;">Total Orders: ${filtered.length}   |   Revenue (excl. Cancelled): Rs. ${totalRevenue}   |   Cost of Goods: Rs. ${totalCostOfGoods}   |   Gross Profit: Rs. ${totalGrossProfit}   |   Discounts: Rs. ${totalDiscount}   |   Outstanding Dues: Rs. ${totalDue}</td></tr>
+                    <tr><td colspan="18" style="font-weight:bold;">Total Orders: ${escapeHtmlForExport(filtered.length)}   |   Revenue (excl. Cancelled): Rs. ${escapeHtmlForExport(totalRevenue)}   |   Cost of Goods: Rs. ${escapeHtmlForExport(totalCostOfGoods)}   |   Gross Profit: Rs. ${escapeHtmlForExport(totalGrossProfit)}   |   Discounts: Rs. ${escapeHtmlForExport(totalDiscount)}   |   Outstanding Dues: Rs. ${escapeHtmlForExport(totalDue)}</td></tr>
                     <tr><td colspan="18"></td></tr>
-                    <tr style="background:#1e293b; color:white; font-weight:bold;">${headers.map((h) => `<td>${h}</td>`).join("")}</tr>
+                    <tr style="background:#1e293b; color:white; font-weight:bold;">${headers.map((h) => `<td>${escapeHtmlForExport(h)}</td>`).join("")}</tr>
                     ${rowsHtml}
                 </table>
                 </body></html>
@@ -29394,15 +29397,15 @@
               orderStatus !== "Completed" ? orderStatus : status;
             const profit = ProfitEngine.order(o);
             return `<tr>
-                    <td style="border:1px solid #999; padding:3px;">#${o.id}</td>
-                    <td style="border:1px solid #999; padding:3px;">${o.date}<br><span style="color:#666;">${o.time ? formatTime12Hour(o.time) : ""}</span></td>
+                    <td style="border:1px solid #999; padding:3px;">#${escapeHtmlForExport(o.id)}</td>
+                    <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(o.date)}<br><span style="color:#666;">${escapeHtmlForExport(o.time ? formatTime12Hour(o.time) : "")}</span></td>
                     <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(o.customerName || "Walk-In Customer")}</td>
-                    <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(o.orderType || "")}${o.orderType === "Dine-In" && o.tableNumber ? ` #${o.tableNumber}` : ""}</td>
+                    <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(o.orderType || "")}${escapeHtmlForExport(o.orderType === "Dine-In" && o.tableNumber ? ` #${o.tableNumber}` : "")}</td>
                     <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(itemsStr)}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right; ${orderStatus !== "Completed" ? "text-decoration:line-through; color:#999;" : ""}">Rs. ${o.totalBill || 0}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right; ${orderStatus !== "Completed" ? "text-decoration:line-through; color:#999;" : ""}">Rs. ${escapeHtmlForExport(o.totalBill || 0)}</td>
                     <td style="border:1px solid #999; padding:3px; text-align:right;">${orderStatus === "Completed" ? `Rs. ${profit.grossProfit.toFixed(2)}` : "-"}</td>
-                    <td style="border:1px solid #999; padding:3px;">${displayStatus}</td>
-                    <td style="border:1px solid #999; padding:3px; text-align:right;">${balance > 0 ? `Rs. ${balance}` : "-"}</td>
+                    <td style="border:1px solid #999; padding:3px;">${escapeHtmlForExport(displayStatus)}</td>
+                    <td style="border:1px solid #999; padding:3px; text-align:right;">${escapeHtmlForExport(balance > 0 ? `Rs. ${balance}` : "-")}</td>
                 </tr>`;
           })
           .join("");
@@ -29419,14 +29422,14 @@
                     ${businessPhone ? `<p style="margin:2px 0; font-size:11px;">📞 ${escapeHtmlForExport(businessPhone)}</p>` : ""}
                 </div>
                 <p style="font-size:11px; color:#333; margin:4px 0;"><strong>Filters applied:</strong> ${escapeHtmlForExport(filterSummary)}</p>
-                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${new Date().toLocaleString()}</p>
+                <p style="font-size:11px; color:#333; margin:4px 0 10px 0;">Generated: ${escapeHtmlForExport(new Date().toLocaleString())}</p>
                 <div style="display:flex; justify-content:space-between; gap:10px; font-size:12px; font-weight:bold; border-top:1.5px solid #000; border-bottom:1.5px solid #000; padding:6px 2px; margin-bottom:10px;">
-                    <span>Total Orders: ${filtered.length}</span>
-                    <span>Revenue (excl. Cancelled): Rs. ${totalRevenue}</span>
-                    <span>COGS: Rs. ${totalCostOfGoods}</span>
-                    <span>Gross Profit: Rs. ${totalGrossProfit}</span>
-                    <span>Discounts: Rs. ${totalDiscount}</span>
-                    <span>Outstanding: Rs. ${totalDue}</span>
+                    <span>Total Orders: ${escapeHtmlForExport(filtered.length)}</span>
+                    <span>Revenue (excl. Cancelled): Rs. ${escapeHtmlForExport(totalRevenue)}</span>
+                    <span>COGS: Rs. ${escapeHtmlForExport(totalCostOfGoods)}</span>
+                    <span>Gross Profit: Rs. ${escapeHtmlForExport(totalGrossProfit)}</span>
+                    <span>Discounts: Rs. ${escapeHtmlForExport(totalDiscount)}</span>
+                    <span>Outstanding: Rs. ${escapeHtmlForExport(totalDue)}</span>
                 </div>
                 <table style="width:100%; border-collapse:collapse; font-size:10.5px;">
                     <thead>
@@ -29499,7 +29502,7 @@
           tr.style.cursor = "pointer";
           tr.setAttribute(
             "onclick",
-            `showOrderInvoiceDetailsView(${order.id})`,
+            `showOrderInvoiceDetailsView(${JSON.stringify(order.id)})`,
           );
 
           // 1. Get ALL items listed dynamically (plain text for the tooltip; a styled pill flags any discount/override)
@@ -29582,13 +29585,13 @@
                         </div>
                     </td>
                     <td style="font-weight: bold; color: #dc2626;">${remainingDueCell}</td>
-                    <td style="font-weight: bold; ${orderStatus !== "Completed" ? "text-decoration: line-through; color: #94a3b8;" : orderPaymentStatus === "Unpaid" ? "color: #dc2626;" : "color: var(--text-dark);"}">Rs. ${order.totalBill}</td>
+                    <td style="font-weight: bold; ${orderStatus !== "Completed" ? "text-decoration: line-through; color: #94a3b8;" : orderPaymentStatus === "Unpaid" ? "color: #dc2626;" : "color: var(--text-dark);"}">Rs. ${escapeHtmlForExport(order.totalBill)}</td>
                     <td>${billProfitCell}</td>
                     <td style="text-align:center;">${statusBadge}</td>
                     <td style="text-align:center; white-space:nowrap;">
                         <button type="button" class="edit-item-btn" style="margin:0; background:#0ea5e9; padding: 4px 10px;" onclick="event.stopPropagation(); reprintOrderReceipt(${htmlJsValue(order.id)});">🖨️ Print</button>
                         <button type="button" class="delete-item-btn" style="margin:0 0 0 4px; padding:4px 10px;" onclick="event.stopPropagation(); deleteBill(${htmlJsValue(order.id)});">🗑️ Delete</button>
-                        ${editCount > 0 ? `<button type="button" class="edit-item-btn" style="margin:0 0 0 4px; background:#7c3aed; padding: 4px 10px;" onclick="event.stopPropagation(); openEditHistoryModal(${htmlJsValue(order.id)});" title="This order has been changed ${editCount} time${editCount === 1 ? "" : "s"} since it was placed — click to see exactly what changed">📝 ${editCount}</button>` : ""}
+                        ${editCount > 0 ? `<button type="button" class="edit-item-btn" style="margin:0 0 0 4px; background:#7c3aed; padding: 4px 10px;" onclick="event.stopPropagation(); openEditHistoryModal(${htmlJsValue(order.id)});" title="This order has been changed ${escapeHtmlForExport(editCount)} time${editCount === 1 ? "" : "s"} since it was placed — click to see exactly what changed">📝 ${escapeHtmlForExport(editCount)}</button>` : ""}
                     </td>
                 `;
           tbody.appendChild(tr);
@@ -29686,8 +29689,8 @@
               : "offer-pill-item";
           const offerNoteHtml = item.offerLabel
             ? `<div style="margin-top:3px; display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                           <span class="offer-pill ${pillClass}">${escapeHtmlForExport(item.offerLabel)}</span>
-                           <span class="offer-price-strike" style="font-size:12px;">was Rs. ${item.originalPrice}</span>
+                           <span class="offer-pill ${escapeHtmlForExport(pillClass)}">${escapeHtmlForExport(item.offerLabel)}</span>
+                           <span class="offer-price-strike" style="font-size:12px;">was Rs. ${escapeHtmlForExport(item.originalPrice)}</span>
                        </div>`
             : "";
           // ➕ Extra ingredients (e.g. "extra cheese") — internal detail, useful when staff review an order later
@@ -29695,12 +29698,12 @@
             .map((extra) => {
               const def = stockItemDefs[extra.key];
               const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<span class="cart-extra-tag" style="margin-top:3px;">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}</span>`;
+              return `<span class="cart-extra-tag" style="margin-top:3px;">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)}</span>`;
             })
             .join("");
           itemsRowsHtml += `
                     <div style="display: flex; justify-content: space-between; align-items:flex-start; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px;">
-                        <span><strong style="color: var(--accent-amber);">${item.qty}x</strong> ${escapeHtmlForExport(item.name)}${offerNoteHtml}${extrasNoteHtml}</span>
+                        <span><strong style="color: var(--accent-amber);">${escapeHtmlForExport(item.qty)}x</strong> ${escapeHtmlForExport(item.name)}${offerNoteHtml}${extrasNoteHtml}</span>
                         <span style="font-weight: 600; color: #1e293b; white-space:nowrap; margin-left:10px;">Rs. ${item.price * item.qty}</span>
                     </div>
                 `;
@@ -29751,14 +29754,14 @@
                     <div style="margin-top: 10px; padding-top: 12px; border-top: 2px solid #e2e8f0;">
                         <div style="display: flex; justify-content: space-between; font-size: 14px; color: #64748b; margin-bottom: 6px;">
                             <span>Subtotal:</span>
-                            <span>Rs. ${order.subtotal !== undefined ? order.subtotal : order.totalBill + (order.discountAmount || 0) - (order.deliveryCharges || 0)}</span>
+                            <span>Rs. ${escapeHtmlForExport(order.subtotal !== undefined ? order.subtotal : order.totalBill + (order.discountAmount || 0) - (order.deliveryCharges || 0))}</span>
                         </div>
                         ${
                           order.discountAmount > 0
                             ? `
                         <div style="display: flex; justify-content: space-between; font-size: 14px; color: #16a34a; font-weight: 600; margin-bottom: 6px;">
-                            <span>🏷️ Discount${order.discountType === "percent" ? ` (${order.discountValue}%)` : ""}:</span>
-                            <span>- Rs. ${order.discountAmount}</span>
+                            <span>🏷️ Discount${escapeHtmlForExport(order.discountType === "percent" ? ` (${order.discountValue}%)` : "")}:</span>
+                            <span>- Rs. ${escapeHtmlForExport(order.discountAmount)}</span>
                         </div>`
                             : ""
                         }
@@ -29767,7 +29770,7 @@
                             ? `
                         <div style="display: flex; justify-content: space-between; font-size: 14px; color: #ef4444; font-weight: 600; margin-bottom: 6px;">
                             <span>🛵 Delivery Surcharge:</span>
-                            <span>Rs. ${order.deliveryCharges}</span>
+                            <span>Rs. ${escapeHtmlForExport(order.deliveryCharges)}</span>
                         </div>`
                             : ""
                         }
@@ -29777,7 +29780,7 @@
                         </div>`).join("")}
                         <div style="display: flex; justify-content: space-between; margin-top: 6px; padding-top: 10px; border-top: 1px dashed #cbd5e1; font-size: 18px; font-weight: bold;">
                             <span style="color: #64748b;">${(order.paymentStatus || "Paid") === "Unpaid" ? "💰 Amount Due (Incl. Delivery):" : "Total Amount:"}</span>
-                            <span style="color: ${(order.paymentStatus || "Paid") === "Unpaid" ? "#dc2626" : "#22c55e"}; font-size: 20px;">Rs. ${order.totalBill}</span>
+                            <span style="color: ${(order.paymentStatus || "Paid") === "Unpaid" ? "#dc2626" : "#22c55e"}; font-size: 20px;">Rs. ${escapeHtmlForExport(order.totalBill)}</span>
                         </div>
                         <div style="margin-top:10px; padding:10px 12px; border-radius:8px; background:#f0fdf4; border:1px solid #bbf7d0; font-size:13px;">
                             <div style="display:flex; justify-content:space-between;"><span>Cost of Goods:</span><strong>Rs. ${billProfit.costOfGoods.toFixed(2)}</strong></div>
@@ -29793,7 +29796,7 @@
                             ? `
                         <div style="display: flex; justify-content: space-between; font-size: 14px; color: #64748b; margin-top: 8px;">
                             <span>💵 Received So Far:</span>
-                            <span style="font-weight: 600;">Rs. ${order.amountReceived}</span>
+                            <span style="font-weight: 600;">Rs. ${escapeHtmlForExport(order.amountReceived)}</span>
                         </div>`
                             : ""
                         }
@@ -29802,8 +29805,8 @@
                         <div style="margin-top: 10px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px;">
                             <label for="invoice-remaining-due-input" style="font-size: 13px; font-weight: 700; color: #991b1b; display: block; margin-bottom: 6px;">⚠️ Remaining Due (Rs.) — editable</label>
                             <div style="display: flex; gap: 8px;">
-                                <input type="number" id="invoice-remaining-due-input" min="0" max="${order.totalBill}" step="1"
-                                       value="${Math.max(0, order.totalBill - (parseFloat(order.amountReceived) || 0))}"
+                                <input type="number" id="invoice-remaining-due-input" min="0" max="${escapeHtmlForExport(order.totalBill)}" step="1"
+                                       value="${escapeHtmlForExport(Math.max(0, order.totalBill - (parseFloat(order.amountReceived) || 0)))}"
                                        onkeydown="if(event.key==='Enter'){event.preventDefault(); updateOrderRemainingDue(${orderIdLiteral});}"
                                        style="flex: 1; padding: 8px 10px; border: 1px solid #fca5a5; border-radius: 6px; font-size: 15px; font-weight: 700; color: #991b1b;">
                                 <button type="button" onclick="updateOrderRemainingDue(${orderIdLiteral})" style="background: #dc2626; color: white; border: none; padding: 0 16px; border-radius: 6px; cursor: pointer; font-weight: 700;">💾 Update</button>
@@ -30340,7 +30343,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
                         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                             ${typeBadge[e.type] || `<span class="badge">${escapeHtmlForExport(e.type)}</span>`}
-                            <strong style="cursor:pointer; color:#0ea5e9;" onclick="closeEditHistoryModal(); showOrderInvoiceDetailsView(${o.id});" title="Open this order's bill">Order #${o.id}</strong>
+                            <strong style="cursor:pointer; color:#0ea5e9;" onclick="closeEditHistoryModal(); showOrderInvoiceDetailsView(${htmlJsValue(o.id)});" title="Open this order's bill">Order #${escapeHtmlForExport(o.id)}</strong>
                             <span style="color:#64748b; font-size:13px;">${escapeHtmlForExport(o.customerName || "Walk-In Customer")}</span>
                         </div>
                         <span style="color:#94a3b8; font-size:12px; white-space:nowrap;">🕒 ${escapeHtmlForExport(e.date)} at ${escapeHtmlForExport(e.time)}</span>
@@ -30395,7 +30398,7 @@
                     <div style="display: flex; gap: 12px;">
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Customer Name</label>
-                            <input type="text" id="edit-cust-name" value="${(order.customerName || "").replace(/"/g, "&quot;")}">
+                            <input type="text" id="edit-cust-name" value="${escapeHtmlForExport(order.customerName || "")}">
                         </div>
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Order Type</label>
@@ -30418,14 +30421,14 @@
                     <div id="edit-table-container" class="form-group" style="margin-bottom: 0; ${order.orderType === "Dine-In" ? "" : "display:none;"}">
                         <label>🪑 Table Number</label>
                         <select id="edit-table-select">
-                            ${buildTableOptionsHtml(order.tableNumber || 1)}
+                            ${escapeHtmlForExport(buildTableOptionsHtml(order.tableNumber || 1))}
                         </select>
                     </div>
 
                     <div id="edit-hall-container" class="form-group" style="margin-bottom: 0; ${order.orderType === "Dine-In" ? "" : "display:none;"}">
                         <label>🏛️ Hall</label>
                         <select id="edit-hall-select">
-                            ${buildHallOptionsHtml(order.hall)}
+                            ${escapeHtmlForExport(buildHallOptionsHtml(order.hall))}
                         </select>
                     </div>
 
@@ -30440,7 +30443,7 @@
                         </div>
                         <div class="form-group" id="edit-amount-received-container" style="flex: 1; margin-bottom: 0; ${(order.paymentStatus || "Paid") === "Unpaid" ? "" : "display:none;"}">
                             <label>💵 Amount Received (Rs.) <span style="font-weight: 400; color: #94a3b8;">optional</span></label>
-                            <input type="number" id="edit-amount-received" min="0" value="${order.amountReceived != null ? order.amountReceived : ""}" placeholder="e.g., 1000" oninput="recalcEditTotals()">
+                            <input type="number" id="edit-amount-received" min="0" value="${escapeHtmlForExport(order.amountReceived != null ? order.amountReceived : "")}" placeholder="e.g., 1000" oninput="recalcEditTotals()">
                         </div>
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Payment Status</label>
@@ -30487,7 +30490,7 @@
                     <div style="display: flex; gap: 12px;">
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Delivery Charges (Rs.)</label>
-                            <input type="number" id="edit-delivery-charge" min="0" value="${order.deliveryCharges || 0}" oninput="recalcEditTotals()">
+                            <input type="number" id="edit-delivery-charge" min="0" value="${escapeHtmlForExport(order.deliveryCharges || 0)}" oninput="recalcEditTotals()">
                         </div>
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Discount Type</label>
@@ -30498,7 +30501,7 @@
                         </div>
                         <div class="form-group" style="flex: 1; margin-bottom: 0;">
                             <label>Discount Value</label>
-                            <input type="number" id="edit-discount-value" min="0" value="${order.discountValue || 0}" oninput="recalcEditTotals()">
+                            <input type="number" id="edit-discount-value" min="0" value="${escapeHtmlForExport(order.discountValue || 0)}" oninput="recalcEditTotals()">
                         </div>
                     </div>
 
@@ -30547,7 +30550,7 @@
       function populateEditPaymentAccounts(selectedId) {
         const select = document.getElementById("edit-payment-account");
         if (!select) return;
-        select.innerHTML = `<option value="">Select bank account</option>` + bankAccounts.filter((account) => account.active !== false).map((account) => `<option value="${account.id}" ${String(account.id) === String(selectedId) ? "selected" : ""}>${escapeHtmlForExport(account.displayName)}</option>`).join("");
+        select.innerHTML = `<option value="">Select bank account</option>` + bankAccounts.filter((account) => account.active !== false).map((account) => `<option value="${escapeHtmlForExport(account.id)}" ${String(account.id) === String(selectedId) ? "selected" : ""}>${escapeHtmlForExport(account.displayName)}</option>`).join("");
       }
       function toggleEditPaymentAccount() { const method = document.getElementById("edit-payment-method")?.value; document.getElementById("edit-payment-account")?.classList.toggle("hidden", method !== "Bank Account"); }
 
@@ -30556,10 +30559,10 @@
         if (!container || !editDraftOrder) return;
         container.innerHTML = normalizeAdditionalCharges(editDraftOrder.additionalCharges).map((charge, index) =>
           `<div style="display:grid; grid-template-columns:minmax(110px,1fr) 92px 82px 28px; gap:5px; align-items:center; margin-bottom:6px;">
-            <input type="text" value="${escapeHtmlForExport(charge.name).replace(/"/g, "&quot;")}" oninput="updateEditAdditionalCharge(${index}, 'name', this.value)">
-            <select onchange="updateEditAdditionalCharge(${index}, 'type', this.value)"><option value="percent" ${charge.type === "percent" ? "selected" : ""}>Percent %</option><option value="flat" ${charge.type === "flat" ? "selected" : ""}>Flat Rs.</option></select>
-            <input type="number" min="0" step="0.01" value="${charge.value}" oninput="updateEditAdditionalCharge(${index}, 'value', this.value)">
-            <button type="button" class="delete-item-btn" onclick="removeEditAdditionalCharge(${index})">×</button>
+            <input type="text" value="${escapeHtmlForExport(charge.name).replace(/"/g, "&quot;")}" oninput="updateEditAdditionalCharge(${htmlJsValue(index)}, 'name', this.value)">
+            <select onchange="updateEditAdditionalCharge(${htmlJsValue(index)}, 'type', this.value)"><option value="percent" ${charge.type === "percent" ? "selected" : ""}>Percent %</option><option value="flat" ${charge.type === "flat" ? "selected" : ""}>Flat Rs.</option></select>
+            <input type="number" min="0" step="0.01" value="${escapeHtmlForExport(charge.value)}" oninput="updateEditAdditionalCharge(${htmlJsValue(index)}, 'value', this.value)">
+            <button type="button" class="delete-item-btn" onclick="removeEditAdditionalCharge(${htmlJsValue(index)})">×</button>
           </div>`).join("");
       }
 
@@ -30598,17 +30601,17 @@
                 const def = stockItemDefs[extra.key];
                 const unitLabel =
                   def && def.sellUnit === "number" ? "pcs" : "g";
-                return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${extra.qty}${unitLabel}<button type="button" onclick="removeExtraFromDraftItem(${idx}, ${exIdx})" title="Remove">✕</button></span>`;
+                return `<span class="cart-extra-tag">➕ ${escapeHtmlForExport(def ? def.label : extra.key)} ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)}<button type="button" onclick="removeExtraFromDraftItem(${htmlJsValue(idx)}, ${htmlJsValue(exIdx)})" title="Remove">✕</button></span>`;
               })
               .join("");
             return `
                 <div style="display: flex; align-items: center; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px;">
                     <span style="flex: 2; font-size: 13px; color: #1e293b; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        ${escapeHtmlForExport(item.name)}<br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openEditOrderExtrasModal(${idx})">➕ Add Extra</span>
+                        ${escapeHtmlForExport(item.name)}<br>${extrasTagsHtml}<span class="cart-add-extra-link" onclick="openEditOrderExtrasModal(${htmlJsValue(idx)})">➕ Add Extra</span>
                     </span>
-                    <span style="width: 70px; font-size: 12px; color: #64748b; text-align: right;">Rs. ${item.price}</span>
-                    <input type="number" min="1" value="${item.qty}" oninput="updateDraftItemQty(${idx}, this.value)" style="width: 60px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;" title="Quantity">
-                    <button type="button" onclick="removeDraftItem(${idx})" style="background: #ef4444; color: white; border: none; width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-weight: bold; flex-shrink: 0;">✕</button>
+                    <span style="width: 70px; font-size: 12px; color: #64748b; text-align: right;">Rs. ${escapeHtmlForExport(item.price)}</span>
+                    <input type="number" min="1" value="${escapeHtmlForExport(item.qty)}" oninput="updateDraftItemQty(${htmlJsValue(idx)}, this.value)" style="width: 60px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px;" title="Quantity">
+                    <button type="button" onclick="removeDraftItem(${htmlJsValue(idx)})" style="background: #ef4444; color: white; border: none; width: 28px; height: 28px; border-radius: 4px; cursor: pointer; font-weight: bold; flex-shrink: 0;">✕</button>
                 </div>
             `;
           })
@@ -30671,8 +30674,8 @@
               .map(
                 (m) => `
                     <div class="edit-add-item-option" onclick="selectEditAddItem(${htmlJsValue(m.id)}, ${htmlJsValue(m.name)})" style="padding: 8px 12px; cursor: pointer; font-size: 13px; display: flex; justify-content: space-between; gap: 10px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">
-                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><strong style="color:#94a3b8;">#${m.itemNumber ?? m.id}</strong> ${escapeHtmlForExport(m.name)}</span>
-                        <span style="color:#64748b; flex-shrink:0;">Rs. ${m.price}</span>
+                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><strong style="color:#94a3b8;">#${escapeHtmlForExport(m.itemNumber ?? m.id)}</strong> ${escapeHtmlForExport(m.name)}</span>
+                        <span style="color:#64748b; flex-shrink:0;">Rs. ${escapeHtmlForExport(m.price)}</span>
                     </div>
                 `,
               )
@@ -30683,7 +30686,7 @@
 
         list.innerHTML =
           groupsHtml ||
-          `<div style="padding: 16px; font-size: 13px; color: #94a3b8; text-align: center;">No items match "${searchInput.value}"</div>`;
+          `<div style="padding: 16px; font-size: 13px; color: #94a3b8; text-align: center;">No items match "${escapeHtmlForExport(searchInput.value)}"</div>`;
       }
 
       // Enter key in the search box picks whatever the first visible/filtered option is — a quick keyboard shortcut
@@ -30838,7 +30841,7 @@
             ? ` (Rs. ${(getSellUnitCost(key) * qty).toFixed(2)} × ${lineQty} qty)`
             : "";
         document.getElementById("edit-order-extra-cost-preview").innerHTML =
-          `≈ Cost: <strong>Rs. ${cost.toFixed(2)}</strong>${perUnitNote}`;
+          `≈ Cost: <strong>Rs. ${cost.toFixed(2)}</strong>${escapeHtmlForExport(perUnitNote)}`;
       }
 
       function resetEditOrderExtraForm() {
@@ -30948,10 +30951,10 @@
             runningTotal += rowCost;
             return `
                     <div style="display:flex; justify-content:space-between; align-items:center; background:${isEditingThis ? "#fef9c3" : "#f8fafc"}; border-radius:6px; padding:6px 10px; font-size:13px;">
-                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${extra.qty}${unitLabel} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
+                        <span>${escapeHtmlForExport(def ? def.icon : "")} ${escapeHtmlForExport(def ? def.label : extra.key)} — ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)} <span style="color:#64748b; font-weight:600;">(Rs. ${rowCost.toFixed(2)})</span></span>
                         <span style="display:flex; gap:4px;">
-                            <button type="button" onclick="startEditExtraInDraftItem(${idx})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
-                            <button type="button" onclick="removeExtraFromDraftItem(${editOrderExtrasTargetIdx}, ${idx})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
+                            <button type="button" onclick="startEditExtraInDraftItem(${htmlJsValue(idx)})" style="background:#e0f2fe; color:#0369a1; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">✏️ Edit</button>
+                            <button type="button" onclick="removeExtraFromDraftItem(${htmlJsValue(editOrderExtrasTargetIdx)}, ${htmlJsValue(idx)})" style="background:#fee2e2; color:#dc2626; border:none; padding:3px 9px; border-radius:5px; cursor:pointer; font-weight:700;">🗑️ Delete</button>
                         </span>
                     </div>
                 `;
