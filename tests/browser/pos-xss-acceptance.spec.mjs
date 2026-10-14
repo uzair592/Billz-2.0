@@ -48,7 +48,11 @@ test("persisted customer, menu, supplier and expense text remains inert on POS s
   const completed = page.waitForResponse(r => r.url().endsWith("/api/pos/orders") && r.request().method() === "POST");
   await page.locator('#screen-new-order button[onclick="submitOrder(false)"]').click();
   const response = await completed; expect(response.status()).toBe(201);
-  expect((await response.json()).order.customerName).toBe(canary); await inert();
+  const sale = (await response.json()).order;
+  const persisted = await createControlPool();
+  try { expect((await persisted.query("SELECT customer_name FROM orders WHERE id=$1", [sale.id])).rows[0].customer_name).toBe(canary); }
+  finally { await persisted.end(); }
+  await inert();
   await page.evaluate(() => switchScreen("purchases"));
   await page.getByRole("button", { name: "Add supplier", exact: true }).click();
   await page.locator(".inventory-modal .inventory-input").first().fill(canary);
