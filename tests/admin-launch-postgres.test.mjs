@@ -15,6 +15,56 @@ import { createPostgresAuthRepository } from "../src/server/auth/postgres-auth-r
 import { createTokenPair } from "../src/server/auth/tokens.mjs";
 import { seedPlan } from "./helpers/postgres.mjs";
 
+test("shared-IP restaurant and admin logins allow startup and isolate failed accounts", async t => {
+  await provisionIntegrationDatabase();
+  const pool = await createAppPool();
+  const control = await createControlPool();
+  const pepper = "shared-ip-login-test-pepper-32bytes";
+  await seedPlan(control, { code: "GROWTH", provider: "manual" });
+  await createPlatformAdminService({ repository: createPlatformAdminRepository(control), passwordPepper: pepper })
+    .bootstrapAdmin({ username: "startupadmin", password: "AdminPassword123!" });
+  let now = new Date();
+  const savedOverride = process.env.DISABLE_RATE_LIMIT;
+  delete process.env.DISABLE_RATE_LIMIT;
+  const server = await createServer({ pool, controlPool: control,
+    loginThrottle: createLoginThrottle(control, { clock: () => now }),
+    env: { NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test", PASSWORD_PEPPER: pepper,
+      SESSION_SECRET: "shared-ip-test-session-secret-32bytes", TRUSTED_ORIGIN: "http://localhost:3000", PAYMENT_PROVIDER: "manual" },
+  });
+  t.after(async () => {
+    await server.close(); await pool.end(); await control.end();
+    if (savedOverride === undefined) delete process.env.DISABLE_RATE_LIMIT;
+    else process.env.DISABLE_RATE_LIMIT = savedOverride;
+  });
+  const send = (url, payload, cookie) => server.app.inject({ method: "POST", url, payload,
+    remoteAddress: "198.51.100.90", headers: cookie ? { cookie } : {} });
+  let adminCookie;
+  for (let n = 0; n < 15; n++) {
+    const result = await send("/platform-admin/api/auth/login", { username: "startupadmin", password: "AdminPassword123!" });
+    assert.equal(result.statusCode, 200, result.body);
+    adminCookie = result.headers["set-cookie"].split(";")[0];
+  }
+  for (const code of ["startup-a", "startup-b"]) {
+    const result = await send("/platform-admin/api/restaurants", { name: code, code,
+      ownerUsername: "owner", ownerPassword: "OwnerPassword123!", planCode: "GROWTH" }, adminCookie);
+    assert.equal(result.statusCode, 201, result.body);
+  }
+  const account = { restaurantCode: "startup-a", username: "owner", password: "OwnerPassword123!" };
+  for (let n = 0; n < 15; n++) {
+    const result = await send("/api/auth/login", account);
+    assert.equal(result.statusCode, 200, result.body);
+  }
+  for (let n = 0; n < 5; n++) {
+    now = new Date(now.getTime() + 10000);
+    assert.equal((await send("/api/auth/login", { ...account, password: "WrongPassword123!" })).statusCode, 401);
+    const delayed = await send("/api/auth/login", { ...account, password: "WrongPassword123!" });
+    assert.equal(delayed.statusCode, 429, delayed.body);
+    assert.ok(Number(delayed.headers["retry-after"]) > 0);
+    const other = await send("/api/auth/login", { ...account, restaurantCode: "startup-b" });
+    assert.equal(other.statusCode, 200, other.body);
+  }
+});
+
 test("test provisioning repairs stale role credentials and security flags", async (t) => {
   await provisionIntegrationDatabase();
   const admin = await connectAdmin();

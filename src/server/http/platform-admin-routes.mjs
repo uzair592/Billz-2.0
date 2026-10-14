@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { failedAuthLimit } from "./failed-auth-limit.mjs";
 import { passwordSchema } from "../auth/password-policy.mjs";
 
 const PLATFORM_COOKIE_NAME = "platform_admin_session";
@@ -205,7 +206,7 @@ export async function registerPlatformAdminRoutes(
 
   app.post(
     "/platform-admin/api/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    failedAuthLimit(app, { max: 10, scope: "platform-admin-login" }),
     async (request, reply) => {
       const input = adminLoginSchema.parse(request.body);
       const attempt = {
