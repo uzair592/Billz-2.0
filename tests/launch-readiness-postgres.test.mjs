@@ -81,6 +81,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     const responses = await Promise.all([send("POST", "/api/pos/orders", saleInput(keys[0]), first, restaurant.id), send("POST", "/api/pos/orders", saleInput(keys[1]), second, restaurant.id)]);
     for (const r of responses) assert.equal(r.statusCode, 201, r.body);
     sales = responses.map(r => r.json().order);
+    assert.ok(sales.every(order => order.orderStatus === "completed"));
     assert.equal(new Set(sales.map(order => order.id)).size, 2);
     assert.deepEqual(sales.map(order => order.orderNumber).sort(), [1, 2]);
     for (const sale of sales) assert.equal(sale.costOfGoodsMinor, 6000);
@@ -88,6 +89,13 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     assert.equal(replay.statusCode, 200); assert.equal(replay.json().order.id, sales[0].id);
     assert.equal((await control.query("SELECT count(*) FROM orders WHERE restaurant_id=$1", [restaurant.id])).rows[0].count, "2");
     assert.equal(Number((await control.query("SELECT quantity_base_units FROM inventory_balances WHERE restaurant_id=$1", [restaurant.id])).rows[0].quantity_base_units), 400);
+    const tickets = (await control.query("SELECT id FROM kitchen_tickets WHERE restaurant_id=$1 ORDER BY ticket_number", [restaurant.id])).rows;
+    assert.equal(tickets.length, 2);
+    for (const status of ["preparing", "ready", "served"]) {
+      const ticket = await send("PATCH", `/api/pos/kitchen/tickets/${tickets[0].id}/status`, { status }, first, restaurant.id);
+      assert.equal(ticket.statusCode, 200, ticket.body);
+    }
+    assert.equal((await control.query("SELECT order_status FROM orders WHERE id=$1", [sales[0].id])).rows[0].order_status, "completed");
   });
   await t.test("catalog publication cannot reset sold stock and competing edits return a conflict", async () => {
     const updates = await Promise.all([send("POST", "/api/pos/import/legacy-catalog", { ...snapshot, expectedRevision: 1 }, first, restaurant.id), send("POST", "/api/pos/import/legacy-catalog", { ...snapshot, expectedRevision: 1 }, second, restaurant.id)]);

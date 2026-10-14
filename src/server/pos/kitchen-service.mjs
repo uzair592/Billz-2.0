@@ -148,7 +148,7 @@ export function createKitchenService(pool, { clock = () => new Date() } = {}) {
           await client.query(
             `UPDATE orders
                 SET order_status = $3, updated_at = $4
-              WHERE restaurant_id = $1 AND id = $2 AND order_status <> 'cancelled'`,
+              WHERE restaurant_id = $1 AND id = $2 AND order_status NOT IN ('cancelled', 'completed')`,
             [restaurantId, ticket.order_id, targetOrderStatus, now],
           );
         }

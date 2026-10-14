@@ -1490,7 +1490,9 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
   });
 
   it("CSV export includes today's rows when dates are omitted", async () => {
-    const reportService = createSalesReportService(pool);
+    // Pin the clock so this test cannot race Karachi midnight against the
+    // PostgreSQL connection's UTC CURRENT_DATE fixture.
+    const reportService = createSalesReportService(pool, { clock: () => new Date("2026-10-14T12:00:00Z") });
 
     // A dedicated restaurant with one order today and one yesterday.
     const noDateTenant = await seedRestaurant(admin, { name: "CSV No Dates" });
@@ -1528,12 +1530,7 @@ describeDatabase("Partial Refunds & Sales Reporting PostgreSQL Integration Tests
       return orderRes.rows[0].id;
     };
 
-    const todayStr = (
-      await admin.query("SELECT CURRENT_DATE::text AS today")
-    ).rows[0].today;
-    const yesterdayStr = (
-      await admin.query("SELECT (CURRENT_DATE - 1)::text AS yesterday")
-    ).rows[0].yesterday;
+    const todayStr = "2026-10-14", yesterdayStr = "2026-10-13";
 
     const todayOrderId = await insertOrder(7101, todayStr);
     await insertOrder(7102, yesterdayStr);

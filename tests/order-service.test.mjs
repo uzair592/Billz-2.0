@@ -111,6 +111,7 @@ describe("transactional order service", () => {
     assert.equal(result.order.businessDate, "2026-10-02");
 
     const orderInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO orders"));
+    assert.match(orderInsert.text, /THEN \$21::timestamptz ELSE NULL END/);
     const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO order_items"));
     const stockUpdate = pool.calls.find((call) => call.text.startsWith("UPDATE inventory_balances"));
     assert.equal(orderInsert.values[18], 46);
