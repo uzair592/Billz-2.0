@@ -147,7 +147,10 @@ export async function createServer({
     passwordPepper: config.pepper,
   });
   const entitlementService = env.OFFLINE_ENTITLEMENT_SECRET
-    ? createEntitlementService({ secret: env.OFFLINE_ENTITLEMENT_SECRET }) : null;
+    ? createEntitlementService({ secret: env.OFFLINE_ENTITLEMENT_SECRET, authorizeSession: async ({restaurantId,userId,sessionToken}) => {
+      const session=await authService.authenticate(sessionToken);
+      if(!session || session.user.id!==userId || session.restaurantId!==restaurantId) throw Object.assign(new Error('An active device session is required.'),{code:'SESSION_REQUIRED',statusCode:403});
+    } }) : null;
   const storageService = createStorageService({ pool: database });
 
   const orderHistoryService = createOrderHistoryService(database);

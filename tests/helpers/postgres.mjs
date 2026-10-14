@@ -220,7 +220,7 @@ export async function seedPlan(admin, { code = "STANDARD", provider = "stripe" }
     `INSERT INTO plan_prices (
        plan_id, provider, provider_price_id, currency_code, amount_minor, billing_interval
      ) VALUES ($1, $2, $3, 'PKR', 25000, 'month')
-     ON CONFLICT (plan_id, currency_code, billing_interval, provider) DO UPDATE
+     ON CONFLICT (plan_id, currency_code, billing_interval, provider) WHERE is_active DO UPDATE
        SET provider_price_id = EXCLUDED.provider_price_id
      RETURNING id`,
     [planId, provider, `price_${code.toLowerCase()}_${provider}`],

@@ -29,7 +29,7 @@ const registrationSchema = z.object({
 const loginSchema = z.union([
   z.object({
     restaurantCode: z.string().trim().min(1).max(64),
-    username: z.string().trim().min(1).max(64),
+    username: z.string().trim().min(1).max(320),
     password: passwordSchema,
   }),
   z.object({
@@ -449,7 +449,7 @@ export async function buildHttpApp({
     }
     const statusCode = Number(error.statusCode) || 500;
     if (error.retryAfter) reply.header("Retry-After", String(error.retryAfter));
-    const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
+    const publicMessage = statusCode >= 500 && !["SCHEMA_OUTDATED", "CONTROL_ROLE_GRANTS_REQUIRED"].includes(error.code) ? "Internal server error." : error.message;
     return reply.code(statusCode).send({
       error: publicMessage,
       code: error.code,
@@ -651,6 +651,7 @@ export async function buildHttpApp({
       try {
         const session = await authService.login({
           ...input,
+          previousSessionToken: request.cookies[SESSION_COOKIE_NAME],
           ...requestMetadata(request),
         });
         await loginThrottle?.succeeded(attempt);
@@ -1448,7 +1449,8 @@ export async function buildHttpApp({
         },
         async (request) => {
           const deviceId = request.headers["x-device-id"] || request.query?.deviceId || "POS-Till-01";
-          return entitlementService.issueToken({
+          return entitlementService.issueForSession({
+            sessionToken: request.cookies[SESSION_COOKIE_NAME],
             restaurantId: request.tenant.restaurant.id,
             userId: request.auth.user.id,
             deviceId: String(deviceId),

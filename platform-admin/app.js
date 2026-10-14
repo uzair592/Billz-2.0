@@ -92,6 +92,7 @@ function showView(view) {
     "restaurants-page",
     "audits-page",
     "payments-page",
+    "plans-page",
     "detail-view",
   ])
     $(id).classList.add("hidden");
@@ -101,6 +102,7 @@ function showView(view) {
     restaurants: "Restaurants",
     audits: "Audit log",
     payments: "Payments",
+    plans: "Subscription plans",
   }[view];
   document
     .querySelectorAll("[data-view]")
@@ -127,6 +129,9 @@ async function loadDashboard() {
     ["stat-active", "activeRestaurants"],
     ["stat-suspended", "suspendedRestaurants"],
     ["stat-pending", "pendingPayments"],
+    ["stat-plans", "activePlans"],
+    ["stat-trials", "activeTrials"],
+    ["stat-expiring", "expiringSoon"],
   ])
     $(id).textContent = stats[key];
   $("stat-storage").textContent = bytes(stats.totalStorageUsedBytes);
@@ -234,6 +239,7 @@ document.querySelectorAll("[data-view]").forEach(
         restaurants: loadRestaurants,
         audits: loadAudits,
         payments: loadPayments,
+        plans: loadPlanCatalog,
       })
         [view]()
         .catch(handleError);
@@ -269,6 +275,8 @@ $("create-restaurant-form").onsubmit = async (event) => {
         code: $("create-code").value,
         ownerUsername: $("create-owner-user").value,
         ownerPassword: $("create-owner-pass").value,
+        ...($("create-owner-email").value ? {ownerEmail:$("create-owner-email").value}:{}),
+        ...($("create-phone").value ? {phone:$("create-phone").value}:{}),
         planCode: $("create-plan").value,
       }),
     });
@@ -371,10 +379,11 @@ async function viewRestaurant(id) {
   $("detail-content").innerHTML = `
     <div class="detail-grid"><article class="card"><h3>Restaurant information</h3>${badge(r.status)}<p class="contact">${escapeHtml(r.phone || "No phone provided")}<br>${escapeHtml(r.contactEmail || "No email provided")}<br>${escapeHtml(r.address || "No address provided")}</p>
       <button id="${r.status === "active" ? "suspend-btn" : "restore-btn"}" class="btn ${r.status === "active" ? "danger" : "success"}">${r.status === "active" ? "Suspend access" : "Restore access"}</button></article>
-    <article class="card"><h3>Subscription</h3>${badge(s.status)}<p><strong>${escapeHtml(s.planName)}</strong> · ${escapeHtml(s.planCode || "—")}</p><p class="muted">${date(s.currentPeriodStart)} – ${date(s.currentPeriodEnd)}</p></article>
+    <article class="card"><h3>Subscription</h3>${badge(s.status)}<p><strong>${escapeHtml(s.planName)}</strong> · ${escapeHtml(s.planCode || "—")}</p><p class="muted">${date(s.currentPeriodStart)} – ${date(s.currentPeriodEnd)}</p><p>${Number(s.maxDevices)} concurrent devices</p><button id="subscription-edit-btn" class="btn secondary">Assign / renew plan</button></article>
     <article class="card"><h3>File storage</h3><strong>${bytes(storage.usedStorageBytes)} / ${bytes(storage.maxStorageBytes)}</strong><progress max="100" value="${percentage}" aria-label="Storage used"></progress>
       <form id="storage-form"><label for="storage-limit">Allowance (GB)</label><input id="storage-limit" type="number" min="0" step="any" value="${Number(storage.maxStorageBytes) / 1073741824}" required /><button class="btn secondary" type="submit">Update allowance</button></form></article></div>
-    <article class="card"><div class="section-heading"><h3>Restaurant users</h3><button id="create-user-btn" class="btn secondary">+ Create user</button></div><p class="muted">Password resets and disabling users sign out their active devices.</p><div class="table-wrap"><table><thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users-tbody">${usersMarkup(data.users)}</tbody></table></div></article>
+    <article class="card"><div class="section-heading"><h3>Restaurant users</h3><button id="create-user-btn" class="btn secondary">+ Create user</button></div><div class="action-row"><button id="owner-credentials-btn" class="btn secondary">Manage owner credentials</button></div><p class="muted">Password resets and disabling users sign out their active devices.</p><div class="table-wrap"><table><thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users-tbody">${usersMarkup(data.users)}</tbody></table></div></article>
+    <article class="card"><div class="section-heading"><h3>Active devices / sessions</h3><button id="force-logout-btn" class="btn danger">Force logout all devices</button></div><p class="muted">One slot per active session; multiple tabs sharing a session use one slot.</p><div id="session-results">Loading sessions…</div></article>
     <article class="card"><h3>Record manual payment</h3><form id="record-pay-form" class="form-grid">
       <label for="pay-plan">Subscription plan<select id="pay-plan" required>${planOptions(s.planCode)}</select></label>
       <label for="pay-amount">Amount (PKR)<input id="pay-amount" type="number" min="0" step="0.01" value="5000" required /></label>
@@ -382,6 +391,15 @@ async function viewRestaurant(id) {
       <label for="pay-ref" class="span-two">Transaction reference<input id="pay-ref" required maxlength="200" /></label><div class="span-two"><button type="submit" class="btn">Record payment</button></div></form></article>
     <article class="card"><h3>Payment history</h3><div class="table-wrap"><table><thead><tr><th>Reference / plan</th><th>Amount</th><th>Status</th><th>Coverage</th><th>Actions</th></tr></thead><tbody>${paymentsMarkup(data.payments)}</tbody></table></div></article>`;
   $("create-user-btn").onclick = () => openUserModal();
+  $("owner-credentials-btn").onclick = () => openOwnerCredentials(data);
+  $("subscription-edit-btn").onclick = () => openSubscription(data).catch(handleError);
+  $("force-logout-btn").onclick = async () => {
+    try {if(!(await confirmAction('Force logout all devices?', 'Every restaurant user must sign in again.')))return;
+      await apiCall(`/platform-admin/api/restaurants/${encodeURIComponent(id)}/sessions/revoke-all`,{method:'POST',body:JSON.stringify({reason:'Force logout through admin portal'})});
+      toast('Restaurant sessions revoked.');await viewRestaurant(id);
+    }catch(e){handleError(e);}
+  };
+  loadSessions(id,requestId).catch(handleError);
   const start = new Date(),
     end = new Date(Date.now() + 30 * 86400000);
   $("pay-from").value = start.toISOString().slice(0, 10);
@@ -635,6 +653,7 @@ function planOptions(selected) {
 async function loadPlans() {
   plans = (await apiCall("/platform-admin/api/plans")).plans;
   $("create-plan").innerHTML = planOptions("GROWTH");
+  if(!plans.length) toast("Create an active subscription plan before provisioning a restaurant.",true);
 }
 function openUserModal(user = null) {
   editingUser = user;
@@ -692,4 +711,96 @@ $("payments-tbody").onclick = async event => {
     toast("Payment reviewed."); await Promise.all([loadPayments(), loadDashboard()]);
   } catch (error) { handleError(error); }
   finally { payment.disabled = false; }
+};
+
+let planPage=1,planRecords=[],editingPlan=null,ownerTarget=null,subscriptionTarget=null,planRequestId=0;
+const intervalLabels={month:'Monthly',quarter:'Quarterly',year:'Yearly',trial:'Custom trial'};
+async function loadPlanCatalog() {
+  const request=++planRequestId;
+  $('plans-tbody').innerHTML='<tr><td colspan="6" class="empty">Loading plans…</td></tr>';
+  try {
+    const data=await apiCall(`/platform-admin/api/plans?includeInactive=true&page=${planPage}&limit=${pageSize}`);
+    if(request!==planRequestId)return;planRecords=data.plans;
+    $('plans-tbody').innerHTML=data.plans.length?data.plans.map(plan=>{
+      const price=plan.prices[0];
+      return `<tr><td><strong>${escapeHtml(plan.name)}</strong><p class="muted">${escapeHtml(plan.code)}</p></td><td>${price?`${escapeHtml(price.currencyCode)} ${(Number(price.amountMinor)/100).toFixed(2)} · ${escapeHtml(intervalLabels[price.billingInterval])}`:'No manual price'}</td><td>${Number(plan.maxDevices)}</td><td>${Number(plan.trialDays)}</td><td>${badge(plan.isActive?'active':'archived')}</td><td><div class="action-row"><button class="btn secondary plan-edit" data-id="${escapeHtml(plan.id)}">Edit</button><button class="btn secondary plan-toggle" data-id="${escapeHtml(plan.id)}">${plan.isActive?'Archive':'Activate'}</button><button class="btn danger plan-delete" data-id="${escapeHtml(plan.id)}">Delete unused</button></div></td></tr>`;
+    }).join(''):'<tr><td colspan="6" class="empty">No plans yet. Create a plan to onboard restaurants.</td></tr>';
+    pager('plan',planPage,data.totalCount,pageSize);
+  }catch(e){if(request===planRequestId)$('plans-tbody').innerHTML='<tr><td colspan="6" class="empty">Could not load plans. Open Plans again to retry.</td></tr>';throw e;}
+}
+function openPlan(plan=null) {
+  editingPlan=plan;const price=plan?.prices[0];
+  $('plan-modal-title').textContent=plan?'Edit subscription plan':'Create subscription plan';
+  $('plan-name').value=plan?.name||'';$('plan-code').value=plan?.code||'';
+  $('plan-interval').value=price?.billingInterval||'month';$('plan-price').value=Number(price?.amountMinor??0)/100;
+  $('plan-currency').value=price?.currencyCode||'PKR';$('plan-devices').value=plan?.maxDevices||3;
+  $('plan-trial-days').value=plan?.trialDays||14;$('plan-active').checked=plan?.isActive??true;
+  $('plan-modal').showModal();
+}
+$('new-plan-btn').onclick=()=>openPlan();
+$('plan-prev').onclick=()=>{planPage--;loadPlanCatalog().catch(handleError);};
+$('plan-next').onclick=()=>{planPage++;loadPlanCatalog().catch(handleError);};
+$('plan-interval').onchange=()=>{if($('plan-interval').value==='trial')$('plan-price').value=0;};
+$('plans-tbody').onclick=async event=>{
+  const button=event.target.closest('button[data-id]');if(!button)return;
+  const plan=planRecords.find(p=>p.id===button.dataset.id);if(!plan)return;
+  if(button.classList.contains('plan-edit')){openPlan(plan);return;}
+  const remove=button.classList.contains('plan-delete');const action=remove?'delete':plan.isActive?'archive':'activate';
+  try{if(!(await confirmAction(`${action[0].toUpperCase()+action.slice(1)} plan?`,remove?'Plans with billing history must be archived, and cannot be deleted.':action==='archive'?'Existing subscribers retain access. New assignments are disabled.':'Allow new assignments to this plan.')))return;
+    button.disabled=true;await apiCall(`/platform-admin/api/plans/${encodeURIComponent(plan.id)}${remove?'':`/${action}`}`,{method:remove?'DELETE':'POST'});
+    toast('Plan updated.');await Promise.all([loadPlanCatalog(),loadPlans(),loadDashboard()]);
+  }catch(e){handleError(e);}finally{button.disabled=false;}
+};
+$('plan-form').onsubmit=async event=>{
+  event.preventDefault();const button=event.submitter,plan=editingPlan;button.disabled=true;
+  try{
+    if(plan && !(await confirmAction('Update plan?', 'New prices apply to future assignments. Lower device limits sign out excess sessions, keeping the most recently used.')))return;
+    const body={name:$('plan-name').value,code:$('plan-code').value.toUpperCase(),billingInterval:$('plan-interval').value,
+      amountMinor:Math.round(Number($('plan-price').value)*100),currencyCode:$('plan-currency').value.toUpperCase(),maxDevices:Number($('plan-devices').value),
+      trialDays:Number($('plan-trial-days').value),isActive:$('plan-active').checked};
+    await apiCall(`/platform-admin/api/plans${plan?`/${encodeURIComponent(plan.id)}`:''}`,{method:plan?'PATCH':'POST',body:JSON.stringify(body)});
+    $('plan-modal').close();toast('Plan saved.');await Promise.all([loadPlanCatalog(),loadPlans(),loadDashboard()]);
+  }catch(e){handleError(e);}finally{button.disabled=false;}
+};
+async function loadSessions(id,requestId) {
+  const data=await apiCall(`/platform-admin/api/restaurants/${encodeURIComponent(id)}/sessions`);
+  if(requestId!==detailReqId)return;
+  $('session-results').innerHTML=data.sessions.length?`<p><strong>${data.sessions.length} active sessions</strong></p><div class="table-wrap"><table><thead><tr><th>User</th><th>Device / client</th><th>IP</th><th>Last seen</th><th>Expires</th></tr></thead><tbody>${data.sessions.map(s=>`<tr><td>${escapeHtml(s.username||s.displayName)}</td><td>${escapeHtml(s.userAgent||'Unknown client')}</td><td>${escapeHtml(s.ipAddress||'—')}</td><td>${escapeHtml(new Date(s.lastSeenAt).toLocaleString())}</td><td>${escapeHtml(new Date(s.expiresAt).toLocaleString())}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No active restaurant sessions.</p>';
+}
+function openOwnerCredentials(data) {
+  const owners=data.users.filter(u=>u.role==='owner');
+  if(owners.length!==1){toast('Use the user table to reset a specific owner; this shortcut requires exactly one owner.',true);return;}
+  ownerTarget={restaurantId:data.restaurant.id,owner:owners[0]};
+  $('owner-credentials-context').textContent=`${data.restaurant.name} · ${owners[0].username}`;
+  $('owner-login-email').value=owners[0].email||'';$('owner-new-password').value='';$('owner-new-password').disabled=false;
+  $('owner-generate-password').checked=false;$('owner-credential-reason').value='';$('owner-credentials-modal').showModal();
+}
+$('owner-generate-password').onchange=()=>{$('owner-new-password').value='';$('owner-new-password').disabled=$('owner-generate-password').checked;};
+$('owner-credentials-modal').addEventListener('close',()=>{$('owner-new-password').value='';ownerTarget=null;});
+$('owner-credentials-form').onsubmit=async event=>{
+  event.preventDefault();const target=ownerTarget,button=event.submitter;button.disabled=true;
+  try{
+    if(!(await confirmAction('Change owner credentials?', 'Every owner session is revoked. The owner must sign in again.')))return;
+    const payload={reason:$('owner-credential-reason').value,generateTemporary:$('owner-generate-password').checked};
+    const email=$('owner-login-email').value.trim();if(email && email.toLowerCase()!==(target.owner.email||'').toLowerCase())payload.email=email;
+    if($('owner-new-password').value)payload.newPassword=$('owner-new-password').value;
+    const result=await apiCall(`/platform-admin/api/restaurants/${encodeURIComponent(target.restaurantId)}/owner-credentials`,{method:'POST',body:JSON.stringify(payload)});
+    $('owner-credentials-modal').close();toast('Owner credentials changed; active sessions revoked.');
+    if(result.temporaryPassword){$('temporary-password').value=result.temporaryPassword;$('temporary-password-modal').showModal();}
+    await viewRestaurant(target.restaurantId);
+  }catch(e){handleError(e);}finally{$('owner-new-password').value='';button.disabled=false;}
+};
+async function openSubscription(data) {
+  await loadPlans();subscriptionTarget=data.restaurant.id;
+  $('subscription-plan').innerHTML=plans.map(p=>`<option value="${escapeHtml(p.id)}" ${p.id===data.subscription.planId?'selected':''}>${escapeHtml(p.name)} · ${Number(p.maxDevices)} devices</option>`).join('');
+  $('subscription-mode').value='renew';$('subscription-expiry').value='';$('subscription-reason').value='';$('subscription-modal').showModal();
+}
+$('subscription-form').onsubmit=async event=>{
+  event.preventDefault();const id=subscriptionTarget,button=event.submitter;button.disabled=true;
+  try{if(!(await confirmAction('Assign / renew subscription?', 'This changes access and may revoke excess device sessions. Administrative suspension stays in place.')))return;
+    const payload={planId:$('subscription-plan').value,mode:$('subscription-mode').value,reason:$('subscription-reason').value};
+    if($('subscription-expiry').value)payload.expiresAt=new Date(`${$('subscription-expiry').value}T23:59:59.999Z`).toISOString();
+    await apiCall(`/platform-admin/api/restaurants/${encodeURIComponent(id)}/subscription`,{method:'PUT',body:JSON.stringify(payload)});
+    $('subscription-modal').close();toast('Subscription updated.');await Promise.all([viewRestaurant(id),loadDashboard()]);
+  }catch(e){handleError(e);}finally{button.disabled=false;}
 };
