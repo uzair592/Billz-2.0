@@ -400,6 +400,7 @@ export async function buildHttpApp({
   storageService = null,
   tenantContextService = null,
   menuService = null,
+  kitchenService = null,
   businessSettingsService = null,
   orderService = null,
   orderHistoryService = null,
@@ -764,7 +765,7 @@ export async function buildHttpApp({
   });
 
   if (tenantContextService
-      && (menuService || businessSettingsService || orderService
+      && (menuService || kitchenService || businessSettingsService || orderService
         || orderHistoryService || orderCancellationService || orderRefundService
         || salesReportService || supplierService || inventoryService
         || recipeService || purchaseService || financeService || catalogImportService
@@ -778,7 +779,7 @@ export async function buildHttpApp({
         {
           preHandler: [
             guards.authenticate,
-            guards.tenant(PERMISSION.ORDER_CREATE),
+            guards.tenant(),
           ],
         },
         async (request) =>
@@ -789,8 +790,55 @@ export async function buildHttpApp({
       );
     }
 
+    if (kitchenService) {
+      app.get(
+        "/api/pos/kitchen/tickets",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.KITCHEN_VIEW),
+          ],
+        },
+        async (request) => {
+          const { status, station } = request.query ?? {};
+          return kitchenService.listTickets({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            branchId: request.tenant.membership.defaultBranchId,
+            status: status || null,
+            station: station || null,
+          });
+        },
+      );
+
+      app.patch(
+        "/api/pos/kitchen/tickets/:ticketId/status",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.KITCHEN_UPDATE),
+          ],
+        },
+        async (request, reply) => {
+          const ticketParamsSchema = z.object({ ticketId: z.uuid() }).strict();
+          const ticketBodySchema = z.object({
+            status: z.enum(["new", "preparing", "ready", "served", "cancelled"]),
+          }).strict();
+          const { ticketId } = ticketParamsSchema.parse(request.params);
+          const { status } = ticketBodySchema.parse(request.body);
+          const result = await kitchenService.updateStatus({
+            restaurantId: request.tenant.restaurant.id,
+            userId: request.auth.user.id,
+            ticketId,
+            status,
+          });
+          return reply.send(result);
+        },
+      );
+    }
+
     if (businessSettingsService) {
-      app.get("/api/pos/receipt-business", { preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_CREATE)] }, async request => {
+      app.get("/api/pos/receipt-business", { preHandler: [guards.authenticate, guards.tenant()] }, async request => {
         const settings = await businessSettingsService.get({ restaurantId: request.tenant.restaurant.id, userId: request.auth.user.id });
         return { businessName: settings?.businessName, phone: settings?.phone, address: settings?.address };
       });
@@ -846,6 +894,34 @@ export async function buildHttpApp({
             tenant: request.tenant,
             userId: request.auth.user.id,
             input,
+          });
+          return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      const orderPaymentSchema = z.object({
+        amountMinor: z.number().int().positive(),
+        paymentMethod: z.enum(["cash", "bank_account", "other"]),
+        financialAccountId: z.uuid().optional(),
+        idempotencyKey: z.uuid(),
+      }).strict();
+
+      app.post(
+        "/api/pos/orders/:orderId/payments",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.PAYMENT_PROCESS),
+          ],
+        },
+        async (request, reply) => {
+          const { orderId } = orderParamsSchema.parse(request.params);
+          const paymentInput = orderPaymentSchema.parse(request.body);
+          const result = await orderService.settlePayment({
+            tenant: request.tenant,
+            userId: request.auth.user.id,
+            orderId,
+            input: paymentInput,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
         },

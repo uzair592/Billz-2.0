@@ -1,5 +1,8 @@
 BEGIN;
 
+CREATE INDEX users_global_username_lookup_idx ON users(normalized_username)
+  WHERE normalized_username IS NOT NULL;
+
 -- One namespace for username-only and email login. Existing collisions are
 -- reserved rather than silently changing customer credentials. Administrators
 -- can rename those users; ambiguous username-only login fails closed.

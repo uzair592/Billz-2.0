@@ -1,6 +1,6 @@
 # POS review regression fixes
 
-Apply numbered migrations through `node src/server/database/migration-runner.mjs` before deploying this change. Migration 023 introduces a global username/email login namespace. It does not change passwords or silently rename existing users.
+Apply numbered migrations through `node src/server/database/migration-runner.mjs` before deploying this change. Migration 024 introduces a global username/email login namespace. It does not change passwords or silently rename existing users.
 
 New usernames and username changes must be unique across restaurants and must not collide with another account's email. Existing ambiguous usernames fail with the normal invalid-credentials response. Those users can sign in with their unique email, or the platform administrator can assign a unique username through the restaurant's user editor. Changing a password alone continues to work for existing accounts. Keep the same password minimums and Argon2 settings.
 

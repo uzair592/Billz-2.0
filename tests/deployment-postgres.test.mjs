@@ -44,6 +44,8 @@ test("clean deployment provisions safe roles, bootstraps admin and restaurant, a
     await assert.rejects(appPool.query(`SELECT * FROM ${table}`), error => error.code === "42501");
   }
   await assert.rejects(appPool.query("CREATE TABLE forbidden_deployment_table(id integer)"), error => error.code === "42501");
+  await assert.rejects(appPool.query("SELECT * FROM user_login_identifiers"), error => error.code === "42501");
+  await assert.rejects(control.query("SELECT * FROM user_login_identifiers"), error => error.code === "42501");
   await assert.rejects(appPool.query("INSERT INTO plans(code,name) VALUES('FORBIDDEN','Forbidden')"), error => error.code === "42501");
   const hashes = (await owner.query("SELECT rolpassword FROM pg_authid WHERE rolname=ANY($1)", [[env.APP_DATABASE_ROLE, env.CONTROL_DATABASE_ROLE]])).rows;
   assert.ok(hashes.every(row => row.rolpassword.startsWith("SCRAM-SHA-256$")));

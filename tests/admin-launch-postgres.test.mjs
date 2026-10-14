@@ -601,7 +601,7 @@ test("username-only identity migration preserves legacy accounts, rejects ambigu
   });
   const first = await create("identity-first"), second = await create("identity-second");
   const collision = await create("identity-collision", "identity-first@example.com");
-  await administrator.query(await readFile(new URL("../database/migrations/023_global_login_identifiers.sql", import.meta.url), "utf8"));
+  await administrator.query(await readFile(new URL("../database/migrations/024_global_login_identifiers.sql", import.meta.url), "utf8"));
   assert.equal((await control.query("SELECT username FROM users WHERE id=$1", [first.owner.id])).rows[0].username, "owner");
   assert.equal((await administrator.query("SELECT user_id FROM user_login_identifiers WHERE identifier='owner'")).rows[0].user_id, null);
   const server = await createServer({ pool, controlPool: control, env: { NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test",

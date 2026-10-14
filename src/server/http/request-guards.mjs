@@ -50,7 +50,7 @@ export function createRequestGuards({ authService, tenantContextService }) {
       if (!context) {
         return reject(reply, 403, "Restaurant access is not available.", "MEMBERSHIP_REQUIRED");
       }
-      if (!hasPermission(context.membership.role, permission)) {
+      if (permission && !hasPermission(context.membership.role, permission)) {
         return reject(reply, 403, "You do not have permission to perform this action.", "FORBIDDEN");
       }
 

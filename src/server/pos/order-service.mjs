@@ -1,11 +1,25 @@
 import { freezeInventoryRecipes } from "./inventory-sale-snapshot.mjs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { MoneyEngine } from "../../domain/money-engine.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError, businessDateInTimezone } from "./business-date.mjs";
 import { createInventoryConsumptionService } from "./inventory-consumption-service.mjs";
+import { hasPermission, PERMISSION } from "../authorization/permissions.mjs";
 
-function publicOrder(row) {
+function computeRequestHash(input) {
+  const canonical = {
+    items: (input.items || []).map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+    orderType: input.orderType ?? null,
+    tableId: input.tableId ?? null,
+    discount: input.discount ? { type: input.discount.type, value: input.discount.value ?? null, valueMinor: input.discount.valueMinor ?? null } : null,
+    deliveryMinor: input.deliveryMinor ?? 0,
+    additionalCharges: (input.additionalCharges || []).map((c) => ({ name: c.name, type: c.type, value: c.value ?? null, valueMinor: c.valueMinor ?? null })),
+    payment: input.payment ? { method: input.payment.method, amountReceivedMinor: input.payment.amountReceivedMinor } : null,
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function publicOrder(row, canViewReports = true) {
   return {
     id: row.id,
     orderNumber: Number(row.order_number),
@@ -17,7 +31,7 @@ function publicOrder(row) {
     deliveryMinor: Number(row.delivery_minor),
     additionalChargesMinor: Number(row.additional_charges_minor),
     totalMinor: Number(row.total_minor),
-    ...(row.cost_of_goods_minor == null ? {} : { costOfGoodsMinor: Number(row.cost_of_goods_minor) }),
+    ...(row.cost_of_goods_minor == null || !canViewReports ? {} : { costOfGoodsMinor: Number(row.cost_of_goods_minor) }),
     businessDate: row.business_date,
     orderedAt: row.ordered_at,
   };
@@ -84,6 +98,7 @@ export function createOrderService(
   {
     clock = () => new Date(),
     inventoryConsumption = null,
+    kitchenService = null,
   } = {},
 ) {
   // The inventory consumption service is shared so the
@@ -96,6 +111,8 @@ export function createOrderService(
     async create({ tenant, userId, input }) {
       const restaurantId = tenant.restaurant.id;
       const branchId = tenant.membership.defaultBranchId;
+      const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
+      const requestHash = computeRequestHash(input);
       const now = clock();
       const today = businessDateInTimezone(now, tenant.restaurant.timezone ?? "UTC");
       const businessDate = input.businessDate ?? today;
@@ -118,13 +135,21 @@ export function createOrderService(
           const existing = await client.query(
             `SELECT id, order_number, order_type, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
-                    additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at
+                    additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at,
+                    request_hash
                FROM orders
               WHERE idempotency_key = $1`,
             [input.idempotencyKey],
           );
           if (existing.rows[0]) {
-            return { order: publicOrder(existing.rows[0]), replayed: true };
+            if (existing.rows[0].request_hash && existing.rows[0].request_hash !== requestHash) {
+              throw apiError(
+                "Idempotency key was previously used with a different request payload.",
+                "IDEMPOTENCY_CONFLICT",
+                409,
+              );
+            }
+            return { order: publicOrder(existing.rows[0], canViewReports), replayed: true };
           }
 
           const requestedIds = input.items.map((item) => item.menuItemId);
@@ -322,6 +347,8 @@ export function createOrderService(
             [restaurantId, branchId],
           );
           const orderNumber = Number(sequenceResult.rows[0].order_number);
+          let kitchenTicket = null;
+          const initialOrderStatus = input.orderStatus ?? (kitchenService ? "new" : "completed");
           const orderResult = await client.query(
             `INSERT INTO orders (
                id, restaurant_id, branch_id, idempotency_key, order_number,
@@ -330,15 +357,15 @@ export function createOrderService(
                subtotal_minor, discount_type, discount_value, discount_minor,
                delivery_minor, additional_charges_minor, total_minor,
                cost_of_goods_minor, business_date, ordered_at, completed_at,
-               created_by_user_id, updated_by_user_id
+               created_by_user_id, updated_by_user_id, request_hash
              ) VALUES (
                $1, $2, $3, $4, $5,
-               $6, 'completed', $7, $8,
+               $6, $23, $7, $8,
                $9, $10, $11,
                $12, $13, $14, $15,
                $16, $17, $18,
-               $19, $20, $21, $21,
-               $22, $22
+               $19, $20, $21, CASE WHEN $23 = 'completed' THEN $21 ELSE NULL END,
+               $22, $22, $24
              )
              RETURNING id, order_number, order_type, order_status, payment_status,
                        subtotal_minor, discount_minor, delivery_minor,
@@ -355,6 +382,7 @@ export function createOrderService(
               pricing.minor.discount, pricing.minor.delivery,
               pricing.minor.additionalCharges, pricing.minor.total,
               costOfGoodsMinor, businessDate, now, userId,
+              initialOrderStatus, requestHash,
             ],
           );
 
@@ -507,10 +535,203 @@ export function createOrderService(
             }
           }
 
+          if (kitchenService && input.sendToKitchen !== false && menuLines.length > 0) {
+            kitchenTicket = await kitchenService.createTicketForOrder(client, {
+              restaurantId,
+              branchId,
+              orderId,
+              items: menuLines.map((line) => ({
+                menuItemId: line.menuItemId,
+                name: line.name,
+                quantity: line.quantity,
+                notes: line.notes || null,
+              })),
+              notes: input.kitchenNotes || input.notes || null,
+              station: input.station || "kitchen",
+            });
+          }
+
           return {
-            order: publicOrder(orderResult.rows[0]),
+            order: publicOrder(orderResult.rows[0], canViewReports),
+            ...(kitchenTicket ? { kitchenTicket } : {}),
             replayed: false,
             inventoryConsumption,
+          };
+        },
+      );
+    },
+
+    async settlePayment({ tenant, userId, orderId, input }) {
+      const restaurantId = tenant.restaurant.id;
+      const branchId = tenant.membership.defaultBranchId;
+      const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
+      const now = clock();
+
+      return withTenantTransaction(
+        pool,
+        { restaurantId, userId },
+        async (client) => {
+          if (input.idempotencyKey) {
+            await client.query(
+              "SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+              [input.idempotencyKey],
+            );
+            const existingPayment = await client.query(
+              `SELECT id, order_id, amount_minor, payment_method, status, received_at
+                 FROM order_payments
+                WHERE restaurant_id = $1 AND idempotency_key = $2`,
+              [restaurantId, input.idempotencyKey],
+            );
+            if (existingPayment.rows[0]) {
+              const orderRes = await client.query(
+                `SELECT id, order_number, order_type, order_status, payment_status,
+                        subtotal_minor, discount_minor, delivery_minor,
+                        additional_charges_minor, total_minor, cost_of_goods_minor,
+                        business_date, ordered_at
+                   FROM orders
+                  WHERE restaurant_id = $1 AND id = $2`,
+                [restaurantId, orderId],
+              );
+              return {
+                payment: {
+                  id: existingPayment.rows[0].id,
+                  orderId: existingPayment.rows[0].order_id,
+                  amountMinor: Number(existingPayment.rows[0].amount_minor),
+                  paymentMethod: existingPayment.rows[0].payment_method,
+                  status: existingPayment.rows[0].status,
+                  receivedAt: existingPayment.rows[0].received_at,
+                },
+                order: publicOrder(orderRes.rows[0], canViewReports),
+                replayed: true,
+              };
+            }
+          }
+
+          const orderResult = await client.query(
+            `SELECT id, order_number, order_type, order_status, payment_status,
+                    subtotal_minor, discount_minor, delivery_minor,
+                    additional_charges_minor, total_minor, cost_of_goods_minor,
+                    business_date, ordered_at
+               FROM orders
+              WHERE restaurant_id = $1 AND id = $2
+              FOR UPDATE`,
+            [restaurantId, orderId],
+          );
+          const order = orderResult.rows[0];
+          if (!order) {
+            throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
+          }
+          if (order.order_status === "cancelled") {
+            throw apiError("Cannot settle payment for a cancelled order.", "ORDER_CANCELLED", 409);
+          }
+
+          const paymentsResult = await client.query(
+            `SELECT COALESCE(SUM(amount_minor), 0) AS total_paid
+               FROM order_payments
+              WHERE restaurant_id = $1 AND order_id = $2 AND status = 'captured'`,
+            [restaurantId, orderId],
+          );
+          const totalPaid = Number(paymentsResult.rows[0].total_paid);
+          const totalMinor = Number(order.total_minor);
+          const remainingMinor = Math.max(0, totalMinor - totalPaid);
+
+          if (remainingMinor <= 0 || order.payment_status === "paid") {
+            throw apiError("Order is already fully paid.", "ORDER_ALREADY_PAID", 409);
+          }
+
+          const amountMinor = Number(input.amountMinor);
+          if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+            throw apiError("Settlement amount must be a positive integer.", "INVALID_AMOUNT", 400);
+          }
+          if (amountMinor > remainingMinor) {
+            throw apiError(
+              `Payment amount (${amountMinor}) exceeds remaining balance (${remainingMinor}).`,
+              "PAYMENT_EXCEEDS_REMAINING",
+              409,
+              { remainingMinor, requestedMinor: amountMinor },
+            );
+          }
+
+          let accountId = input.financialAccountId ?? null;
+          if (accountId) {
+            const accRes = await client.query(
+              `SELECT id, account_type FROM financial_accounts
+                WHERE id = $1 AND restaurant_id = $2 AND (branch_id IS NULL OR branch_id = $3) AND is_active = true`,
+              [accountId, restaurantId, branchId],
+            );
+            const acc = accRes.rows[0];
+            const expectedType = input.paymentMethod === "bank_account" ? "bank" : input.paymentMethod === "cash" ? "cash" : null;
+            if (!acc || (expectedType && acc.account_type !== expectedType)) {
+              throw apiError("The selected payment account is not available for this payment method.", "INVALID_PAYMENT_ACCOUNT", 422);
+            }
+          }
+          if (!accountId && input.paymentMethod === "cash") {
+            const accRes = await client.query(
+              `SELECT id FROM financial_accounts
+                WHERE restaurant_id = $1 AND branch_id = $2 AND account_type = 'cash' AND is_active = true
+                ORDER BY created_at LIMIT 1`,
+              [restaurantId, branchId],
+            );
+            accountId = accRes.rows[0]?.id ?? null;
+          }
+          if (["cash", "bank_account"].includes(input.paymentMethod) && !accountId) {
+            throw apiError("An active financial account is required for this payment.", "PAYMENT_ACCOUNT_REQUIRED", 422);
+          }
+
+          const paymentId = randomUUID();
+          await client.query(
+            `INSERT INTO order_payments (
+               id, restaurant_id, order_id, financial_account_id,
+               payment_method, status, amount_minor, idempotency_key,
+               received_at, created_by_user_id
+             ) VALUES ($1, $2, $3, $4, $5, 'captured', $6, $7, $8, $9)`,
+            [
+              paymentId, restaurantId, orderId, accountId,
+              input.paymentMethod, amountMinor, input.idempotencyKey, now, userId,
+            ],
+          );
+          if (accountId) {
+            await client.query(
+              `INSERT INTO ledger_entries (
+                 id, restaurant_id, branch_id, financial_account_id,
+                 order_payment_id, entry_type, amount_minor, description,
+                 source_type, source_key, occurred_at
+               ) VALUES ($1, $2, $3, $4, $5, 'credit', $6, $7, 'sale', $8, $9)`,
+              [
+                randomUUID(), restaurantId, branchId, accountId, paymentId,
+                amountMinor, `Settlement / Order #${order.order_number}`,
+                `settlement:${orderId}:${paymentId}`, now,
+              ],
+            );
+          }
+
+          const newTotalPaid = totalPaid + amountMinor;
+          const newPaymentStatus = newTotalPaid >= totalMinor ? "paid" : "partially_paid";
+          const updatedOrderRes = await client.query(
+            `UPDATE orders
+                SET payment_status = $3,
+                    completed_at = CASE WHEN $3 = 'paid' AND completed_at IS NULL THEN $4 ELSE completed_at END,
+                    updated_at = $4
+              WHERE restaurant_id = $1 AND id = $2
+              RETURNING id, order_number, order_type, order_status, payment_status,
+                        subtotal_minor, discount_minor, delivery_minor,
+                        additional_charges_minor, total_minor, cost_of_goods_minor,
+                        business_date, ordered_at`,
+            [restaurantId, orderId, newPaymentStatus, now],
+          );
+
+          return {
+            payment: {
+              id: paymentId,
+              orderId,
+              amountMinor,
+              paymentMethod: input.paymentMethod,
+              status: "captured",
+              receivedAt: now,
+            },
+            order: publicOrder(updatedOrderRes.rows[0], canViewReports),
+            remainingMinor: Math.max(0, totalMinor - newTotalPaid),
+            replayed: false,
           };
         },
       );

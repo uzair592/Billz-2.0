@@ -677,5 +677,122 @@
       "source": "cli",
       "timestamp": "2026-10-14T18:18:29.596Z"
     }
+  },
+  {
+    "id": "ab14e674-0415-45c1-bb72-8e1e81989e45",
+    "question": "How was commit 45e9b0f pushed to the Billz-2.0 remote?",
+    "answer": "Pushed commit 45e9b0f to origin/main on https://github.com/uzair592/Billz-2.0.git with all fixes and enhancements.",
+    "timestamp": "2026-10-14T18:21:44.912Z",
+    "tags": [
+      "git",
+      "how",
+      "release",
+      "sync"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "commitHash": "45e9b0f",
+      "autoLink": {
+        "checkedAt": "2026-10-14T18:21:44.912Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [
+      "45e9b0f"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-14T18:21:44.913Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "git",
+        "github"
+      ],
+      "patterns": [],
+      "concepts": []
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-14T18:21:44.785Z"
+    }
+  },
+  {
+    "id": "3d171a3b-2b0b-4745-b1e9-00260e5888f2",
+    "question": "How were the October 14 Billz 2.0 pre-deployment audit findings resolved across backend, database, client, and test suites?",
+    "answer": "Applied migration 023 for kitchen tickets and request hash, created kitchen-service.mjs, added kitchen ticket lifecycle management with KDS screen, durable FIFO print queue, local cart draft recovery, order payment settlement endpoint and modal UI, authoritative cloud finance sync and transfers, role navigation guards, idempotency request hash conflict detection, and expanded accountant permissions with 675 passing tests.",
+    "timestamp": "2026-10-14T19:07:54.186Z",
+    "tags": [
+      "audit",
+      "database",
+      "deployment",
+      "finance",
+      "how",
+      "kitchen",
+      "migration",
+      "pos",
+      "printing",
+      "settlement"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-14T19:07:54.186Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-14T19:07:54.187Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [],
+      "patterns": [],
+      "concepts": [
+        "migration",
+        "database",
+        "queue",
+        "audit"
+      ]
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-14T19:07:54.003Z"
+    }
   }
 ]

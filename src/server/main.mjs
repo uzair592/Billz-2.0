@@ -19,6 +19,7 @@ import { createBusinessSettingsService } from "./pos/business-settings-service.m
 import { createOrderRefundService } from "./pos/order-refund-service.mjs";
 import { createSalesReportService } from "./pos/sales-report-service.mjs";
 import { createOrderService } from "./pos/order-service.mjs";
+import { createKitchenService } from "./pos/kitchen-service.mjs";
 import { createMenuService } from "./pos/menu-service.mjs";
 import { createSupplierService } from "./pos/supplier-service.mjs";
 import { createInventoryService } from "./pos/inventory-service.mjs";
@@ -166,8 +167,10 @@ export async function createServer({
   const orderRefundService = createOrderRefundService(database);
   const salesReportService = createSalesReportService(database);
   const inventoryConsumptionService = createInventoryConsumptionService(database);
+  const kitchenService = createKitchenService(database);
   const orderService = createOrderService(database, {
     inventoryConsumption: inventoryConsumptionService,
+    kitchenService,
   });
   const menuService = createMenuService(database);
   const supplierService = createSupplierService(database);
@@ -190,6 +193,7 @@ export async function createServer({
     subscriptionService,
     billingWebhookService,
     menuService,
+    kitchenService,
     orderService,
     orderRefundService,
     orderHistoryService,
