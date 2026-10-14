@@ -117,11 +117,15 @@ test.describe("Mobile & Tablet Usability & Acceptance", () => {
 
     const newOrderBtn = page.locator('button.menu-btn[onclick*="new-order"]');
     await expect(newOrderBtn).toBeVisible();
+    await expect(sidebar.locator(".menu")).toHaveCSS("flex-direction", "column");
+    await expect(newOrderBtn.locator(".menu-btn-label")).toHaveCSS("font-size", "12px");
+    expect((await newOrderBtn.boundingBox()).width).toBeGreaterThan(200);
     await newOrderBtn.click();
 
     await expect(sidebar).not.toHaveClass(/mobile-open/);
     await expect(overlay).not.toBeVisible();
     await expect(page.locator("#app-screen-title")).toHaveText("New Sale");
+    await expect.poll(async () => sidebar.evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
   });
 
   test("No page-level horizontal overflow across required viewports", async ({ page }) => {

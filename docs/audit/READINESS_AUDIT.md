@@ -1,4 +1,4 @@
-# Billz 2.0 — production readiness audit, 13 October 2026
+# Billz 2.0 — production readiness audit, 14 October 2026
 
 ## Scope and baseline
 
@@ -23,6 +23,9 @@ The baseline unit suite on the pending PR passes 631 tests. Static inventory ide
 | Admin can reset passwords but cannot create staff or change login identifiers | Audited, validated, rate-limited staff creation and username/display-name edits. Username and restaurant-code changes revoke sessions; session creation rechecks the verified identifiers to prevent stale login races. Duplicate identifiers return 409, foreign users/unknown restaurants return 404. |
 | Pending payments lack a global workflow | New paginated status-filtered payment queue, restaurant links and confirmed approve/reject controls. Searchable restaurants, actual storage allowances, user table, password reset, contact edits, suspension/restore and audit viewer remain available from the earlier PR changes. |
 | Several admin mutations accept malformed UUIDs/reasons and surface database failures | Route validation now covers identifiers and suspension reasons before SQL. Unknown suspend/restore/payment targets return a controlled 404. |
+| Catalog publication rejects its own revision metadata | CI reproduced a 400 from the strict snapshot validator. The HTTP route now validates revision metadata separately from the persisted snapshot, with regressions for valid, malformed and unknown fields. |
+| Phone navigation combines a drawer with obsolete horizontal/bottom-bar styles | Removed the conflicting sidebar styles. Browser acceptance now checks vertical navigation, readable labels, usable button widths and that the drawer moves completely offscreen after navigation. Admin tables retain readable columns inside their own scroll containers. |
+| Cancellation history omits restored stock from the newer inventory ledger | The persisted cancellation summary and replay include actual restored quantities from both inventory ledgers. PostgreSQL regression compares summaries with stock balances. |
 
 ## What the suites exercise
 
@@ -48,11 +51,17 @@ Previously local expenses must be reconciled before entering cloud expenses; thi
 
 1. **Hosting/staging:** trusted proxy CIDRs, restricted/control-role grants (including new tables), TLS, migrations 015–020, public support contact, real HTTPS client IPs, external load limits, alerts and staging backup recovery. No hosting account or deployed URL has been supplied.
 2. **Offline:** managed checkout requires internet and refuses paid offline receipts. Browser-verifiable offline leases, dependable cold-start offline access and signed offline pricing are unfinished.
-3. **Complete cloud product parity:** legacy kitchen/table live ordering, cash/bank transfers, purchasing settlements, local attachments/photos/receipt templates and all local settings do not yet have full multi-device synchronization. Shared publication covers menu/catalog setup; cloud inventory/purchasing/expenses/reports/history have separate authoritative APIs. Local stock/restocking screens remain local; use the Cloud Inventory/Purchases screens for shared operations.
+3. **Complete cloud product parity:** legacy kitchen/table live ordering, extras/options, cash/bank transfers, purchasing settlements, local attachments/photos/receipt templates and all local settings do not yet have full multi-device synchronization. Shared publication covers menu/catalog setup; cloud inventory/purchasing/expenses/reports/history have separate authoritative APIs. Local stock/restocking screens remain local; use the Cloud Inventory/Purchases screens for shared operations.
 4. **Roles/limits:** roles are predefined; configurable owner permissions, plan device-limit enforcement and all role-specific visible journeys are not complete. Server permissions remain authoritative.
 5. **Printing and security:** real 58/80 mm printer drivers/cutting/paper layout need physical-hardware acceptance. Canary/escaping/static/RLS tests do not constitute an exhaustive penetration test. Parameter-bound SQL and Fastify guards/rate limits reduce application risk; volumetric DDoS requires hosting/network protection.
 6. **Operational recovery:** rehearse historical stock/cost reconciliation, migration rollback/recovery and a complete restoration of real customer data on an isolated staging copy.
 
 ## Verification record
 
-Final exact-head results and acceptance fixes are recorded in PR #10. Local Node 22 unit checks run in this workspace. PostgreSQL is not installed and the workspace cannot perform the OS permission operations needed to install/run it; required local PostgreSQL commands fail explicitly. Chromium/headless-shell downloads are truncated; local browser execution is attempted but not claimed to pass. CI provides real PostgreSQL 17, Node 22 and Chromium and is the database/browser acceptance gate. No blanket “all functions pass” or paid-launch approval is implied by green CI.
+At `8bcc9069158faefb7460c7af5c8b0e2db39efcad`, [CI run 38525632567](https://github.com/uzair592/Billz-2.0/actions/runs/38525632567) passed all four jobs: 642 unit tests; 41 PostgreSQL startup/shutdown/backup checks; integration, full-stack, inventory and financial regressions; 55 existing browser tests; seven real-server browser journeys; production-container readiness/shutdown; clean migration validation; and the full feature-delta Gitleaks scan. No required database tests were skipped. The HTTP/PostgreSQL journey retained both simultaneous invoices with unique numbers, replayed the same invoice without extra stock consumption, rejected a conflicting menu publication, and verified exact expense/P&L/refund/cancellation totals.
+
+Screenshots from that run were inspected on phone, tablet and laptop. That inspection exposed the conflicting phone sidebar styles despite green tests; the follow-up removes them and strengthens geometric browser assertions. Its final exact-head results are recorded in PR #10 once CI completes.
+
+The nine-file follow-up (POS CSS, admin CSS, two cancellation/inventory service files, three acceptance test files, the PostgreSQL runner and this report) passes all 642 local unit tests. Its stronger browser/PostgreSQL assertions must also pass on the final published PR head; the `8bcc906` results alone do not verify those later changes. The final commit SHA, CI run and screenshot review are recorded in PR #10 before handoff. No merge or deployment is part of this review.
+
+Local Node 22.23.3 runs pass 642 unit tests with zero skips. Requested local PostgreSQL commands fail explicitly because PostgreSQL is unavailable. The ordinary browser suite cannot launch without the Chromium headless-shell executable, and the SaaS browser command stops during database setup with ECONNREFUSED. Passing database/browser results above come from real PostgreSQL 17 and Chromium in GitHub CI, not local execution. No production database, hosting account or physical printer was tested. No blanket “all functions pass” or paid-launch approval is implied by green CI.

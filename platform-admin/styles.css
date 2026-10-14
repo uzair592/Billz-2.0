@@ -243,6 +243,14 @@ input:disabled {
 .table-wrap {
   overflow: auto;
 }
+.table-wrap table {
+  min-width: 640px;
+}
+#users-tbody td:nth-child(1),
+#users-tbody td:nth-child(3),
+#users-tbody td:nth-child(4) {
+  white-space: nowrap;
+}
 table {
   width: 100%;
   border-collapse: collapse;

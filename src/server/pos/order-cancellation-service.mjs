@@ -75,7 +75,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
           }
 
           const unreturned = await nonRestockedRefundUsage(client, { restaurantId, orderId });
-          await reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned: unreturned.inventory });
+          const restocked = await reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned: unreturned.inventory });
           const reversalResult = await client.query(
             `WITH sales AS (
                SELECT stock_item_id, SUM(-quantity_delta) AS quantity
@@ -108,7 +108,6 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
             [restaurantId, orderId, order.branch_id, now, userId, JSON.stringify([...unreturned.legacy].map(([stock_item_id, quantity]) => ({ stock_item_id, quantity })))],
           );
 
-          const restocked = [];
           for (const movement of reversalResult.rows) {
             await client.query(
               `UPDATE inventory_balances
@@ -177,7 +176,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
 
           const restockedSummary = restocked.length
             ? restocked
-              .map((entry) => `${entry.stockItemId} +${entry.quantityBaseUnits}`)
+              .map((entry) => `${entry.stockItemId ?? entry.inventoryItemId} +${entry.quantityBaseUnits}`)
               .join("; ")
             : "Nothing restocked";
           const cancellationResult = await client.query(

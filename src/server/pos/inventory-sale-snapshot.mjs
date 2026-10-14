@@ -78,6 +78,7 @@ export async function nonRestockedRefundUsage(client, { restaurantId, orderId })
   return { inventory, legacy };
 }
 export async function reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned = new Map() }) {
+  const restocked = [];
   const rows = (await client.query(`SELECT inventory_item_id, -SUM(quantity_delta) AS remaining
     FROM inventory_movements WHERE restaurant_id = $1 AND reference_type = 'order' AND reference_id = $2
       AND movement_type IN ('sale_consumption', 'sale_reversal') GROUP BY inventory_item_id
@@ -88,5 +89,7 @@ export async function reverseRemainingInventory(client, { restaurantId, orderId,
     await applyStockChange(client, { restaurantId, inventoryItemId: row.inventory_item_id,
     movementType: "sale_reversal", quantityDelta: quantity, referenceType: "order", referenceId: orderId,
     idempotencyKey: operationId(`cancel:${orderId}:${row.inventory_item_id}`), notes: "Cancellation of remaining consumed stock", actorUserId: userId, now });
+    restocked.push({ inventoryItemId: row.inventory_item_id, quantityBaseUnits: quantity });
   }
+  return restocked;
 }

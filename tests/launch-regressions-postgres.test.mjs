@@ -111,7 +111,12 @@ test("launch fixes against non-superuser tenant and control roles", async t => {
     const result=await cancellations.cancel(cancel);
     assert.equal(result.cancellation.refundedMinor,30000);
     assert.deepEqual(await balances(),[2000,1000]);
-    await cancellations.cancel(cancel);
+    assert.deepEqual(result.cancellation.restocked,[
+      {inventoryItemId:inventoryId,quantityBaseUnits:400},
+      {stockItemId:stockId,quantityBaseUnits:30},
+    ]);
+    const replay=await cancellations.cancel(cancel);
+    assert.deepEqual(replay.cancellation.restocked,result.cancellation.restocked);
     assert.deepEqual(await balances(),[2000,1000]);
   });
   await t.test("changed prices reject before creating a payment or receipt",async()=>{

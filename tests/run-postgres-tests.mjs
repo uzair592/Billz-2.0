@@ -38,11 +38,6 @@ await provisionIntegrationDatabase();
 
 const testsDir = path.join(projectRoot, "tests");
 const files = POSTGRES_TESTS
-  .filter((file) => {
-    // Only run files that actually exist so a renamed suite does not
-    // silently disappear from the report.
-    return true;
-  })
   .sort()
   .map((file) => path.join(testsDir, file));
 

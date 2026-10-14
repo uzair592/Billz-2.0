@@ -24,6 +24,7 @@ test.describe("Production server readiness journeys", () => {
       if (await target.locator("#mobile-menu-toggle").isVisible()) await target.locator("#mobile-menu-toggle").click();
       await target.locator(`button.menu-btn[onclick="switchScreen('${screen}')"]`).click();
       await expect(target.locator(`#screen-${screen}`)).toBeVisible();
+      if (await target.locator("#mobile-menu-toggle").isVisible()) await expect.poll(() => target.locator("#app-sidebar").evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
     }
     async function login(target, username) {
       await target.goto("/"); await target.fill("#cloud-restaurant-code", code); await target.fill("#cloud-username", username); await target.fill("#cloud-password", "OwnerPassword123!");
@@ -42,7 +43,9 @@ test.describe("Production server readiness journeys", () => {
       await page.selectOption("#payment-filter", "approved"); const paid = page.locator("#payments-tbody tr").filter({ hasText: code }); await expect(paid).toContainText("approved"); await paid.locator(".payment-restaurant").click();
       await page.click("#create-user-btn"); await page.fill("#user-username", "cashier"); await page.fill("#user-display-name", "Counter staff"); await page.selectOption("#user-role", "cashier"); await page.fill("#user-password", "OwnerPassword123!"); await page.click("#user-form button[type=submit]");
       await expect(page.locator("#users-tbody")).toContainText("Counter staff");
-      await page.screenshot({ path: `tests/browser/screenshots/readiness-admin-${size.name}.png` });
+      await expect(page.locator("#users-tbody td:nth-child(3)").first()).toHaveCSS("white-space", "nowrap");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+      await page.screenshot({ path: `tests/browser/screenshots/readiness-admin-${size.name}.png`, fullPage: true });
       // Create category and menu item through the actual UI, without seeding browser collections.
       await login(page, "owner"); await goTo(page, "edit-menu");
       await page.locator('button[onclick="openManageCategoriesModal()"]').click(); await page.fill("#new-category-name", "Burgers"); await page.click("#category-form-submit-btn");
