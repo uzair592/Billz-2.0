@@ -71,7 +71,11 @@ test.describe("Production server readiness journeys", () => {
       const results = await Promise.all(responses); for (const response of results) expect(response.status()).toBe(201);
       const orders = await Promise.all(results.map(async response => (await response.json()).order));
       expect(new Set(orders.map(order => order.id)).size).toBe(2); expect(orders.map(order => order.orderNumber).sort()).toEqual([1, 2]);
-      for (const order of orders) { expect(order.totalMinor).toBe(10000); expect(order.costOfGoodsMinor).toBe(2000); }
+      for (const order of orders) expect(order.totalMinor).toBe(10000);
+      expect(orders[0].costOfGoodsMinor).toBe(2000);
+      expect(orders[1]).not.toHaveProperty("costOfGoodsMinor");
+      const storedCosts = await control.query("SELECT cost_of_goods_minor FROM orders WHERE id=ANY($1::uuid[])", [orders.map(order => order.id)]);
+      expect(storedCosts.rows.map(row => Number(row.cost_of_goods_minor))).toEqual([2000,2000]);
       // An offline till cannot issue a locally paid receipt in managed mode.
       await device.setOffline(true); const count = await second.evaluate(() => orders.length);
       await second.locator('#food-grid button.food-card[aria-label="Add Readiness Burger to bill"]').click(); await second.locator('#screen-new-order button[onclick="submitOrder(false)"]').click();
