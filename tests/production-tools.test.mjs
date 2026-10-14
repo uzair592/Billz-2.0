@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { BACKUP_TABLES, compareBackupCounts, connectionEnvironment } from "../src/server/database/backup-verify.mjs";
+import { BACKUP_TABLES, compareBackupCounts, connectionEnvironment, postgresToolInvocation } from "../src/server/database/backup-verify.mjs";
 import { latencySummary, runLoadTest, validateLoadFixtures } from "../scripts/load-test.mjs";
 
 test("backup verification compares every required table and never puts passwords in libpq URL", () => {
@@ -12,6 +12,13 @@ test("backup verification compares every required table and never puts passwords
   assert.equal(env.PGPASSWORD, "p@ssword");
   assert.equal(new URL(env.PGDATABASE).password, "");
   assert.equal(new URL(env.PGDATABASE).searchParams.get("sslmode"), "verify-full");
+  const invocation = postgresToolInvocation(["--format=custom"], "postgresql://backup:p%40ssword@db.example:5438/test?sslmode=verify-full");
+  assert.equal(invocation.args[0], "--dbname");
+  assert.equal(new URL(invocation.args[1]).port, "5438");
+  assert.equal(new URL(invocation.args[1]).password, "");
+  assert.equal(new URL(invocation.args[1]).searchParams.get("sslmode"), "verify-full");
+  assert.equal(invocation.env.PGPASSWORD, "p@ssword");
+  assert.equal(JSON.stringify(invocation.args).includes("p%40ssword"), false);
   assert.throws(() => connectionEnvironment("postgres"), /full PostgreSQL/);
   assert.throws(() => connectionEnvironment("https://example.com/db"), /full PostgreSQL/);
 });

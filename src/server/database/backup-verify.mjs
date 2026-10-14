@@ -24,9 +24,17 @@ export function connectionEnvironment(databaseUrl) {
   return { ...process.env, PGDATABASE: url.href, PGPASSWORD: secret };
 }
 
+export function postgresToolInvocation(args, databaseUrl) {
+  const env = connectionEnvironment(databaseUrl);
+  // libpq does not expand a connection URI supplied only as an environment
+  // default. Pass it explicitly so host/port/TLS select the intended server.
+  return { args: ["--dbname", env.PGDATABASE, ...args], env };
+}
+
 async function runTool(tool, args, databaseUrl) {
+  const invocation = postgresToolInvocation(args, databaseUrl);
   await new Promise((resolve, reject) => {
-    const child = spawn(tool, args, { env: connectionEnvironment(databaseUrl), stdio: ["ignore", "ignore", "ignore"] });
+    const child = spawn(tool, invocation.args, { env: invocation.env, stdio: ["ignore", "ignore", "ignore"] });
     child.on("error", () => reject(new Error(`${tool} could not start. Install PostgreSQL client tools matching the server major version.`)));
     child.on("close", code => code === 0 ? resolve() : reject(new Error(`${tool} failed (exit ${code}). Check client version, database privileges, TLS and disk space; tool output is withheld to protect credentials.`)));
   });
@@ -67,7 +75,7 @@ export async function verifyBackup({ databaseUrl, scratchAdminUrl, backupDir }) 
     await source.query("COMMIT"); transaction = false;
     // Only this newly generated scratch database is ever restored or dropped.
     await admin.query(`CREATE DATABASE "${databaseName}" TEMPLATE template0`); created = true;
-    await runTool("pg_restore", ["--exit-on-error", "--no-owner", "--no-privileges", "--dbname", connectionEnvironment(targetUrl.href).PGDATABASE, backupPath], targetUrl.href);
+    await runTool("pg_restore", ["--exit-on-error", "--no-owner", "--no-privileges", backupPath], targetUrl.href);
     await restored.connect(); await restored.query("SET row_security=off");
     const actual = await counts(restored);
     compareBackupCounts(expected, actual);
