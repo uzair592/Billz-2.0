@@ -595,7 +595,7 @@ test("username-only identity migration preserves legacy accounts, rejects ambigu
     .bootstrapAdmin({ username: "identityadmin", password: "AdminPassword123!" });
   const portal = createPlatformAdminPortalService({ pool: control, passwordPepper: pepper });
   // Simulate the pre-migration database, where tenant-scoped duplicates were legal.
-  await administrator.query("DROP TRIGGER users_claim_login_identifiers ON users; DROP FUNCTION claim_user_login_identifiers(); DROP TABLE user_login_identifiers;");
+  await administrator.query("DROP TRIGGER users_claim_login_identifiers ON users; DROP FUNCTION claim_user_login_identifiers(); DROP TABLE user_login_identifiers; DROP INDEX users_global_username_lookup_idx;");
   const create = (code, ownerUsername = "owner", ownerEmail = `${code}@example.com`) => portal.createRestaurant({
     adminId: admin.admin.id, code, name: code, ownerUsername, ownerEmail, ownerPassword: "OwnerPassword123!", planCode: "GROWTH",
   });
