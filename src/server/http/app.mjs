@@ -349,6 +349,10 @@ export const legacyCatalogSchema = z.object({
   }).passthrough()).max(1_000).default([]),
 }).strict();
 
+const legacyCatalogImportSchema = legacyCatalogSchema.extend({
+  expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+});
+
 function setSessionCookie(reply, session, secureCookies) {
   reply.setCookie(SESSION_COOKIE_NAME, session.token, {
     path: "/",
@@ -1345,13 +1349,16 @@ export async function buildHttpApp({
             guards.tenant(PERMISSION.MENU_MANAGE),
           ],
         },
-        async (request) => catalogImportService.import({
-          restaurantId: request.tenant.restaurant.id,
-          branchId: request.tenant.membership.defaultBranchId,
-          userId: request.auth.user.id,
-          snapshot: legacyCatalogSchema.parse(request.body),
-          expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional().parse(request.body?.expectedRevision),
-        }),
+        async (request) => {
+          const { expectedRevision, ...snapshot } = legacyCatalogImportSchema.parse(request.body);
+          return catalogImportService.import({
+            restaurantId: request.tenant.restaurant.id,
+            branchId: request.tenant.membership.defaultBranchId,
+            userId: request.auth.user.id,
+            snapshot,
+            expectedRevision,
+          });
+        },
       );
     }
 

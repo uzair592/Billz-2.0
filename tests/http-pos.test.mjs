@@ -211,6 +211,27 @@ describe("tenant-protected POS HTTP endpoints", () => {
     assert.equal(calls.at(-1)[0], "catalog:import");
     assert.equal(calls.at(-1)[1].restaurantId, restaurantId);
   });
+  it("accepts publication revisions separately from the strict catalog snapshot", async () => {
+    const { app, calls } = await makeApp();
+    const payload = { pos_categories: ["Burgers"], pos_menu: [{ id: 1, category: "Burgers", name: "Zinger", price: 500 }] };
+    for (const expectedRevision of [0, 2]) {
+      const response = await app.inject({ method: "POST", url: "/api/pos/import/legacy-catalog", headers: authenticatedHeaders, payload: { ...payload, expectedRevision } });
+      assert.equal(response.statusCode, 200, response.body);
+      const input = calls.at(-1)[1];
+      assert.equal(input.expectedRevision, expectedRevision);
+      assert.equal(input.snapshot.pos_menu[0].name, "Zinger");
+      assert.equal("expectedRevision" in input.snapshot, false);
+    }
+    const writes = calls.length;
+    for (const invalid of [-1, 0.5, "2", Number.MAX_SAFE_INTEGER + 1, null]) {
+      const response = await app.inject({ method: "POST", url: "/api/pos/import/legacy-catalog", headers: authenticatedHeaders, payload: { ...payload, expectedRevision: invalid } });
+      assert.equal(response.statusCode, 400, response.body);
+    }
+    const unknown = await app.inject({ method: "POST", url: "/api/pos/import/legacy-catalog", headers: authenticatedHeaders, payload: { ...payload, expectedRevision: 0, pos_orders: [] } });
+    assert.equal(unknown.statusCode, 400);
+    assert.equal(calls.length, writes);
+  });
+
   it("does not allow cashiers to import a catalog", async () => {
     const { app, calls } = await makeApp({ role: "cashier" });
     const response = await app.inject({

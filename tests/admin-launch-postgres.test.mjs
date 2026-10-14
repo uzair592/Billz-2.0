@@ -373,7 +373,7 @@ test("password management through actual HTTP composition and PostgreSQL", async
     {},
     { name: "" },
     { contactEmail: "invalid" },
-    { code: "forbidden" },
+    { code: "a" },
   ])
     assert.equal(
       (await send("PATCH", restPath, body, adminCookie)).statusCode,
