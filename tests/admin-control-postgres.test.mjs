@@ -669,7 +669,6 @@ test("enterprise admin HTTP controls and concurrent session limits with PostgreS
                 ...signup,
                 code: "rollback",
                 ownerUsername: "audit_rollback_owner",
-                ownerEmail: "audit-rollback@example.com",
                 ownerEmail: "rollback@example.com",
               },
               admin,
