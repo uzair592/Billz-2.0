@@ -46,7 +46,7 @@ test("shared-IP restaurant and admin logins allow startup and isolate failed acc
   }
   for (const code of ["startup-a", "startup-b"]) {
     const result = await send("/platform-admin/api/restaurants", { name: code, code,
-      ownerUsername: "owner", ownerPassword: "OwnerPassword123!", planCode: "GROWTH" }, adminCookie);
+      ownerUsername: code === "startup-a" ? "owner" : "startup_b_owner", ownerPassword: "OwnerPassword123!", planCode: "GROWTH" }, adminCookie);
     assert.equal(result.statusCode, 201, result.body);
   }
   const account = { restaurantCode: "startup-a", username: "owner", password: "OwnerPassword123!" };
@@ -60,7 +60,7 @@ test("shared-IP restaurant and admin logins allow startup and isolate failed acc
     const delayed = await send("/api/auth/login", { ...account, password: "WrongPassword123!" });
     assert.equal(delayed.statusCode, 429, delayed.body);
     assert.ok(Number(delayed.headers["retry-after"]) > 0);
-    const other = await send("/api/auth/login", { ...account, restaurantCode: "startup-b" });
+    const other = await send("/api/auth/login", { ...account, restaurantCode: "startup-b", username: "startup_b_owner" });
     assert.equal(other.statusCode, 200, other.body);
   }
 });
@@ -607,7 +607,8 @@ test("username-only identity migration preserves legacy accounts, rejects ambigu
   const server = await createServer({ pool, controlPool: control, env: { NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test",
     PASSWORD_PEPPER: pepper, SESSION_SECRET: "identity-session-secret-long", TRUSTED_ORIGIN: "http://localhost:3000", PAYMENT_PROVIDER: "manual" } });
   t.after(async () => { await server.close(); await pool.end(); await control.end(); await administrator.end(); });
-  const send = (username,password = "OwnerPassword123!") => server.app.inject({ method: "POST", url: "/api/auth/login", payload: { username,password } });
+  let loginAttempt = 0;
+  const send = (username,password = "OwnerPassword123!") => server.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: `198.51.100.${++loginAttempt}`, payload: { username,password } });
   assert.equal((await send("owner")).statusCode, 401);
   assert.equal((await send("identity-first@example.com")).statusCode, 401);
   // Renaming a legacy collision must not attempt to re-claim its unchanged,
