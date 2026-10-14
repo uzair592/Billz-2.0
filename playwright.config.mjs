@@ -11,6 +11,7 @@ export default defineConfig({
     command: "node tests/browser/static-server.mjs",
     port: 8899,
     reuseExistingServer: !process.env.CI,
+    env: { BILLZ_TEST_DEMO: "true" },
   },
   use: {
     baseURL: "http://127.0.0.1:8899",

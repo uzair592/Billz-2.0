@@ -4905,364 +4905,17 @@
   </head>
   <body>
     
-    <!-- ═══════════════════════════════════════════════════════════════════════
-         🔐 ONBOARDING — shown before anything else on a brand-new installation:
-            Step 1  Licence key
-            Step 2  Business details (locked to the licence)
-            Step 3  Choose a PIN
-         It also reappears, permanently, if the licence is ever revoked.
-         ═══════════════════════════════════════════════════════════════════════ -->
-    <div
-      id="onboarding-overlay"
-      class="hidden"
-      style="
-        position: fixed;
-        inset: 0;
-        z-index: 2147482000;
-        background: linear-gradient(135deg, #1e1b4b, #0f172a);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
-        overflow-y: auto;
-      "
-    >
-      <div
-        style="
-          background: #fff;
-          width: 100%;
-          max-width: 470px;
-          border-radius: 16px;
-          padding: 30px;
-          box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6);
-        "
-      >
-        <div style="text-align: center; margin-bottom: 20px">
-          <div style="font-size: 34px">🔐</div>
-          <h2 id="onboard-title" style="margin: 6px 0 4px; font-size: 20px">
-            Activate your software
-          </h2>
-          <p
-            id="onboard-subtitle"
-            style="margin: 0; font-size: 13px; color: #64748b"
-          >
-            Enter the licence key you were given.
-          </p>
-        </div>
-
-        <div
-          id="onboard-steps"
-          style="display: flex; gap: 6px; margin-bottom: 20px"
-        >
-          <div
-            class="onboard-pip"
-            data-step="1"
-            style="
-              flex: 1;
-              height: 4px;
-              border-radius: 2px;
-              background: #4f46e5;
-            "
-          ></div>
-          <div
-            class="onboard-pip"
-            data-step="2"
-            style="
-              flex: 1;
-              height: 4px;
-              border-radius: 2px;
-              background: #e2e8f0;
-            "
-          ></div>
-          <div
-            class="onboard-pip"
-            data-step="3"
-            style="
-              flex: 1;
-              height: 4px;
-              border-radius: 2px;
-              background: #e2e8f0;
-            "
-          ></div>
-        </div>
-
-        <p
-          id="onboard-error"
-          class="hidden"
-          style="
-            background: #fef2f2;
-            border-left: 4px solid #dc2626;
-            color: #7f1d1d;
-            padding: 10px 13px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin: 0 0 14px;
-            white-space: pre-line;
-            word-break: break-word;
-            text-align: left;
-          "
-        ></p>
-        <p
-          id="onboard-info"
-          class="hidden"
-          style="
-            background: #eff6ff;
-            border-left: 4px solid #2563eb;
-            color: #1e3a8a;
-            padding: 10px 13px;
-            border-radius: 8px;
-            font-size: 13px;
-            margin: 0 0 14px;
-          "
-        ></p>
-
-        <!-- STEP 1 — licence key -->
-        <div id="onboard-step-1">
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 14px;
-            "
-            >Licence key
-            <input
-              type="text"
-              id="onboard-key-input"
-              placeholder="SLR-XXXX-XXXX-XXXX"
-              autocomplete="off"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 12px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 17px;
-                letter-spacing: 0.08em;
-                text-align: center;
-                text-transform: uppercase;
-                font-family: ui-monospace, monospace;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <button
-            type="button"
-            onclick="onboardGoToBusinessStep()"
-            style="
-              width: 100%;
-              background: #4f46e5;
-              color: #fff;
-              border: none;
-              padding: 13px;
-              border-radius: 9px;
-              font-size: 15px;
-              font-weight: 700;
-              cursor: pointer;
-            "
-          >
-            Continue →
-          </button>
-        </div>
-
-        
-        <div id="onboard-step-2" class="hidden">
-          <p style="font-size: 12.5px; color: #64748b; margin: 0 0 14px">
-            These print on your receipts and are tied to your licence. Every
-            device on this licence must use exactly the same details.
-          </p>
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 12px;
-            "
-            >Business name
-            <input
-              type="text"
-              id="onboard-business-name"
-              placeholder="e.g. Salaar Food Cafe"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 11px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 15px;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 12px;
-            "
-            >Contact number
-            <input
-              type="text"
-              id="onboard-business-phone"
-              placeholder="e.g. 0300-1234567"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 11px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 15px;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 16px;
-            "
-            >Business address
-            <input
-              type="text"
-              id="onboard-business-address"
-              placeholder="e.g. Cantt Road, Multan"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 11px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 15px;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <button
-            type="button"
-            id="onboard-activate-btn"
-            onclick="onboardActivate()"
-            style="
-              width: 100%;
-              background: #4f46e5;
-              color: #fff;
-              border: none;
-              padding: 13px;
-              border-radius: 9px;
-              font-size: 15px;
-              font-weight: 700;
-              cursor: pointer;
-            "
-          >
-            🔓 Activate
-          </button>
-          <button
-            type="button"
-            onclick="onboardShowStep(1)"
-            style="
-              width: 100%;
-              background: none;
-              border: none;
-              color: #64748b;
-              padding: 10px;
-              font-size: 13px;
-              cursor: pointer;
-              margin-top: 4px;
-            "
-          >
-            ← Back
-          </button>
-        </div>
-
-        
-        <div id="onboard-step-3" class="hidden">
-          <p style="font-size: 12.5px; color: #64748b; margin: 0 0 14px">
-            Pick a 4-digit PIN. Staff enter this to open the till each day.
-          </p>
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 12px;
-            "
-            >New PIN
-            <input
-              type="password"
-              id="onboard-pin-1"
-              inputmode="numeric"
-              maxlength="4"
-              placeholder="••••"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 12px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 22px;
-                text-align: center;
-                letter-spacing: 0.5em;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <label
-            style="
-              display: block;
-              font-weight: 700;
-              font-size: 13px;
-              margin-bottom: 16px;
-            "
-            >Confirm PIN
-            <input
-              type="password"
-              id="onboard-pin-2"
-              inputmode="numeric"
-              maxlength="4"
-              placeholder="••••"
-              style="
-                width: 100%;
-                margin-top: 5px;
-                padding: 12px;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                font-size: 22px;
-                text-align: center;
-                letter-spacing: 0.5em;
-                box-sizing: border-box;
-              "
-            />
-          </label>
-          <button
-            type="button"
-            onclick="onboardSavePin()"
-            style="
-              width: 100%;
-              background: #16a34a;
-              color: #fff;
-              border: none;
-              padding: 13px;
-              border-radius: 9px;
-              font-size: 15px;
-              font-weight: 700;
-              cursor: pointer;
-            "
-          >
-            ✅ Finish setup
-          </button>
-        </div>
-
-        <p
-          id="onboard-footer"
-          style="
-            text-align: center;
-            font-size: 11.5px;
-            color: #94a3b8;
-            margin: 18px 0 0;
-          "
-        ></p>
+    <!-- Standalone local terminal setup; managed mode uses server authentication. -->
+    <div id="onboarding-overlay" class="hidden" style="position:fixed;inset:0;z-index:2147482000;background:#0f172a;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto">
+      <div style="background:white;border-radius:12px;padding:24px;max-width:460px;width:100%">
+        <h2>Set up this local terminal</h2><p>Hosted restaurants sign in with their account. This setup applies only to a standalone local copy.</p>
+        <p id="onboard-error" class="hidden" role="alert" style="color:#b91c1c"></p>
+        <label>Business name<input id="onboard-business-name" required maxlength="160" /></label>
+        <label>Phone<input id="onboard-business-phone" maxlength="40" /></label>
+        <label>Address<input id="onboard-business-address" maxlength="500" /></label>
+        <label>Choose a PIN (4–8 digits)<input id="onboard-pin-1" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" /></label>
+        <label>Confirm PIN<input id="onboard-pin-2" type="password" inputmode="numeric" maxlength="8" autocomplete="new-password" /></label>
+        <button type="button" onclick="onboardSavePin()">Save terminal setup</button>
       </div>
     </div>
 
@@ -7744,69 +7397,7 @@
         </div>
 
         
-        <div
-          id="forced-pin-reset-modal-overlay"
-          class="hidden"
-          style="
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(4px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 10000;
-            padding: 20px;
-            box-sizing: border-box;
-          "
-        >
-          <div
-            style="
-              background: white;
-              width: 100%;
-              max-width: 380px;
-              border-radius: 12px;
-              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
-              padding: 25px;
-              animation: modalSlideUp 0.25s ease-out;
-            "
-          >
-            <h3 style="margin-top: 0">🆘 Set a New PIN</h3>
-            <p style="font-size: 13px; color: #64748b; margin: -4px 0 16px">
-              You unlocked the system with a recovery code. Set a new PIN now to
-              continue.
-            </p>
-            <div class="form-group">
-              <label for="forced-new-pin-input">New PIN (4–8 digits):</label>
-              <input
-                type="password"
-                id="forced-new-pin-input"
-                inputmode="numeric"
-                placeholder="Enter new PIN"
-              />
-            </div>
-            <div class="form-group">
-              <label for="forced-confirm-pin-input">Confirm New PIN:</label>
-              <input
-                type="password"
-                id="forced-confirm-pin-input"
-                inputmode="numeric"
-                placeholder="Re-enter new PIN"
-              />
-            </div>
-            <button
-              type="button"
-              onclick="saveForcedPinReset()"
-              class="save-item-btn"
-              style="background-color: var(--accent-amber); width: 100%"
-            >
-              💾 Set New PIN
-            </button>
-          </div>
-        </div>
+
 
         
         <div
@@ -8877,55 +8468,7 @@
               </div>
             </div>
 
-<div class="settings-section" style="margin-top: 22px">
-              <h3>🔐 Software Licence</h3>
-              <p style="font-size: 12px; color: #64748b; margin-top: -6px">
-                Your activation status. The app verifies this quietly in the
-                background whenever internet is available; it keeps working
-                offline in between.
-              </p>
-              <div id="license-status-box" style="margin-bottom: 12px"></div>
-              <div style="display: flex; gap: 8px; flex-wrap: wrap">
-                <button
-                  type="button"
-                  id="license-check-btn"
-                  onclick="checkLicenseNow()"
-                  style="
-                    background: #0ea5e9;
-                    color: #fff;
-                    border: none;
-                    padding: 9px 15px;
-                    border-radius: 6px;
-                    font-weight: 700;
-                    font-size: 13px;
-                    cursor: pointer;
-                  "
-                >
-                  🔄 Check licence now
-                </button>
-                <button
-                  type="button"
-                  onclick="releaseThisDevice()"
-                  style="
-                    background: #f1f5f9;
-                    color: #475569;
-                    border: 1px solid #cbd5e1;
-                    padding: 9px 15px;
-                    border-radius: 6px;
-                    font-weight: 700;
-                    font-size: 13px;
-                    cursor: pointer;
-                  "
-                >
-                  🔓 Release this device
-                </button>
-              </div>
-              <p style="font-size: 12px; color: #94a3b8; margin-top: 10px">
-                Release this device before replacing or reformatting this
-                computer — it frees the slot so the same key works on the new
-                machine.
-              </p>
-            </div>
+
           </div>
 
           
@@ -14152,7 +13695,7 @@
       let iceCreamPurchaseLastPricingInput = null; // 'perKg' | 'amount' | null — mirrors the Kitchen tab's Price Per KG linkage
 
 
-      let systemPinCode = "1234";
+      let systemPinCode = "";
       // Tracking states
       let isSalesHidden = true; // ⚡ Hidden by default (stars)
       let computedSalesTotal = 0; // Tracks live calculated values
@@ -18822,16 +18365,6 @@
 
 
 
-      function computeRecoveryPin() {
-        const now = new Date();
-        const dd = now.getDate();
-        const mm = now.getMonth() + 1;
-        const ddmm = dd * 100 + mm; // e.g. Aug 4 → 408
-        const SECRET = 6465;
-        const code = (ddmm + SECRET) % 10000;
-        return String(code).padStart(4, "0");
-      }
-
       function attemptUnlock() {
         if (window.BILLZ_MANAGED) return;
         if (pinInputBuffer.length === 0) return;
@@ -18840,13 +18373,6 @@
           safeStorageSet("biteTechUnlocked", "true", true);
           pinInputBuffer = "";
           showAppAfterUnlock();
-        } else if (pinInputBuffer === computeRecoveryPin()) {
-          // 🆘 Unlocked with today's recovery code instead of the real PIN — let them in, then
-          // immediately require setting a brand new PIN (no need to know the old/forgotten one).
-          safeStorageSet("biteTechUnlocked", "true", true);
-          pinInputBuffer = "";
-          showAppAfterUnlock();
-          openForcedPinResetModal();
         } else {
           const err = document.getElementById("pin-error-message");
           if (err) err.classList.remove("hidden");
@@ -18953,49 +18479,6 @@
           "✅ PIN code updated successfully! Use the new PIN next time you unlock the system.",
         );
       }
-
-
-
-
-      function openForcedPinResetModal() {
-        document.getElementById("forced-new-pin-input").value = "";
-        document.getElementById("forced-confirm-pin-input").value = "";
-        document
-          .getElementById("forced-pin-reset-modal-overlay")
-          .classList.remove("hidden");
-      }
-
-      function closeForcedPinResetModal() {
-        document
-          .getElementById("forced-pin-reset-modal-overlay")
-          .classList.add("hidden");
-      }
-
-      function saveForcedPinReset() {
-        const newInput = document
-          .getElementById("forced-new-pin-input")
-          .value.trim();
-        const confirmInput = document
-          .getElementById("forced-confirm-pin-input")
-          .value.trim();
-
-        if (!/^\d{4,8}$/.test(newInput)) {
-          alert("⚠️ New PIN must be 4 to 8 digits (numbers only).");
-          return;
-        }
-        if (newInput !== confirmInput) {
-          alert("⚠️ New PIN and Confirm PIN do not match.");
-          return;
-        }
-
-        systemPinCode = newInput;
-        saveToStorage();
-        closeForcedPinResetModal();
-        alert(
-          "✅ New PIN set successfully! Use it next time you unlock the system.",
-        );
-      }
-
 
 
 
@@ -19214,573 +18697,46 @@
 
       // 🔐 LICENCE ACTIVATION
 
-      // The app talks to the licence portal at three moments: when it is first
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-      // hosting painless later — see licenseState.endpoint below.
-      const LICENSE_DEFAULT_ENDPOINT = "https://imjalalahmad.com";
-      const APP_VERSION = "1.0.0";
-      const LOCAL_SEED_LICENSE_KEY = "LOCAL-DEMO-2026";
-      const LOCAL_SEED_PIN = "1234";
-
-      let licenseState = {
-        key: "",
-        deviceUid: "",
-        token: "",
-        status: "none", // none | active | revoked | suspended | expired | offline_expired
-        localSeed: false,
-        endpoint: "",
-        offlineDays: 30,
-        lastCheckOk: "", // ISO date of the last successful check-in
-        message: "",
-        businessName: "",
-        contactNumber: "",
-        address: "",
-      };
-
-      function licenseEndpoint() {
-        return (licenseState.endpoint || LICENSE_DEFAULT_ENDPOINT).replace(
-          /\/+$/,
-          "",
-        );
+      // Explicit development fixtures only. The production static handler forces
+      // this flag off, and managed mode always bypasses local setup/PIN logic.
+      async function seedDevelopmentPin() {
+        if (window.BILLZ_MANAGED || window.BILLZ_DEVELOPMENT_DEMO !== true) return;
+        if (await idbGet("pos_setup_done")) return;
+        const pin = String(window.BILLZ_DEVELOPMENT_PIN || "");
+        if (!/^\d{4,8}$/.test(pin)) return;
+        systemPinCode = pin;
+        await idbSet("pos_pin_code", pin);
+        await idbSet("pos_setup_done", true);
       }
-
-      async function loadLicenseState() {
-        const saved = await idbGet("pos_license_state");
-        if (saved && typeof saved === "object")
-          licenseState = { ...licenseState, ...saved };
-        if (!licenseState.deviceUid) {
-          licenseState.deviceUid = await buildDeviceFingerprint();
-          await idbSet("pos_license_state", licenseState);
-        }
-      }
-
-      async function saveLicenseState() {
-        await idbSet("pos_license_state", licenseState);
-      }
-
-      async function seedLocalAccessCredentials() {
-        if (window.BILLZ_MANAGED) return;
-        const setupDone = await idbGet("pos_setup_done");
-        if (!setupDone) {
-          systemPinCode = LOCAL_SEED_PIN;
-          await idbSet("pos_pin_code", LOCAL_SEED_PIN);
-          await idbSet("pos_setup_done", true);
-        }
-
-        if (!licenseState.key || licenseState.status === "none") {
-          licenseState.key = LOCAL_SEED_LICENSE_KEY;
-          licenseState.status = "active";
-          licenseState.localSeed = true;
-          licenseState.businessName = businessName || "SALAAR PIZZA SHOP";
-          licenseState.lastCheckOk = getLocalDateString();
-          await saveLicenseState();
-        }
-      }
-
-
-
-
-      async function buildDeviceFingerprint() {
-        try {
-          if (
-            window.pywebview &&
-            window.pywebview.api &&
-            window.pywebview.api.get_machine_id
-          ) {
-            // Raced against a timer: if the Python side never answers, start-up must not hang
-            // forever waiting for it — fall back to the locally generated id instead.
-            const hw = await Promise.race([
-              window.pywebview.api.get_machine_id(),
-              new Promise((resolve) =>
-                setTimeout(function () {
-                  resolve(null);
-                }, 3000),
-              ),
-            ]);
-            if (hw) return "HW-" + String(hw).slice(0, 90);
-          }
-        } catch (err) {
-
-        }
-
-        // Kept in IndexedDB, which works under file:// in a packaged app. (localStorage does
-        // not — see safeStorageGet — so relying on it here would break activation in the .exe.)
-        let local = await idbGet("pos_device_uid");
-        if (!local) {
-          local = safeStorageGet("pos_device_uid");
-        }
-        if (!local) {
-          const rand =
-            window.crypto && crypto.randomUUID
-              ? crypto.randomUUID()
-              : Date.now() +
-                "-" +
-                Math.random().toString(36).slice(2) +
-                Math.random().toString(36).slice(2);
-          local = "UID-" + rand;
-        }
-        await idbSet("pos_device_uid", local);
-        safeStorageSet("pos_device_uid", local);
-        return local;
-      }
-
-      function describeThisDevice() {
-        const ua = navigator.userAgent || "";
-        let platform = "Unknown";
-        if (/Windows NT 10/.test(ua)) platform = "Windows 10/11";
-        else if (/Windows/.test(ua)) platform = "Windows";
-        else if (/Mac OS X/.test(ua)) platform = "macOS";
-        else if (/Android/.test(ua)) platform = "Android";
-        else if (/Linux/.test(ua)) platform = "Linux";
-        return platform;
-      }
-
-
-
-
-
-
-
-
-
-      async function callLicenseApi(action, body) {
-        const url = `${licenseEndpoint()}/api/${action}`;
-        let res;
-
-        try {
-
-
-
-
-
-
-
-
-
-
-          res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "text/plain;charset=UTF-8" },
-            body: JSON.stringify(body),
-          });
-        } catch (err) {
-          // The request never left the browser at all.
-          let reason = "unreachable";
-          let detail = `Could not open a connection to ${url}.`;
-
-          if (/^https?:\/\/(licence|license)\.example\.com/i.test(url)) {
-            reason = "not_configured";
-            detail =
-              "The app is still pointing at the example address. Set LICENSE_DEFAULT_ENDPOINT in the HTML file to your real portal address.";
-          } else if (
-            location.protocol === "https:" &&
-            url.startsWith("http://")
-          ) {
-            reason = "mixed_content";
-            detail =
-              "This page is on https but the portal address is http. Browsers block that. Use https:// for the portal.";
-          }
-          return { ok: false, offline: true, reason, detail, url, error: err };
-        }
-
-        // The server answered — but is it actually the portal?
-        const text = await res.text().catch(() => "");
-        let data = null;
-        try {
-          data = JSON.parse(text);
-        } catch (err) {
-
-        }
-
-        if (data === null) {
-          // We got a web page instead of an API reply. Almost always means the clean-URL
-          // rewriting isn't active, so /api/... is landing on a normal 404 page.
-          return {
-            ok: false,
-            offline: true,
-            url,
-            reason: res.status === 404 ? "routing" : "not_json",
-            detail:
-              res.status === 404
-                ? `The portal returned a "page not found" for ${url}. The address is probably missing a subfolder, or mod_rewrite is not enabled on the hosting.`
-                : `The portal replied with ${res.status} but sent a web page instead of data. Check the portal is installed at ${licenseEndpoint()}.`,
-          };
-        }
-
-        return { ok: true, data, httpStatus: res.status };
-      }
-
-
-
-
-
-
-
-      function describeLicenseConnectionProblem(result) {
-        const messages = {
-          not_configured:
-            "This copy of the software hasn't been set up for activation yet.\n\nPlease contact your software provider and quote code LIC-1.",
-          mixed_content:
-            "The connection was blocked by this computer's security settings.\n\nPlease contact your software provider and quote code LIC-2.",
-          routing:
-            "The activation service could not be found.\n\nPlease contact your software provider and quote code LIC-3.",
-          not_json:
-            "The activation service gave an unexpected response.\n\nPlease contact your software provider and quote code LIC-4.",
-          unreachable:
-            "Couldn't connect to the activation service.\n\nPlease check this computer is connected to the internet and try again. If it is online, contact your software provider and quote code LIC-5.",
-        };
-        return messages[result.reason] || messages.unreachable;
-      }
-
-      // Applies whatever the portal just told us, and remembers it.
-      async function applyLicenseResponse(data) {
-        licenseState.localSeed = false;
-        licenseState.status = data.status || (data.ok ? "active" : "none");
-        licenseState.message = data.message || "";
-        if (data.device_token) licenseState.token = data.device_token;
-        if (typeof data.offline_days === "number")
-          licenseState.offlineDays = data.offline_days;
-
-        // 🌐 The portal can move house: if it hands back a new address, adopt it
-        // permanently so this device follows automatically.
-        if (data.endpoint && data.endpoint !== licenseState.endpoint) {
-          licenseState.endpoint = data.endpoint;
-        }
-
-        // The portal's copy of the business details is authoritative, so every device
-        // on a licence ends up byte-identical — no drift from typing differences.
-        if (data.business_name) {
-          licenseState.businessName = data.business_name;
-          licenseState.contactNumber = data.contact_number || "";
-          licenseState.address = data.address || "";
-          businessName = data.business_name;
-          businessNameProvided = true;
-          businessPhone = data.contact_number || "";
-          businessAddress = data.address || "";
-          await saveToStorage();
-          applyBusinessNameEverywhere();
-          applyBusinessContactInfoToReceipt();
-        }
-
-        if (data.ok) licenseState.lastCheckOk = getLocalDateString();
-        await saveLicenseState();
-      }
-
-      // Is the app allowed to run right now?
-      function licenseVerdict() {
-        if (!licenseState.key || licenseState.status === "none") {
-          return { allowed: false, reason: "not_activated" };
-        }
-        if (["revoked", "suspended", "expired"].includes(licenseState.status)) {
-          return { allowed: false, reason: licenseState.status };
-        }
-        // 🛡️ Offline safety net. Without this, unplugging the internet would be a
-        // permanent way to ignore a revocation.
-        if (licenseState.lastCheckOk) {
-          const days = Math.floor(
-            (Date.now() -
-              new Date(licenseState.lastCheckOk + "T00:00:00").getTime()) /
-              86400000,
-          );
-          if (days > (licenseState.offlineDays || 30)) {
-            return { allowed: false, reason: "offline_expired", days };
-          }
-        }
-        return { allowed: true };
-      }
-
-      // 💓 Background check-in. Never blocks the UI and never locks the app just
-      // because the portal was unreachable.
-      async function runLicenseHeartbeat(force) {
-        if (!licenseState.key || licenseState.localSeed) return;
-
-        const result = await callLicenseApi("heartbeat", {
-          license_key: licenseState.key,
-          device_uid: licenseState.deviceUid,
-          device_token: licenseState.token,
-          app_version: APP_VERSION,
-          business_name: businessName,
-          contact_number: businessPhone,
-          address: businessAddress,
-        });
-
-        if (!result.ok) return; // offline — carry on working
-
-        await applyLicenseResponse(result.data);
-
-        const verdict = licenseVerdict();
-        if (!verdict.allowed) {
-          // The portal has said no. Lock immediately and stay locked.
-          showOnboardingLock(
-            verdict.reason,
-            result.data.message || licenseState.message,
-          );
-        }
-        renderLicenseSettingsPanel();
-      }
-
-      // ── Onboarding screens ──────────────────────────────────────────────────
-      let onboardStep = 1;
-
-      function onboardShowStep(step) {
-        onboardStep = step;
-        [1, 2, 3].forEach((n) => {
-          const el = document.getElementById("onboard-step-" + n);
-          if (el) el.classList.toggle("hidden", n !== step);
-        });
-        document.querySelectorAll(".onboard-pip").forEach((p) => {
-          p.style.background =
-            Number(p.dataset.step) <= step ? "#4f46e5" : "#e2e8f0";
-        });
-        const titles = {
-          1: [
-            "Activate your software",
-            "Enter the licence key you were given.",
-          ],
-          2: ["Your business details", "These print on every receipt."],
-          3: ["Choose a PIN", "You're almost done."],
-        };
-        document.getElementById("onboard-title").innerText = titles[step][0];
-        document.getElementById("onboard-subtitle").innerText = titles[step][1];
-        onboardHideError();
-      }
-
-      function onboardError(msg) {
-        const el = document.getElementById("onboard-error");
-        el.innerText = msg;
-        el.classList.remove("hidden");
-      }
-      function onboardHideError() {
-        document.getElementById("onboard-error").classList.add("hidden");
-        document.getElementById("onboard-info").classList.add("hidden");
-      }
-      function onboardInfo(msg) {
-        const el = document.getElementById("onboard-info");
-        el.innerText = msg;
-        el.classList.remove("hidden");
-      }
-
       function showOnboarding() {
-        document
-          .getElementById("onboarding-overlay")
-          .classList.remove("hidden");
+        document.getElementById("onboarding-overlay").classList.remove("hidden");
         document.getElementById("pin-lock-overlay").classList.add("hidden");
         document.querySelector(".app-container").classList.add("hidden");
-        // Nothing identifying on screen — the device id is internal
-        document.getElementById("onboard-footer").innerText = "";
+        document.getElementById("onboard-business-name").value = businessName || "";
+        document.getElementById("onboard-business-phone").value = businessPhone || "";
+        document.getElementById("onboard-business-address").value = businessAddress || "";
       }
-
-      // 🚫 Locked out — revoked, suspended, unpaid, or offline too long. The activation
-      // screen comes back and the till cannot be used until it is resolved.
-      function showOnboardingLock(reason, message) {
-        licenseState.token = "";
-        if (reason !== "offline_expired") licenseState.status = reason;
-        saveLicenseState();
-
-        showOnboarding();
-        onboardShowStep(1);
-        const preset = {
-          revoked:
-            "This licence has been revoked. Please contact your software provider.",
-          suspended:
-            "This licence is temporarily suspended. Please contact your software provider.",
-          expired:
-            "This subscription is unpaid. Please clear the payment to continue.",
-          offline_expired:
-            "This device hasn't been able to reach the licence server for a while. Please connect to the internet once to continue.",
-        };
-        onboardError(
-          message || preset[reason] || "This licence is not active.",
-        );
-        const keyInput = document.getElementById("onboard-key-input");
-        if (keyInput) keyInput.value = licenseState.key || "";
+      function onboardError(message) {
+        const element = document.getElementById("onboard-error");
+        element.textContent = message; element.classList.remove("hidden");
       }
-
-      function onboardGoToBusinessStep() {
-        const key = (document.getElementById("onboard-key-input").value || "")
-          .trim()
-          .toUpperCase();
-        if (key.length < 8) {
-          onboardError("Please enter the full licence key.");
-          return;
-        }
-        licenseState.key = key;
-        // Prefill with whatever we already know, so a second device isn't retyping blind
-        document.getElementById("onboard-business-name").value =
-          licenseState.businessName || businessName || "";
-        document.getElementById("onboard-business-phone").value =
-          licenseState.contactNumber || businessPhone || "";
-        document.getElementById("onboard-business-address").value =
-          licenseState.address || businessAddress || "";
-        onboardShowStep(2);
-        onboardInfo(
-          "If this licence is already running on another device, type exactly the same details it uses.",
-        );
-      }
-
-      async function onboardActivate() {
-        const btn = document.getElementById("onboard-activate-btn");
-        const name = (
-          document.getElementById("onboard-business-name").value || ""
-        ).trim();
-        if (name === "") {
-          onboardError("Business name is required.");
-          return;
-        }
-
-        btn.disabled = true;
-        btn.innerText = "Activating…";
-        onboardHideError();
-
-        const result = await callLicenseApi("activate", {
-          license_key: licenseState.key,
-          device_uid: licenseState.deviceUid,
-          device_name:
-            (document.getElementById("onboard-business-name").value || "POS") +
-            " — " +
-            describeThisDevice(),
-          platform: describeThisDevice(),
-          app_version: APP_VERSION,
-          business_name: name,
-          contact_number: (
-            document.getElementById("onboard-business-phone").value || ""
-          ).trim(),
-          address: (
-            document.getElementById("onboard-business-address").value || ""
-          ).trim(),
-        });
-
-        btn.disabled = false;
-        btn.innerText = "🔓 Activate";
-
-        if (!result.ok) {
-          onboardError(describeLicenseConnectionProblem(result));
-          // Full detail for you, not for the customer's screen (F12 → Console)
-          console.warn(
-            "[Licence] " + result.reason + ": " + result.detail,
-            result.url || "",
-            result.error || "",
-          );
-          return;
-        }
-        if (!result.data.ok) {
-          onboardError(result.data.message || "Activation failed.");
-          return;
-        }
-
-        await applyLicenseResponse(result.data);
-        onboardShowStep(3);
-        onboardInfo(
-          "Activated for " + (result.data.business_name || name) + ".",
-        );
-      }
-
       async function onboardSavePin() {
-        const a = (document.getElementById("onboard-pin-1").value || "").trim();
-        const b = (document.getElementById("onboard-pin-2").value || "").trim();
-        if (!/^\d{4}$/.test(a)) {
-          onboardError("PIN must be exactly 4 digits.");
-          return;
-        }
-        if (a !== b) {
-          onboardError("The two PINs don't match.");
-          return;
-        }
-
-        systemPinCode = a;
-        await idbSet("pos_pin_code", systemPinCode);
-        await idbSet("pos_setup_done", true);
-
+        if (window.BILLZ_MANAGED) return;
+        const pin = document.getElementById("onboard-pin-1").value.trim();
+        const confirmation = document.getElementById("onboard-pin-2").value.trim();
+        const name = document.getElementById("onboard-business-name").value.trim();
+        if (!name) return onboardError("Business name is required.");
+        if (!/^\d{4,8}$/.test(pin)) return onboardError("PIN must be 4–8 digits.");
+        if (pin !== confirmation) return onboardError("The PINs do not match.");
+        systemPinCode = pin; businessName = name; businessNameProvided = true;
+        businessPhone = document.getElementById("onboard-business-phone").value.trim();
+        businessAddress = document.getElementById("onboard-business-address").value.trim();
+        await saveToStorage(); await idbSet("pos_setup_done", true);
+        document.getElementById("onboard-pin-1").value = ""; document.getElementById("onboard-pin-2").value = "";
+        applyBusinessNameEverywhere(); applyBusinessContactInfoToReceipt();
         document.getElementById("onboarding-overlay").classList.add("hidden");
-        safeStorageSet("biteTechUnlocked", "true", true);
-        showAppAfterUnlock();
-        renderLicenseSettingsPanel();
+        safeStorageSet("biteTechUnlocked", "true", true); showAppAfterUnlock();
       }
-
-      // ── Settings → Licence panel ────────────────────────────────────────────
-      function renderLicenseSettingsPanel() {
-        const box = document.getElementById("license-status-box");
-        if (!box) return;
-
-        const tone =
-          licenseState.status === "active"
-            ? { bg: "#f0fdf4", br: "#16a34a", fg: "#166534", label: "Active" }
-            : {
-                bg: "#fef2f2",
-                br: "#dc2626",
-                fg: "#7f1d1d",
-                label: licenseState.status || "Not activated",
-              };
-
-        box.innerHTML = `
-                <div style="background:${tone.bg}; border-left:4px solid ${tone.br}; padding:14px 16px; border-radius:8px;">
-                    <div style="font-weight:800; color:${tone.fg}; margin-bottom:6px;">Licence: ${escapeHtmlForExport(tone.label)}</div>
-                    <div style="font-size:13px; color:#475569; line-height:1.8;">
-                        <div><strong>Key:</strong> ${escapeHtmlForExport(licenseState.key || "—")}</div>
-                        <div><strong>This device:</strong> ${escapeHtmlForExport(licenseState.deviceUid.slice(0, 26))}</div>
-                        <div><strong>Last verified:</strong> ${escapeHtmlForExport(licenseState.lastCheckOk || "never")}</div>
-                        ${licenseState.message ? `<div style="color:#b91c1c;"><strong>Note:</strong> ${escapeHtmlForExport(licenseState.message)}</div>` : ""}
-                    </div>
-                </div>`;
-      }
-
-      async function checkLicenseNow() {
-        const btn = document.getElementById("license-check-btn");
-        if (btn) {
-          btn.disabled = true;
-          btn.innerText = "Checking…";
-        }
-        await runLicenseHeartbeat(true);
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = "🔄 Check licence now";
-        }
-        renderLicenseSettingsPanel();
-        if (licenseVerdict().allowed)
-          alert("✅ Licence verified — everything is in order.");
-      }
-
-      // 🔓 Hand this device's slot back, so the same key can be used on a replacement
-      // machine without you having to release it from the portal.
-      async function releaseThisDevice() {
-        if (
-          !confirm(
-            "Release this device from the licence?\n\nThe app will lock and need activating again. Use this before replacing or reinstalling on this computer.",
-          )
-        )
-          return;
-        await callLicenseApi("release", {
-          license_key: licenseState.key,
-          device_uid: licenseState.deviceUid,
-          device_token: licenseState.token,
-        });
-        licenseState.token = "";
-        licenseState.status = "none";
-        await saveLicenseState();
-        alert(
-          "This device has been released. The activation screen will now appear.",
-        );
-        showOnboarding();
-        onboardShowStep(1);
-      }
-
-
-
 
       let bootFinished = false;
 
@@ -19923,50 +18879,20 @@
           stockDateInput.max = todayStr;
         }
 
-        // 🔐 LICENCE GATE — must come before the PIN screen. A machine that has never
-        // been activated, or whose licence has been revoked, gets the activation screen
+        // Managed access is enforced by the authenticated server, not a local licence.
 
-        bootStep(5, "checking licence");
+        bootStep(5, "checking access");
         if (window.BILLZ_MANAGED) {
           hideBootSplash();
           showAppAfterUnlock();
           return;
         }
-        await loadLicenseState();
-        await seedLocalAccessCredentials();
-        renderLicenseSettingsPanel();
-
-        bootStep(6, "checking setup");
+        await seedDevelopmentPin();
+        bootStep(6, "checking local setup");
         const setupDone = await idbGet("pos_setup_done");
-        const verdict = licenseVerdict();
-
-        if (!verdict.allowed) {
-          hideBootSplash();
-          if (verdict.reason === "not_activated") {
-            showOnboarding();
-            onboardShowStep(1);
-          } else {
-            showOnboardingLock(verdict.reason, licenseState.message);
-          }
-          // Still try to reach the portal in the background: if the owner has just
-          // paid or the licence was reinstated, the screen clears on its own.
-          runLicenseHeartbeat().then(() => {
-            if (licenseVerdict().allowed) location.reload();
-          });
-          return;
+        if (!setupDone || !/^\d{4,8}$/.test(systemPinCode)) {
+          hideBootSplash(); showOnboarding(); return;
         }
-
-        // Activated, but setup never finished (e.g. closed before choosing a PIN)
-        if (!setupDone) {
-          hideBootSplash();
-          showOnboarding();
-          onboardShowStep(3);
-          return;
-        }
-
-        // 💓 Check in quietly in the background — never blocks opening the till
-        runLicenseHeartbeat();
-        setInterval(runLicenseHeartbeat, 6 * 60 * 60 * 1000); // every 6 hours
 
         // 🔒 Only skip the PIN screen if this exact browser session was already unlocked (i.e. this is a refresh, not a fresh open)
         bootStep(7, "opening");
