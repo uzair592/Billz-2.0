@@ -5,6 +5,7 @@ services:
     dockerfilePath: Dockerfile
     plan: starter
     healthCheckPath: /health/ready
+    preDeployCommand: node src/server/database/migration-runner.mjs && node database/ops/create-runtime-roles.mjs
     envVars:
       - key: NODE_ENV
         value: production
@@ -35,6 +36,10 @@ services:
       - key: TRUSTED_PROXY_CIDRS
         sync: false
       - key: CONTROL_DATABASE_URL
+        sync: false
+      - key: APP_DATABASE_PASSWORD
+        sync: false
+      - key: CONTROL_DATABASE_PASSWORD
         sync: false
 
 databases:

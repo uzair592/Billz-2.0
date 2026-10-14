@@ -73,9 +73,12 @@ export async function createServer({
     const appRole = (await database.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")).rows[0];
     const controlRole = (await controlDatabase.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")).rows[0];
     if (!appRole || appRole.rolsuper || appRole.rolbypassrls || !controlRole?.rolbypassrls || controlRole.rolsuper) {
+      logger.error?.({ message: "unsafe_runtime_database_role",
+        connection: !appRole || appRole.rolsuper || appRole.rolbypassrls ? "DATABASE_URL" : "CONTROL_DATABASE_URL",
+        detail: "DATABASE_URL requires a non-superuser NOBYPASSRLS role; CONTROL_DATABASE_URL requires a separate non-superuser BYPASSRLS role. Run database/ops/create-runtime-roles.mjs with the migration account." });
       if (!pool) await closeDatabasePool(database);
       if (!controlPool && controlDatabase !== database) await closeDatabasePool(controlDatabase);
-      throw new Error("Use a non-superuser NOBYPASSRLS POS role and a separate non-superuser BYPASSRLS control role.");
+      throw Object.assign(new Error("Set DATABASE_URL to a dedicated non-superuser NOBYPASSRLS POS role and CONTROL_DATABASE_URL to a separate non-superuser BYPASSRLS control role; run database/ops/create-runtime-roles.mjs with the migration account."), { code: "UNSAFE_DATABASE_ROLE" });
     }
   }
 

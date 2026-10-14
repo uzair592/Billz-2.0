@@ -45,9 +45,9 @@ test("static assets reject decoded traversal and symlink escapes", async t => {
 test("forged forwarded IPs cannot bypass the direct-server login limit", async t => {
   const app = await buildHttpApp({ authService: { login: async () => { throw Object.assign(new Error("Invalid"),{ code:"INVALID_CREDENTIALS" }) } }, trustedOrigin:"http://localhost:3000", serveClient:false });
   t.after(() => app.close());
-  for (let n=0;n<11;n++) {
+  for (let n=0;n<101;n++) {
     const res = await app.inject({ method:"POST",url:"/api/auth/login",headers:{"x-forwarded-for":`198.51.100.${n}`},payload:{email:`test${n}@example.com`,password:"long-password"} });
-    assert.equal(res.statusCode,n<10?401:429);
+    assert.equal(res.statusCode,n<100?401:429);
   }
 });
 test("authentication DTO strips credential fields even from a repository-shaped session", async t => {

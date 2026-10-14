@@ -3,6 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import pg from "pg";
+import { parseSslConfig } from "./pool.mjs";
 
 /**
  * Production migration runner.
@@ -10,8 +11,8 @@ import pg from "pg";
  * Safety properties:
  *  * Migrations are applied in filename order.
  *  * A PostgreSQL advisory lock guarantees two instances cannot migrate
- *    concurrently; the second waits, then re-reads the history table and
- *    exits cleanly if the work is already done.
+ *    concurrently; the second fails with MIGRATION_LOCK_BUSY and can be
+ *    retried after the first release completes.
  *  * Every applied migration is recorded with a SHA-256 checksum. If an
  *    already-applied migration's content changes, the run refuses to
  *    continue — a drifted migration must never be silently re-applied.
@@ -26,6 +27,13 @@ import pg from "pg";
 
 const MIGRATIONS_TABLE = "schema_migrations";
 const ADVISORY_LOCK_KEY = 724_191_312; // arbitrary stable key for this project
+
+export function createMigrationPool(env = process.env) {
+  const databaseUrl = env.MIGRATION_DATABASE_URL || env.DATABASE_URL;
+  if (!databaseUrl) throw Object.assign(new Error("MIGRATION_DATABASE_URL is required (DATABASE_URL remains a legacy fallback)."), { code: "CONFIGURATION_INVALID" });
+  const ssl = parseSslConfig(env);
+  return new pg.Pool({ connectionString: databaseUrl, max: 1, ...(ssl ? { ssl } : {}) });
+}
 
 function checksum(sql) {
   return createHash("sha256").update(sql, "utf8").digest("hex");
@@ -213,15 +221,15 @@ const invokedDirectly = process.argv[1]
 if (invokedDirectly) {
   const migrationsDir = process.env.MIGRATIONS_DIR
     ?? path.join(process.cwd(), "database", "migrations");
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
+  let pool;
+  try { pool = createMigrationPool(); }
+  catch (error) {
     console.error(JSON.stringify({
       message: "migration_run_failed",
-      error: "DATABASE_URL is required.",
+      error: error.message,
     }));
     process.exit(1);
   }
-  const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   runMigrations({ pool, migrationsDir })
     .then(() => pool.end())
     .catch((error) => {

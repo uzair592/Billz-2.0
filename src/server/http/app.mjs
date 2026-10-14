@@ -18,6 +18,7 @@ import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
 import { createStaticFileHandler } from "./static-files.mjs";
 import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
+import { failedAuthLimit } from "./failed-auth-limit.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
@@ -629,7 +630,7 @@ export async function buildHttpApp({
 
   app.post(
     "/api/auth/verify-email",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    failedAuthLimit(app, { max: 10, scope: "verify-email" }),
     async (request, reply) => {
       const input = verificationSchema.parse(request.body);
       const session = await authService.verifyEmail({
@@ -643,7 +644,9 @@ export async function buildHttpApp({
 
   app.post(
     "/api/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
+    // Staff devices share a public IP. A broad 100-attempt cap permits shift
+    // changes; the durable account/IP throttle delays password guessing.
+    { config: { rateLimit: { max: 100, timeWindow: "15 minutes" } } },
     async (request, reply) => {
       const input = loginSchema.parse(request.body);
       const attempt = { scope: "restaurant", ...input, password: undefined, ipAddress: request.ip };
@@ -696,7 +699,7 @@ export async function buildHttpApp({
 
   app.get("/api/public/config", async () => ({ supportContact }));
 
-  app.post("/api/auth/change-password", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
+  app.post("/api/auth/change-password", failedAuthLimit(app, { max: 5, scope: "change-password" }), async (request, reply) => {
     const sessionToken = request.cookies[SESSION_COOKIE_NAME];
     const session = await authService.authenticate(sessionToken);
     if (!session) return reply.code(401).send({ error: "Authentication is required.", code: "UNAUTHENTICATED" });

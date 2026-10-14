@@ -234,9 +234,12 @@ export function loadServerConfiguration(env = process.env) {
     if (!version || extra !== undefined || (prefix !== undefined && (!/^\d+$/.test(prefix) || Number(prefix) > (version === 4 ? 32 : 128)))) {
       throw configurationError("TRUSTED_PROXY_CIDRS must contain valid IP addresses or CIDRs.");
     }
+    if (prefix !== undefined && Number(prefix) === 0) {
+      throw configurationError("TRUSTED_PROXY_CIDRS must not trust every client (0.0.0.0/0 or ::/0). List only verified ingress proxies.");
+    }
   }
   if (trustProxyEnabled && !trustedProxyCidrs.length) {
-    throw configurationError("TRUSTED_PROXY_CIDRS is required when TRUST_PROXY=true. List only verified platform proxy IPs/CIDRs.");
+    throw configurationError("Set TRUSTED_PROXY_CIDRS to the verified ingress proxy IPs/CIDRs when TRUST_PROXY=true (for a local reverse proxy: 127.0.0.1/32,::1/128). Otherwise set TRUST_PROXY=false. Never use 0.0.0.0/0 or ::/0. See docs/DEPLOY_FROM_ZERO.md.");
   }
 
   return Object.freeze({
