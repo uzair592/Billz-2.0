@@ -545,6 +545,19 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           throw err;
         }
 
+        const manualPrice = (
+          await client.query(
+            "SELECT currency_code FROM plan_prices WHERE plan_id=$1 AND provider='manual' AND is_active ORDER BY created_at DESC LIMIT 1",
+            [plan.id],
+          )
+        ).rows[0];
+        if (manualPrice && manualPrice.currency_code !== currencyCode) {
+          throw controlError(
+            "Payment currency must match the plan's current manual price.",
+            "PAYMENT_CURRENCY_MISMATCH", 400,
+          );
+        }
+
         await client.query(
           `INSERT INTO manual_payments (
              id, restaurant_id, plan_id, amount_minor, currency_code, payment_date,
@@ -635,10 +648,16 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
 
         // Lock existing subscription FOR UPDATE
         const subResult = await client.query(
-          `SELECT id, current_period_end, status FROM subscriptions WHERE restaurant_id = $1 AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+          `SELECT id, current_period_end, status, provider FROM subscriptions WHERE restaurant_id = $1 AND status <> 'cancelled' ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
           [payment.restaurant_id],
         );
         const existingSub = subResult.rows[0];
+        if (existingSub?.provider && existingSub.provider !== "manual") {
+          throw controlError(
+            "Provider-managed subscriptions must be changed through their billing provider.",
+            "PROVIDER_MANAGED", 409,
+          );
+        }
 
         // Documented Policy: Renewal begins from the later of current expiry or payment coverage start
         let periodStart = new Date(payment.covered_from);

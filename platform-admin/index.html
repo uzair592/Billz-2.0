@@ -76,9 +76,16 @@
             </article>
           </div>
           <div class="stats">
-            <article class="stat"><span>Active plans</span><strong id="stat-plans">—</strong></article>
-            <article class="stat"><span>Active trials</span><strong id="stat-trials">—</strong></article>
-            <article class="stat"><span>Expiring in 7 days</span><strong id="stat-expiring">—</strong></article>
+            <article class="stat">
+              <span>Active plans</span><strong id="stat-plans">—</strong>
+            </article>
+            <article class="stat">
+              <span>Active trials</span><strong id="stat-trials">—</strong>
+            </article>
+            <article class="stat">
+              <span>Expiring in 7 days</span
+              ><strong id="stat-expiring">—</strong>
+            </article>
           </div>
           <article class="card">
             <h2>Restaurant operations</h2>
@@ -157,16 +164,76 @@
           </div>
           <div id="detail-content"></div>
         </section>
-        <section id="plans-page" class="hidden"><article class="card">
-          <div class="section-heading"><div><h2>Subscription plans</h2><p class="muted">Set prices, billing periods and concurrent device allowances. Historical prices are preserved.</p></div><button id="new-plan-btn" class="btn">+ Create plan</button></div>
-          <div class="table-wrap"><table><thead><tr><th>Plan</th><th>Price / period</th><th>Devices</th><th>Trial days</th><th>Status</th><th>Actions</th></tr></thead><tbody id="plans-tbody"></tbody></table></div>
-          <div class="pager"><span id="plan-page-info"></span><div><button id="plan-prev" class="btn secondary">Previous</button><button id="plan-next" class="btn secondary">Next</button></div></div>
-        </article></section>
+        <section id="plans-page" class="hidden">
+          <article class="card">
+            <div class="section-heading">
+              <div>
+                <h2>Subscription plans</h2>
+                <p class="muted">
+                  Set prices, billing periods and concurrent device allowances.
+                  Historical prices are preserved.
+                </p>
+              </div>
+              <button id="new-plan-btn" class="btn">+ Create plan</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plan</th>
+                    <th>Price / period</th>
+                    <th>Devices</th>
+                    <th>Trial days</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="plans-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="plan-page-info"></span>
+              <div>
+                <button id="plan-prev" class="btn secondary">Previous</button
+                ><button id="plan-next" class="btn secondary">Next</button>
+              </div>
+            </div>
+          </article>
+        </section>
         <section id="payments-page" class="hidden">
-          <article class="card"><h2>Payment review queue</h2><p class="muted">Review manual payments across all restaurants.</p>
-            <label for="payment-filter">Status<select id="payment-filter"><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="all">All</option></select></label>
-            <div class="table-wrap"><table><thead><tr><th>Restaurant</th><th>Reference / plan</th><th>Amount</th><th>Status</th><th>Coverage</th><th>Actions</th></tr></thead><tbody id="payments-tbody"></tbody></table></div>
-            <div class="pager"><span id="payment-page-info"></span><div><button id="payment-prev" class="btn secondary">Previous</button><button id="payment-next" class="btn secondary">Next</button></div></div>
+          <article class="card">
+            <h2>Payment review queue</h2>
+            <p class="muted">Review manual payments across all restaurants.</p>
+            <label for="payment-filter"
+              >Status<select id="payment-filter">
+                <option value="pending">Pending</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="all">All</option>
+              </select></label
+            >
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Restaurant</th>
+                    <th>Reference / plan</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Coverage</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="payments-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="payment-page-info"></span>
+              <div>
+                <button id="payment-prev" class="btn secondary">Previous</button
+                ><button id="payment-next" class="btn secondary">Next</button>
+              </div>
+            </div>
           </article>
         </section>
         <section id="audits-page" class="hidden">
@@ -213,7 +280,9 @@
     <dialog id="create-modal">
       <form id="create-restaurant-form">
         <h2>Create restaurant</h2>
-        <p class="muted">Create an owner account with the selected plan's trial allowance.</p>
+        <p class="muted">
+          Create an owner account with the selected plan's trial allowance.
+        </p>
         <div id="create-error" class="error hidden" role="alert"></div>
         <label for="create-name">Restaurant name</label
         ><input id="create-name" required maxlength="160" />
@@ -236,9 +305,17 @@
           maxlength="200"
           autocomplete="new-password"
         />
-        <label for="create-owner-email">Owner login email (optional)</label><input id="create-owner-email" type="email" maxlength="320" autocomplete="off" />
-        <label for="create-phone">Contact phone</label><input id="create-phone" maxlength="40" />
-        <label for="create-plan">Subscription plan</label><select id="create-plan" required></select>
+        <label for="create-owner-email">Owner login email (optional)</label
+        ><input
+          id="create-owner-email"
+          type="email"
+          maxlength="320"
+          autocomplete="off"
+        />
+        <label for="create-phone">Contact phone</label
+        ><input id="create-phone" maxlength="40" />
+        <label for="create-plan">Subscription plan</label
+        ><select id="create-plan" required></select>
         <div class="dialog-actions">
           <button type="button" id="cancel-create-btn" class="btn secondary">
             Cancel</button
@@ -251,8 +328,11 @@
         <h2>Edit restaurant</h2>
         <label for="edit-name">Name</label
         ><input id="edit-name" required maxlength="160" />
-        <label for="edit-code">Restaurant login code</label><input id="edit-code" required minlength="2" maxlength="64" />
-        <p class="muted">Changing the code signs out restaurant users on all devices.</p>
+        <label for="edit-code">Restaurant login code</label
+        ><input id="edit-code" required minlength="2" maxlength="64" />
+        <p class="muted">
+          Changing the code signs out restaurant users on all devices.
+        </p>
         <label for="edit-phone">Contact phone</label
         ><input id="edit-phone" maxlength="40" />
         <label for="edit-email">Contact email</label
@@ -266,15 +346,48 @@
         </div>
       </form>
     </dialog>
-    <dialog id="user-modal"><form id="user-form">
-      <h2 id="user-modal-title">Create user</h2>
-      <label for="user-username">Username</label><input id="user-username" required minlength="2" maxlength="64" autocomplete="off" />
-      <label for="user-display-name">Display name</label><input id="user-display-name" required maxlength="120" />
-      <label for="user-role">Role</label><select id="user-role"><option value="cashier">Cashier</option><option value="manager">Manager</option><option value="waiter">Waiter</option><option value="kitchen">Kitchen</option><option value="accountant">Accountant</option><option value="owner">Owner</option></select>
-      <label id="user-password-label" for="user-password">Password (10–200 characters)</label><input id="user-password" type="password" minlength="10" maxlength="200" autocomplete="new-password" />
-      <p class="muted">Changing a username signs out all of that user's sessions. Use Reset password to change their password.</p>
-      <div class="dialog-actions"><button type="button" data-close="user-modal" class="btn secondary">Cancel</button><button type="submit" class="btn">Save user</button></div>
-    </form></dialog>
+    <dialog id="user-modal">
+      <form id="user-form">
+        <h2 id="user-modal-title">Create user</h2>
+        <label for="user-username">Username</label
+        ><input
+          id="user-username"
+          required
+          minlength="2"
+          maxlength="64"
+          autocomplete="off"
+        />
+        <label for="user-display-name">Display name</label
+        ><input id="user-display-name" required maxlength="120" />
+        <label for="user-role">Role</label
+        ><select id="user-role">
+          <option value="cashier">Cashier</option>
+          <option value="manager">Manager</option>
+          <option value="waiter">Waiter</option>
+          <option value="kitchen">Kitchen</option>
+          <option value="accountant">Accountant</option>
+          <option value="owner">Owner</option>
+        </select>
+        <label id="user-password-label" for="user-password"
+          >Password (10–200 characters)</label
+        ><input
+          id="user-password"
+          type="password"
+          minlength="10"
+          maxlength="200"
+          autocomplete="new-password"
+        />
+        <p class="muted">
+          Changing a username signs out all of that user's sessions. Use Reset
+          password to change their password.
+        </p>
+        <div class="dialog-actions">
+          <button type="button" data-close="user-modal" class="btn secondary">
+            Cancel</button
+          ><button type="submit" class="btn">Save user</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="reset-modal">
       <form id="reset-password-form">
         <h2>Reset user password</h2>
@@ -300,32 +413,139 @@
         </div>
       </form>
     </dialog>
-    <dialog id="plan-modal"><form id="plan-form"><h2 id="plan-modal-title">Create subscription plan</h2>
-      <label for="plan-name">Plan name</label><input id="plan-name" required maxlength="160" />
-      <label for="plan-code">Plan code</label><input id="plan-code" required maxlength="64" pattern="[A-Za-z][A-Za-z0-9_]*" />
-      <label for="plan-interval">Billing period</label><select id="plan-interval"><option value="month">Monthly</option><option value="quarter">Quarterly (3 months)</option><option value="year">Yearly (12 months)</option><option value="trial">Custom trial</option></select>
-      <div class="form-grid"><label>Price<input id="plan-price" type="number" min="0" step="0.01" required /></label><label>Currency<input id="plan-currency" required maxlength="3" pattern="[A-Za-z]{3}" value="PKR" /></label>
-      <label>Concurrent devices<input id="plan-devices" type="number" min="1" max="1000" required /></label><label>Trial days<input id="plan-trial-days" type="number" min="1" max="3650" required /></label></div>
-      <label class="check"><input id="plan-active" type="checkbox" checked /> Available for new assignments</label>
-      <p class="muted">Each active login session counts as a device; tabs sharing that session use one slot. Lowering a limit keeps the most recently used sessions and signs out the excess.</p>
-      <div class="dialog-actions"><button type="button" data-close="plan-modal" class="btn secondary">Cancel</button><button type="submit" class="btn">Save plan</button></div>
-    </form></dialog>
-    <dialog id="owner-credentials-modal"><form id="owner-credentials-form"><h2>Manage owner credentials</h2><p id="owner-credentials-context" class="muted"></p>
-      <label for="owner-login-email">Login email</label><input id="owner-login-email" type="email" maxlength="320" />
-      <label for="owner-new-password">New password (leave blank to retain)</label><input id="owner-new-password" type="password" minlength="10" maxlength="200" autocomplete="new-password" />
-      <label class="check"><input id="owner-generate-password" type="checkbox" /> Generate a strong temporary password on the server</label>
-      <label for="owner-credential-reason">Audit reason</label><input id="owner-credential-reason" required maxlength="1000" />
-      <p class="muted">The owner can sign in with their username or login email. All owner sessions are revoked when credentials change.</p>
-      <div class="dialog-actions"><button type="button" data-close="owner-credentials-modal" class="btn secondary">Cancel</button><button type="submit" class="btn danger">Update credentials</button></div>
-    </form></dialog>
-    <dialog id="subscription-modal"><form id="subscription-form"><h2>Assign plan / renew subscription</h2>
-      <label for="subscription-plan">Active plan</label><select id="subscription-plan" required></select>
-      <label for="subscription-mode">Action</label><select id="subscription-mode"><option value="renew">Assign / renew for one billing period</option><option value="trial">Start / extend custom trial</option></select>
-      <label for="subscription-expiry">Expiry date (UTC, optional)</label><input id="subscription-expiry" type="date" />
-      <label for="subscription-reason">Audit reason</label><input id="subscription-reason" required maxlength="1000" />
-      <p class="muted">Renewal starts at the later of now or the existing expiry. This is an audited access adjustment; record payments separately. An administrative suspension stays in place.</p>
-      <div class="dialog-actions"><button type="button" data-close="subscription-modal" class="btn secondary">Cancel</button><button type="submit" class="btn">Confirm assignment</button></div>
-    </form></dialog>
+    <dialog id="plan-modal">
+      <form id="plan-form">
+        <h2 id="plan-modal-title">Create subscription plan</h2>
+        <label for="plan-name">Plan name</label
+        ><input id="plan-name" required maxlength="160" />
+        <label for="plan-code">Plan code</label
+        ><input
+          id="plan-code"
+          required
+          maxlength="64"
+          pattern="[A-Za-z][A-Za-z0-9_]*"
+        />
+        <label for="plan-interval">Billing period</label
+        ><select id="plan-interval">
+          <option value="month">Monthly</option>
+          <option value="quarter">Quarterly (3 months)</option>
+          <option value="year">Yearly (12 months)</option>
+          <option value="trial">Custom trial</option>
+        </select>
+        <div class="form-grid">
+          <label
+            >Price<input
+              id="plan-price"
+              type="number"
+              min="0"
+              step="0.01"
+              required /></label
+          ><label
+            >Currency<input
+              id="plan-currency"
+              required
+              maxlength="3"
+              pattern="[A-Za-z]{3}"
+              value="PKR"
+          /></label>
+          <label
+            >Concurrent devices<input
+              id="plan-devices"
+              type="number"
+              min="1"
+              max="1000"
+              required /></label
+          ><label
+            >Trial days<input
+              id="plan-trial-days"
+              type="number"
+              min="1"
+              max="3650"
+              required
+          /></label>
+        </div>
+        <label class="check"
+          ><input id="plan-active" type="checkbox" checked /> Available for new
+          assignments</label
+        >
+        <p class="muted">
+          Each active login session counts as a device; tabs sharing that
+          session use one slot. Lowering a limit keeps the most recently used
+          sessions and signs out the excess.
+        </p>
+        <div class="dialog-actions">
+          <button type="button" data-close="plan-modal" class="btn secondary">
+            Cancel</button
+          ><button type="submit" class="btn">Save plan</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="owner-credentials-modal">
+      <form id="owner-credentials-form">
+        <h2>Manage owner credentials</h2>
+        <p id="owner-credentials-context" class="muted"></p>
+        <label for="owner-login-email">Login email</label
+        ><input id="owner-login-email" type="email" maxlength="320" />
+        <label for="owner-new-password"
+          >New password (leave blank to retain)</label
+        ><input
+          id="owner-new-password"
+          type="password"
+          minlength="10"
+          maxlength="200"
+          autocomplete="new-password"
+        />
+        <label class="check"
+          ><input id="owner-generate-password" type="checkbox" /> Generate a
+          strong temporary password on the server</label
+        >
+        <label for="owner-credential-reason">Audit reason</label
+        ><input id="owner-credential-reason" required maxlength="1000" />
+        <p class="muted">
+          The owner can sign in with their username or login email. All owner
+          sessions are revoked when credentials change.
+        </p>
+        <div class="dialog-actions">
+          <button
+            type="button"
+            data-close="owner-credentials-modal"
+            class="btn secondary"
+          >
+            Cancel</button
+          ><button type="submit" class="btn danger">Update credentials</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="subscription-modal">
+      <form id="subscription-form">
+        <h2>Assign plan / renew subscription</h2>
+        <label for="subscription-plan">Active plan</label
+        ><select id="subscription-plan" required></select>
+        <label for="subscription-mode">Action</label
+        ><select id="subscription-mode">
+          <option value="renew">Assign / renew for one billing period</option>
+          <option value="trial">Start / extend custom trial</option>
+        </select>
+        <label for="subscription-expiry">Expiry date (UTC, optional)</label
+        ><input id="subscription-expiry" type="date" />
+        <label for="subscription-reason">Audit reason</label
+        ><input id="subscription-reason" required maxlength="1000" />
+        <p class="muted">
+          Renewal starts at the later of now or the existing expiry. This is an
+          audited access adjustment; record payments separately. An
+          administrative suspension stays in place.
+        </p>
+        <div class="dialog-actions">
+          <button
+            type="button"
+            data-close="subscription-modal"
+            class="btn secondary"
+          >
+            Cancel</button
+          ><button type="submit" class="btn">Confirm assignment</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="confirm-dialog">
       <h2 id="confirm-title">Confirm action</h2>
       <p id="confirm-message"></p>
