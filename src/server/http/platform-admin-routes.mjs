@@ -6,7 +6,8 @@ const PLATFORM_COOKIE_NAME = "platform_admin_session";
 
 const adminLoginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: passwordSchema,
+  password: z.string().min(1).max(200),
+  code: z.string().max(64).optional(),
 });
 
 const createRestaurantSchema = z.object({
@@ -177,6 +178,7 @@ export async function registerPlatformAdminRoutes(
     platformAdminPortalService,
     secureCookies = true,
     loginThrottle = null,
+    platformAdminMfaService = null,
   },
 ) {
   // Authentication Guard Helper for Platform Admin Routes
@@ -219,6 +221,7 @@ export async function registerPlatformAdminRoutes(
         const session = await platformAdminService.login({
           username: input.username,
           password: input.password,
+          code: input.code,
           ipAddress: request.ip,
           userAgent: request.headers["user-agent"] ?? null,
         });
@@ -278,6 +281,26 @@ export async function registerPlatformAdminRoutes(
   app.get("/platform-admin/api/dashboard", async () => {
     return platformAdminPortalService.getDashboardStats();
   });
+
+  if (platformAdminMfaService) {
+    const credentials = z.object({ currentPassword: z.string().min(1).max(200) }).strict();
+    const verification = z.object({ enrollmentId: z.uuid(), code: z.string().regex(/^\d{6}$/) }).strict();
+    const confirmation = credentials.extend({ code: z.string().regex(/^\d{6}$/) }).strict();
+    const identity = request => ({ adminId: request.adminSession.admin.id, sessionToken: request.cookies[PLATFORM_COOKIE_NAME] });
+    app.get("/platform-admin/api/security/2fa", async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      return platformAdminMfaService.status(identity(request));
+    });
+    for (const [path, method, schema] of [
+      ["start", "start", credentials], ["verify", "enable", verification],
+      ["disable", "disable", confirmation], ["recovery-codes", "regenerate", confirmation],
+    ]) app.post(`/platform-admin/api/security/2fa/${path}`,
+      path === "start" ? { config: { rateLimit: { max: 5, timeWindow: "15 minutes", keyGenerator: request => request.adminSession?.admin.id || request.ip } } }
+        : failedAuthLimit(app, { max: 5, scope: `admin-2fa-${path}` }), async (request, reply) => {
+        reply.header("Cache-Control", "no-store");
+        return platformAdminMfaService[method]({ ...identity(request), ...schema.parse(request.body) });
+      });
+  }
 
   app.get("/platform-admin/api/plans", async (request) => {
     const q = planQuery.parse(request.query);

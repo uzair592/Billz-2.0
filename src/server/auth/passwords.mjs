@@ -24,10 +24,16 @@ export async function hashPassword(password, pepper) {
 }
 
 export async function verifyPassword(hash, password, pepper) {
-  if (typeof hash !== "string" || !hash.startsWith("$argon2id$")) return false;
+  if (typeof password !== "string" || !password.length || password.length > 200 || typeof pepper !== "string" || pepper.length < 16) return false;
+  const realHash = typeof hash === "string" && hash.startsWith("$argon2id$");
   try {
-    return await argon2.verify(hash, passwordMaterial(password, pepper));
+    // Setting passwords still requires 10 characters. Verification accepts
+    // legacy passwords and spends Argon2 work even for an absent account.
+    if (!realHash) hash = await (dummyHash ??= hashPassword("dummy-authentication-password", pepper));
+    const valid = await argon2.verify(hash, `${password}\u0000${pepper}`);
+    return realHash && valid;
   } catch {
     return false;
   }
 }
+let dummyHash;

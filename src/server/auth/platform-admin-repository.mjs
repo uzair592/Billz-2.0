@@ -9,6 +9,7 @@ function mapAdmin(row) {
     displayName: row.display_name,
     status: row.status,
     passwordHash: row.password_hash,
+    totpEnabled: Boolean(row.totp_enabled),
   };
 }
 
@@ -25,15 +26,23 @@ export function createPlatformAdminRepository(pool) {
         `INSERT INTO platform_administrators (id, username, normalized_username, password_hash, display_name)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, username, display_name, status, password_hash`,
-        [id, String(username).trim(), normUsername, passwordHash, String(displayName).trim()],
+        [
+          id,
+          String(username).trim(),
+          normUsername,
+          passwordHash,
+          String(displayName).trim(),
+        ],
       );
       return mapAdmin(result.rows[0]);
     },
 
     async findAdminByUsername(username) {
-      const normUsername = String(username ?? "").trim().toLowerCase();
+      const normUsername = String(username ?? "")
+        .trim()
+        .toLowerCase();
       const result = await pool.query(
-        `SELECT id, username, display_name, status, password_hash
+        `SELECT id, username, display_name, status, password_hash, totp_enabled
            FROM platform_administrators
           WHERE normalized_username = $1`,
         [normUsername],
@@ -41,7 +50,13 @@ export function createPlatformAdminRepository(pool) {
       return mapAdmin(result.rows[0]);
     },
 
-    async createAdminSession({ adminId, tokenHash, ipAddress, userAgent, expiresAt }) {
+    async createAdminSession({
+      adminId,
+      tokenHash,
+      ipAddress,
+      userAgent,
+      expiresAt,
+    }) {
       await pool.query(
         `INSERT INTO platform_admin_sessions (admin_id, token_hash, ip_address, user_agent, expires_at)
          VALUES ($1, $2, $3, $4, $5)`,
@@ -51,7 +66,7 @@ export function createPlatformAdminRepository(pool) {
 
     async findActiveAdminSession(tokenHash, now) {
       const result = await pool.query(
-        `SELECT s.admin_id, s.expires_at, a.id, a.username, a.display_name, a.status, a.password_hash
+        `SELECT s.admin_id, s.expires_at, a.id, a.username, a.display_name, a.status, a.password_hash, a.totp_enabled
            FROM platform_admin_sessions s
            JOIN platform_administrators a ON a.id = s.admin_id
           WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2 AND a.status = 'active'`,
@@ -59,6 +74,54 @@ export function createPlatformAdminRepository(pool) {
       );
       const row = result.rows[0];
       return row ? { admin: mapAdmin(row), expiresAt: row.expires_at } : null;
+    },
+
+    async completeAdminLogin({
+      adminId,
+      expectedPasswordHash,
+      tokenHash,
+      ipAddress,
+      userAgent,
+      expiresAt,
+      verifyMfa,
+    }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const row = (
+          await client.query(
+            "SELECT * FROM platform_administrators WHERE id=$1 FOR UPDATE",
+            [adminId],
+          )
+        ).rows[0];
+        if (
+          !row ||
+          row.status !== "active" ||
+          row.password_hash !== expectedPasswordHash
+        ) {
+          throw Object.assign(new Error("Invalid administrator credentials."), {
+            code: "INVALID_ADMIN_CREDENTIALS",
+            statusCode: 401,
+          });
+        }
+        await verifyMfa(client, row);
+        await client.query(
+          `INSERT INTO platform_admin_sessions(admin_id,token_hash,ip_address,user_agent,expires_at)
+          VALUES($1,$2,$3,$4,$5)`,
+          [adminId, tokenHash, ipAddress, userAgent, expiresAt],
+        );
+        await client.query(
+          `INSERT INTO audit_logs(actor_admin_id,actor_type,action,resource_type,resource_id,metadata)
+          VALUES($1,'platform_admin','platform_admin.login','platform_administrator',$1,'{}')`,
+          [adminId],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async revokeAdminSession(tokenHash, now) {
@@ -69,11 +132,25 @@ export function createPlatformAdminRepository(pool) {
       );
     },
 
-    async recordAuditLog({ restaurantId = null, adminId, action, resourceType, resourceId = null, metadata = {} }) {
+    async recordAuditLog({
+      restaurantId = null,
+      adminId,
+      action,
+      resourceType,
+      resourceId = null,
+      metadata = {},
+    }) {
       await pool.query(
         `INSERT INTO audit_logs (restaurant_id, actor_admin_id, actor_type, action, resource_type, resource_id, metadata)
          VALUES ($1, $2, 'platform_admin', $3, $4, $5, $6)`,
-        [restaurantId, adminId, action, resourceType, resourceId, JSON.stringify(metadata)],
+        [
+          restaurantId,
+          adminId,
+          action,
+          resourceType,
+          resourceId,
+          JSON.stringify(metadata),
+        ],
       );
     },
   });

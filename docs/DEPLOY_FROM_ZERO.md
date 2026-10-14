@@ -41,6 +41,7 @@ Use the hosting secret manager. Generate independent 32-byte random values for t
 | `TRUST_PROXY` | `true` only with the verified ingress allowlist below; otherwise `false` |
 | `TRUSTED_PROXY_CIDRS` | Exact verified ingress proxy IPs/CIDRs; never all networks |
 | `PAYMENT_PROVIDER` | `manual`; leave Stripe credentials unset |
+| `PLATFORM_ADMIN_ALLOWED_IPS` | Optional comma-separated IP/CIDR allowlist for administrator HTML/API; verified proxy configuration is required |
 | `SUPPORT_CONTACT` | Actual support phone/email or instructions visible to customers |
 | `LOG_LEVEL` | `info` |
 
@@ -126,3 +127,9 @@ CI verifies clean PostgreSQL migrations, restricted-role isolation, authenticati
 - Restore into a separate database, reapply runtime grants and validate counts, logins and reports before switching connection secrets/traffic. Preserve the pepper/session secrets required by the restored data. Do not blindly rotate them during rollback.
 
 Reference: [Render deploy lifecycle](https://render.com/docs/deploys), [Blueprint pre-deploy command](https://render.com/docs/blueprint-spec), [Render database credentials](https://render.com/docs/postgresql-credentials), [PostgreSQL 17 role attributes](https://www.postgresql.org/docs/17/role-attributes.html).
+
+## Administrator 2FA
+
+Apply migration 022 before upgrading. Enroll from the Security tab using the current password. The authenticator URI and recovery codes are returned once with no-store and cleared on navigation; save codes before verifying. Enrollment expires after ten minutes and requires a valid authenticator code before it becomes active. Codes use RFC 6238, 30-second steps and a one-step clock window; a successfully used step cannot be replayed. Wait for a fresh step for subsequent sensitive changes. Recovery codes are single-use; replacing them requires password and a fresh authenticator code. Enabling/disabling signs out other admin sessions.
+
+Secrets are AES-256-GCM encrypted with a key derived from SESSION_SECRET and bound to the admin ID. Recovery codes are hashed. Preserve SESSION_SECRET across restarts; rotation without re-enrollment/key migration makes old encrypted credentials unreadable. No endpoint returns active secrets. PLATFORM_ADMIN_ALLOWED_IPS protects static admin assets and API using the verified request IP and returns 404 to others. Unknown/unverified proxies cannot supply trusted forwarding headers. New passwords and resets still require 10 characters; older passwords are accepted for verification only.
