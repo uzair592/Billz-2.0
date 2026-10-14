@@ -98,181 +98,183 @@ Numeric arithmetic, `.toFixed()` output, literal status/class/color choices, and
 | HTML:14773 | `populateLedgerMovementDestinations` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
 | HTML:14797 | `transferLedgerFunds` | `from.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
 | HTML:14797 | `transferLedgerFunds` | `to.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:15540 | `populateDineInTableSelect` | `select.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:15562 | `populateHallSelect` | `select.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:15606 | `renderHallsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:15609 | `renderHallsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:15733 | `setPaymentStatus` | `document.getElementById("balance-preview").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:15756 | `populatePaymentBankAccounts` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:15807 | `renderCart` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:15812 | `renderCart` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:15862 | `renderCart` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:15977 | `populateCartExtraIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:16025 | `updateCartExtraCostPreview` | `document.getElementById("cart-extra-cost-preview").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16107 | `renderCartExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16113 | `renderCartExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16152 | `renderAdditionalCharges` | `rows.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:16158 | `renderAdditionalCharges` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16188 | `renderAdditionalChargeSummary` | `target.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:16246 | `calculateCartTotal` | `balancePreview.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16248 | `calculateCartTotal` | `balancePreview.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16251 | `calculateCartTotal` | `balancePreview.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:16649 | `populateCustomerReceiptSlip` | `printCharges.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16662 | `populateCustomerReceiptSlip` | `printTbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:16674 | `populateCustomerReceiptSlip` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:16720 | `populateKitchenReceiptSlip` | `kTbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:16731 | `populateKitchenReceiptSlip` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:17612 | `openStockUnitSetup` | `overlay.innerHTML` | Retained: constant markup/text only. |
-| HTML:17856 | `openCancelOrderModal` | `document.getElementById("cancel-order-modal-content").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:18272 | `submitOrder` | `document.getElementById("balance-preview").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:18328 | `renderPinDots` | `display.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:18771 | `<listener>` | `t.innerHTML` | Retained: constant markup/text only. |
-| HTML:18791 | `showBootFailure` | `document.getElementById("boot-splash-text").innerHTML` | Retained: constant markup/text only. |
-| HTML:19123 | `renderFoodGridOrderingUI` | `grid.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:19244 | `renderFoodGridOrderingUI` | `card.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:19633 | `renderCategoryOffersCheckboxList` | `list.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:19649 | `renderCategoryOffersCheckboxList` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:19752 | `renderManagementMenuTable` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:19793 | `renderManagementMenuTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:19883 | `renderManagementMenuTable` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:19900 | `populateFormCategoryDropdown` | `select.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:19963 | `populateManagementCategoryFilter` | `select.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:20191 | `filterDealComponentDropdown` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:20278 | `renderDealComponentsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:20282 | `renderDealComponentsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:20347 | `renderManualRecipeFields` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:20511 | `openCostFieldsModal` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21198 | `toggleDashboardAmounts` | `btn.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:21243 | `renderDashboardLowStockList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21316 | `renderDashboardLowStockList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21402 | `renderUnmeasurableStockWarning` | `box.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:21406 | `renderUnmeasurableStockWarning` | `box.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21478 | `renderIngredientStockCards` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21707 | `renderStockThresholdSettingsRows` | `weightContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21712 | `renderStockThresholdSettingsRows` | `pieceContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21828 | `startAdjustStock` | `display.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:21938 | `populateStockIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:22395 | `renderStockPurchaseHistory` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:22415 | `renderStockPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22447 | `renderStockPurchaseHistory` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22487 | `renderStockHistoryIngredientFilterOptions` | `container.innerHTML` | Retained: constant markup/text only. |
-| HTML:22494 | `renderStockHistoryIngredientFilterOptions` | `container.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:22864 | `renderStockItemTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22867 | `renderStockItemTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22908 | `populateSoftDrinkBrandSelect` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22928 | `populateSoftDrinkFlavorSelect` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22934 | `populateSoftDrinkFlavorSelect` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:22979 | `addSoftDrinkBrandFlavorField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:22995 | `addSoftDrinkBrandSizeField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:23009 | `resetSoftDrinkBrandForm` | `document.getElementById("softdrink-brand-flavor-fields").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23012 | `resetSoftDrinkBrandForm` | `document.getElementById("softdrink-brand-size-fields").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23042 | `startEditSoftDrinkBrand` | `flavorContainer.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23052 | `startEditSoftDrinkBrand` | `sizeContainer.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23205 | `renderSoftDrinkBrandTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23209 | `renderSoftDrinkBrandTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23569 | `populateSoftDrinkStockFilterOptions` | `brandSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23572 | `populateSoftDrinkStockFilterOptions` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23575 | `populateSoftDrinkStockFilterOptions` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23645 | `renderSoftDrinkStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23649 | `renderSoftDrinkStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23721 | `renderSoftDrinkPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23730 | `renderSoftDrinkPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23812 | `populateIceCreamNameSelect` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23826 | `populateIceCreamFlavorSelect` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23832 | `populateIceCreamFlavorSelect` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:23875 | `addIceCreamNameFlavorField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:23891 | `addIceCreamNameSizeField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:23906 | `resetIceCreamNameForm` | `document.getElementById("icecream-name-flavor-fields").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23909 | `resetIceCreamNameForm` | `document.getElementById("icecream-name-size-fields").innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23937 | `startEditIceCreamName` | `flavorContainer.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:23947 | `startEditIceCreamName` | `sizeContainer.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:24090 | `renderIceCreamNameTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24094 | `renderIceCreamNameTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24432 | `populateIceCreamStockFilterOptions` | `nameSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24435 | `populateIceCreamStockFilterOptions` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24438 | `populateIceCreamStockFilterOptions` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24506 | `renderIceCreamStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24510 | `renderIceCreamStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24588 | `renderIceCreamPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24597 | `renderIceCreamPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:24877 | `renderExpenseFieldTable` | `tbody.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:24906 | `populateExpenseFieldSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:24957 | `populateExpenseFieldFilter` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:25319 | `populateExpenseLedgerDestinations` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:25490 | `exportExpenseHistoryToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:25551 | `renderExpenseHistory` | `breakdownContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:25579 | `renderExpenseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:25747 | `renderItemSalesLookup` | `resultBox.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:25768 | `renderItemSalesLookup` | `resultBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:25772 | `renderItemSalesLookup` | `resultBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26005 | `renderSalesChannelBreakdownTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26394 | `renderItemLedger` | `channelSplitEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26415 | `renderItemLedger` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:26421 | `renderItemLedger` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26606 | `renderMaterialBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26640 | `renderMaterialBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26720 | `renderExpenseBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26740 | `renderExpenseBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:26882 | `exportItemLedgerToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27123 | `calculateAndRenderBusinessReports` | `topItemsTbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27124 | `calculateAndRenderBusinessReports` | `topItemsGraphBox.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27132 | `calculateAndRenderBusinessReports` | `topItemsTbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27133 | `calculateAndRenderBusinessReports` | `topItemsGraphBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27138 | `calculateAndRenderBusinessReports` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27145 | `calculateAndRenderBusinessReports` | `barRow.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27158 | `calculateAndRenderBusinessReports` | `peakHoursTbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27159 | `calculateAndRenderBusinessReports` | `peakHoursGraphBox.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27167 | `calculateAndRenderBusinessReports` | `peakHoursTbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27168 | `calculateAndRenderBusinessReports` | `peakHoursGraphBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27173 | `calculateAndRenderBusinessReports` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27180 | `calculateAndRenderBusinessReports` | `barRow.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27230 | `populateReportExpenseCategoryDropdown` | `select.innerHTML` | Retained: constant markup/text only. |
-| HTML:27272 | `renderBillWiseProfitReport` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27275 | `renderBillWiseProfitReport` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27294 | `renderBillWiseProfitReport` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27359 | `renderExpensesReportTab` | `progBox.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27362 | `renderExpensesReportTab` | `progBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27371 | `renderExpensesReportTab` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27388 | `renderExpensesReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27390 | `renderExpensesReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27396 | `renderExpensesReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27485 | `renderPurchaseReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27487 | `renderPurchaseReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27491 | `renderPurchaseReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27611 | `renderStockValuationReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27613 | `renderStockValuationReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27621 | `renderStockValuationReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27766 | `renderIngredientUsageReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:27768 | `renderIngredientUsageReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27773 | `renderIngredientUsageReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27844 | `exportBillWiseProfitToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27897 | `exportExpensesReportTabToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27942 | `exportPurchaseReportToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:27988 | `exportStockValuationToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:28035 | `exportIngredientUsageToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:28865 | `renderManagementCategoryTable` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:29417 | `exportOrdersHistoryToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:29461 | `renderOrdersHistory` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
-| HTML:29493 | `renderOrdersHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:29575 | `renderOrdersHistory` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:29657 | `toggleSalesVisibility` | `btn.innerHTML` | Retained: constant markup/text only. |
-| HTML:29659 | `toggleSalesVisibility` | `btn.innerHTML` | Retained: constant markup/text only. |
-| HTML:29724 | `showOrderInvoiceDetailsView` | `modalContent.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30301 | `renderEditHistoryModalList` | `body.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30320 | `renderEditHistoryModalList` | `body.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30388 | `enterEditOrderMode` | `modalContent.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30553 | `populateEditPaymentAccounts` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30560 | `renderEditAdditionalCharges` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30593 | `renderEditItemsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30597 | `renderEditItemsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30687 | `filterEditAddItemDropdown` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30799 | `populateEditOrderExtraIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
-| HTML:30843 | `updateEditOrderExtraCostPreview` | `document.getElementById("edit-order-extra-cost-preview").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30939 | `renderEditOrderExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:30945 | `renderEditOrderExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
-| HTML:31033 | `recalcEditTotals` | `editChargesSummary.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:15539 | `populateDineInTableSelect` | `select.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:15561 | `populateHallSelect` | `select.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:15605 | `renderHallsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:15608 | `renderHallsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:15732 | `setPaymentStatus` | `document.getElementById("balance-preview").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:15755 | `populatePaymentBankAccounts` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:15806 | `renderCart` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:15811 | `renderCart` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:15861 | `renderCart` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:15976 | `populateCartExtraIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:16024 | `updateCartExtraCostPreview` | `document.getElementById("cart-extra-cost-preview").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16106 | `renderCartExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16112 | `renderCartExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16151 | `renderAdditionalCharges` | `rows.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:16157 | `renderAdditionalCharges` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16187 | `renderAdditionalChargeSummary` | `target.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:16245 | `calculateCartTotal` | `balancePreview.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16247 | `calculateCartTotal` | `balancePreview.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16250 | `calculateCartTotal` | `balancePreview.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:16648 | `populateCustomerReceiptSlip` | `printCharges.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16661 | `populateCustomerReceiptSlip` | `printTbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:16673 | `populateCustomerReceiptSlip` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:16719 | `populateKitchenReceiptSlip` | `kTbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:16730 | `populateKitchenReceiptSlip` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:17611 | `openStockUnitSetup` | `overlay.innerHTML` | Retained: constant markup/text only. |
+| HTML:17855 | `openCancelOrderModal` | `document.getElementById("cancel-order-modal-content").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:18271 | `submitOrder` | `document.getElementById("balance-preview").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:18327 | `renderPinDots` | `display.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:18770 | `<listener>` | `t.innerHTML` | Retained: constant markup/text only. |
+| HTML:18790 | `showBootFailure` | `document.getElementById("boot-splash-text").innerHTML` | Retained: constant markup/text only. |
+| HTML:19122 | `renderFoodGridOrderingUI` | `grid.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:19243 | `renderFoodGridOrderingUI` | `card.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:19632 | `renderCategoryOffersCheckboxList` | `list.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:19648 | `renderCategoryOffersCheckboxList` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:19751 | `renderManagementMenuTable` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:19792 | `renderManagementMenuTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:19882 | `renderManagementMenuTable` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:19899 | `populateFormCategoryDropdown` | `select.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:19962 | `populateManagementCategoryFilter` | `select.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:20190 | `filterDealComponentDropdown` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:20277 | `renderDealComponentsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:20281 | `renderDealComponentsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:20346 | `renderManualRecipeFields` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:20510 | `openCostFieldsModal` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21197 | `toggleDashboardAmounts` | `btn.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:21242 | `renderDashboardLowStockList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21315 | `renderDashboardLowStockList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21401 | `renderUnmeasurableStockWarning` | `box.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:21405 | `renderUnmeasurableStockWarning` | `box.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21477 | `renderIngredientStockCards` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21706 | `renderStockThresholdSettingsRows` | `weightContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21711 | `renderStockThresholdSettingsRows` | `pieceContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21827 | `startAdjustStock` | `display.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:21937 | `populateStockIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:22394 | `renderStockPurchaseHistory` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:22414 | `renderStockPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22446 | `renderStockPurchaseHistory` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22486 | `renderStockHistoryIngredientFilterOptions` | `container.innerHTML` | Retained: constant markup/text only. |
+| HTML:22493 | `renderStockHistoryIngredientFilterOptions` | `container.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:22863 | `renderStockItemTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22866 | `renderStockItemTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22907 | `populateSoftDrinkBrandSelect` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22927 | `populateSoftDrinkFlavorSelect` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22933 | `populateSoftDrinkFlavorSelect` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:22978 | `addSoftDrinkBrandFlavorField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:22994 | `addSoftDrinkBrandSizeField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:23008 | `resetSoftDrinkBrandForm` | `document.getElementById("softdrink-brand-flavor-fields").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23011 | `resetSoftDrinkBrandForm` | `document.getElementById("softdrink-brand-size-fields").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23041 | `startEditSoftDrinkBrand` | `flavorContainer.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23051 | `startEditSoftDrinkBrand` | `sizeContainer.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23204 | `renderSoftDrinkBrandTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23208 | `renderSoftDrinkBrandTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23568 | `populateSoftDrinkStockFilterOptions` | `brandSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23571 | `populateSoftDrinkStockFilterOptions` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23574 | `populateSoftDrinkStockFilterOptions` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23644 | `renderSoftDrinkStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23648 | `renderSoftDrinkStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23720 | `renderSoftDrinkPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23729 | `renderSoftDrinkPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23811 | `populateIceCreamNameSelect` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23825 | `populateIceCreamFlavorSelect` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23831 | `populateIceCreamFlavorSelect` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:23874 | `addIceCreamNameFlavorField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:23890 | `addIceCreamNameSizeField` | `row.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:23905 | `resetIceCreamNameForm` | `document.getElementById("icecream-name-flavor-fields").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23908 | `resetIceCreamNameForm` | `document.getElementById("icecream-name-size-fields").innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23936 | `startEditIceCreamName` | `flavorContainer.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:23946 | `startEditIceCreamName` | `sizeContainer.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:24089 | `renderIceCreamNameTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24093 | `renderIceCreamNameTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24431 | `populateIceCreamStockFilterOptions` | `nameSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24434 | `populateIceCreamStockFilterOptions` | `flavorSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24437 | `populateIceCreamStockFilterOptions` | `sizeSelect.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24505 | `renderIceCreamStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24509 | `renderIceCreamStockRows` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24587 | `renderIceCreamPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24596 | `renderIceCreamPurchaseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:24876 | `renderExpenseFieldTable` | `tbody.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:24905 | `populateExpenseFieldSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:24956 | `populateExpenseFieldFilter` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:25318 | `populateExpenseLedgerDestinations` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:25489 | `exportExpenseHistoryToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:25550 | `renderExpenseHistory` | `breakdownContainer.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:25578 | `renderExpenseHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:25746 | `renderItemSalesLookup` | `resultBox.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:25767 | `renderItemSalesLookup` | `resultBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:25771 | `renderItemSalesLookup` | `resultBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26004 | `renderSalesChannelBreakdownTable` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26393 | `renderItemLedger` | `channelSplitEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26414 | `renderItemLedger` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:26420 | `renderItemLedger` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26605 | `renderMaterialBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26639 | `renderMaterialBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26719 | `renderExpenseBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26739 | `renderExpenseBreakdownModal` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:26881 | `exportItemLedgerToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27122 | `calculateAndRenderBusinessReports` | `topItemsTbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27123 | `calculateAndRenderBusinessReports` | `topItemsGraphBox.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27131 | `calculateAndRenderBusinessReports` | `topItemsTbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27132 | `calculateAndRenderBusinessReports` | `topItemsGraphBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27137 | `calculateAndRenderBusinessReports` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27144 | `calculateAndRenderBusinessReports` | `barRow.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27157 | `calculateAndRenderBusinessReports` | `peakHoursTbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27158 | `calculateAndRenderBusinessReports` | `peakHoursGraphBox.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27166 | `calculateAndRenderBusinessReports` | `peakHoursTbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27167 | `calculateAndRenderBusinessReports` | `peakHoursGraphBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27172 | `calculateAndRenderBusinessReports` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27179 | `calculateAndRenderBusinessReports` | `barRow.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27229 | `populateReportExpenseCategoryDropdown` | `select.innerHTML` | Retained: constant markup/text only. |
+| HTML:27271 | `renderBillWiseProfitReport` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27274 | `renderBillWiseProfitReport` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27293 | `renderBillWiseProfitReport` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27358 | `renderExpensesReportTab` | `progBox.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27361 | `renderExpensesReportTab` | `progBox.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27370 | `renderExpensesReportTab` | `row.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27387 | `renderExpensesReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27389 | `renderExpensesReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27395 | `renderExpensesReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27484 | `renderPurchaseReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27486 | `renderPurchaseReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27490 | `renderPurchaseReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27610 | `renderStockValuationReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27612 | `renderStockValuationReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27620 | `renderStockValuationReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27765 | `renderIngredientUsageReportTab` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:27767 | `renderIngredientUsageReportTab` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27772 | `renderIngredientUsageReportTab` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27843 | `exportBillWiseProfitToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27896 | `exportExpensesReportTabToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27941 | `exportPurchaseReportToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:27987 | `exportStockValuationToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:28034 | `exportIngredientUsageToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:28864 | `renderManagementCategoryTable` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:29416 | `exportOrdersHistoryToPDF` | `document.getElementById("print-orders-report").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:29460 | `renderOrdersHistory` | `tbody.innerHTML` | Retained: clear existing DOM; no data. |
+| HTML:29492 | `renderOrdersHistory` | `tbody.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:29574 | `renderOrdersHistory` | `tr.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:29656 | `toggleSalesVisibility` | `btn.innerHTML` | Retained: constant markup/text only. |
+| HTML:29658 | `toggleSalesVisibility` | `btn.innerHTML` | Retained: constant markup/text only. |
+| HTML:29723 | `showOrderInvoiceDetailsView` | `modalContent.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30300 | `renderEditHistoryModalList` | `body.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30319 | `renderEditHistoryModalList` | `body.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30387 | `enterEditOrderMode` | `modalContent.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30552 | `populateEditPaymentAccounts` | `select.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30559 | `renderEditAdditionalCharges` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30592 | `renderEditItemsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30596 | `renderEditItemsList` | `container.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30686 | `filterEditAddItemDropdown` | `list.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30798 | `populateEditOrderExtraIngredientSelect` | `select.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
+| HTML:30842 | `updateEditOrderExtraCostPreview` | `document.getElementById("edit-order-extra-cost-preview").innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30938 | `renderEditOrderExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:30944 | `renderEditOrderExtrasModalList` | `listEl.innerHTML` | Encoded data in this renderer/builder; retained literal/numeric/composite markup. |
+| HTML:31032 | `recalcEditTotals` | `editChargesSummary.innerHTML` | Retained: existing encoder, numeric formatting, literal status choices or encoded composite. |
 
 ## Every module sink
+
+The real browser journey also caught a supplier dialog being moved out of the document into a detached node. Its creation flow now leaves the dialog attached; the test explicitly checks visibility before submitting.
 
 Module UIs already use `textContent`, encoded HTML text, DOM-created options, and event listeners. No module data-field changes were necessary.
 

@@ -29,5 +29,5 @@ test('served POS contains no external domains and forces development flags off',
  const response=await app.inject('/');assert.equal(response.statusCode,200);
  assert.equal(/https?:\/\/[a-z0-9.-]+\.[a-z]{2,}/i.test(response.body),false,'external domain in served HTML');
  assert.ok(response.body.includes('window.BILLZ_DEVELOPMENT_DEMO = false'));
- for(const symbol of ['callLicenseApi','runLicenseHeartbeat','LICENSE_DEFAULT_ENDPOINT','imjalalahmad.com'])assert.equal(response.body.includes(symbol),false);
+  for(const symbol of ['callLicenseApi','runLicenseHeartbeat','renderLicenseSettingsPanel','LICENSE_DEFAULT_ENDPOINT','imjalalahmad.com'])assert.equal(response.body.includes(symbol),false);
 });
