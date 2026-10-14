@@ -544,7 +544,6 @@ export function createPurchasesUI({
     body.appendChild(errorContainer);
 
     let busy = false;
-    const modal = document.createElement("div");
     const overlay = document.createElement("div");
     overlay.className = "inventory-modal-overlay";
     const dialog = document.createElement("div");
@@ -609,7 +608,6 @@ export function createPurchasesUI({
       if (event.target === overlay) close();
     });
     document.body.appendChild(overlay);
-    modal.appendChild(overlay);
   }
 
   /**
