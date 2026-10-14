@@ -367,7 +367,7 @@ export function createOrderService(
                $9, $10, $11,
                $12, $13, $14, $15,
                $16, $17, $18,
-               $19, $20, $21::timestamptz, CASE WHEN $23 = 'completed' THEN $21::timestamptz ELSE NULL END,
+               $19, $20, $21, $25,
                $22, $22, $24
              )
              RETURNING id, order_number, order_type, order_status, payment_status,
@@ -386,6 +386,7 @@ export function createOrderService(
               pricing.minor.additionalCharges, pricing.minor.total,
               costOfGoodsMinor, businessDate, now, userId,
               initialOrderStatus, requestHash,
+              initialOrderStatus === "completed" ? now : null,
             ],
           );
 

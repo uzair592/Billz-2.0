@@ -77,35 +77,20 @@ Characterization tests and migration scaffold for the Bite Tech restaurant POS S
 **Branch:** main
 
 **Modified:**
-- .continuity/cli-state.json
 - .continuity/decisions.json
 - .continuity/decisions.json.backup
 - .continuity/decisions.jsonl
-- .continuity/delta-snapshot.json
 - .continuity/metrics.json
-- Fast_Food_POS_Custom_Bill_Header_XXXL.html
-- SESSION_HANDOFF.md
-- src/server/authorization/permissions.mjs
-- src/server/http/app.mjs
-- src/server/http/finance-routes.mjs
-- src/server/http/request-guards.mjs
-- src/server/main.mjs
-- src/server/pos/finance-service.mjs
-- src/server/pos/order-history-service.mjs
 - src/server/pos/order-service.mjs
-
-**Untracked:**
-- database/migrations/023_kitchen_tickets_and_settlement.sql
-- src/server/pos/kitchen-service.mjs
-- tests/audit-fixes.test.mjs
+- tests/refund-sales-report-postgres.test.mjs
 
 
 ## Recent Commits
+- `5c58612` feat: resolve pre-deployment audit findings (KDS, print queue, cart recovery, settlement, cloud finance) (Muhammad Uzair)
 - `45e9b0f` feat: streamline POS auth, recipe display, unified stock tabs, redesigned expenses, and responsive modal (Muhammad Uzair)
 - `3184feb` Merge pull request #17 from uzair592/production/verification-tools (Muhammad Uzair)
 - `da77a47` Merge pull request #16 from uzair592/security/pos-xss-csp (Muhammad Uzair)
 - `f41d851` Merge pull request #15 from uzair592/security/remove-legacy-secrets (Muhammad Uzair)
-- `3763599` Merge pull request #14 from uzair592/security/admin-mfa (Muhammad Uzair)
 
 
 ## Recent Decisions (most recent first)
@@ -153,8 +138,10 @@ These are prior decisions for THIS project. Treat them as binding context — ho
   A: Pushed commit 45e9b0f to origin/main on https://github.com/uzair592/Billz-2.0.git with all fixes and enhancements.
 - **Q: How were the October 14 Billz 2.0 pre-deployment audit findings resolved across backend, database, client, and test suites?** _(audit, database, deployment, finance, how, kitchen)_
   A: Applied migration 023 for kitchen tickets and request hash, created kitchen-service.mjs, added kitchen ticket lifecycle management with KDS screen, durable FIFO print queue, local cart draft recovery, order payment settlement endpoint and modal UI, authoritative cloud finance sync and transfers, role navigation guards, idempotency request hash conflict detection, and expanded accountant permissions with 675 passing tests.
+- **Q: How were PostgreSQL error 42P08 and timezone date flakiness in integration tests resolved?** _(bugfix, ci, database, how, postgres, testing)_
+  A: Replaced untyped CASE WHEN  with explicit parameter  for completed_at in src/server/pos/order-service.mjs and queried CURRENT_DATE::text from the database in tests/refund-sales-report-postgres.test.mjs.
 
-Older decisions may exist beyond these 21; use `search_decisions(query)` or grep `.continuity/decisions.json` for the full history.
+Older decisions may exist beyond these 22; use `search_decisions(query)` or grep `.continuity/decisions.json` for the full history.
 
 ## Project Structure
 .continuity/
@@ -197,4 +184,4 @@ tests/
 - [ ] Recover any missed decisions before session ends
 
 ---
-Generated: 2026-10-14T19:07:55.084Z
+Generated: 2026-10-14T19:41:15.541Z
