@@ -67,7 +67,7 @@ test("SaaS Core Fullstack Suite", async (t) => {
     ownerPassword: "Password123!",
   });
 
-  // Create cashier user in both restaurants with identical username 'cashier'
+  // Username-only login uses globally unique identifiers across restaurants.
   await authRepo.createTenantUser({
     restaurantId: restA.id,
     username: "cashier",
@@ -78,14 +78,14 @@ test("SaaS Core Fullstack Suite", async (t) => {
 
   await authRepo.createTenantUser({
     restaurantId: restB.id,
-    username: "cashier",
+    username: "cashier_b",
     passwordHash: await platformAdminService.bootstrapAdmin({ username: "dummy2", password: "Password123!" }).then(() => import("../src/server/auth/passwords.mjs")).then(m => m.hashPassword("CashierPassB!", pepper)),
     displayName: "Cashier Bob",
     role: "cashier",
   });
 
   await t.test("PHASE 2 — Username Authentication", async () => {
-    // 1. Same username in two restaurants succeeds for correct restaurant code
+    // 1. Unique usernames authenticate in their own restaurants; legacy scoped login remains compatible.
     const resA = await app.inject({
       method: "POST",
       url: "/api/auth/login",
@@ -96,7 +96,7 @@ test("SaaS Core Fullstack Suite", async (t) => {
     const resB = await app.inject({
       method: "POST",
       url: "/api/auth/login",
-      payload: { restaurantCode: "pizza-palace", username: "cashier", password: "CashierPassB!" },
+      payload: { restaurantCode: "pizza-palace", username: "cashier_b", password: "CashierPassB!" },
     });
     assert.equal(resB.statusCode, 200);
 

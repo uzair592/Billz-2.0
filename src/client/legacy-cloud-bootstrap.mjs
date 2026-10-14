@@ -86,10 +86,16 @@ function showCloudSalesReport() {
   if (cloudView) cloudView.classList.remove("hidden");
   if (localTab) localTab.classList.remove("active-switch");
   if (cloudTab) cloudTab.classList.add("active-switch");
+  document.getElementById("toggle-view-table")?.parentElement.classList.add("hidden");
+  if (globalThis.BILLZ_MANAGED) {
+    document.getElementById("cloud-profit-loss-container")?.classList.remove("hidden");
+    globalThis.BillzCloudProfit?.mount();
+  }
   salesReportUI.mount();
 }
 
 function showLocalReports() {
+  if (globalThis.BILLZ_MANAGED) return showCloudSalesReport();
   const localView = document.getElementById("local-reports-view");
   const cloudView = document.getElementById("cloud-sales-report-view");
   const localTab = document.getElementById("reports-tab-local");
@@ -98,6 +104,7 @@ function showLocalReports() {
   if (localView) localView.classList.remove("hidden");
   if (cloudTab) cloudTab.classList.remove("active-switch");
   if (localTab) localTab.classList.add("active-switch");
+  document.getElementById("toggle-view-table")?.parentElement.classList.remove("hidden");
   if (typeof calculateAndRenderBusinessReports === "function") {
     calculateAndRenderBusinessReports();
   }

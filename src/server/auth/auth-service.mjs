@@ -19,7 +19,7 @@ function publicUser(user) {
 }
 
 function authenticationError() {
-  const error = new Error("Invalid restaurant code, username or password.");
+  const error = new Error("Invalid username or password.");
   error.code = "INVALID_CREDENTIALS";
   error.statusCode = 401;
   return error;

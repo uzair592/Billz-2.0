@@ -207,7 +207,7 @@ test("password management through actual HTTP composition and PostgreSQL", async
       {
         code,
         name: code,
-        ownerUsername: "owner",
+        ownerUsername: code === "password-cafe" ? "owner" : "other_password_owner",
         ownerPassword: "OriginalPassword123!",
       },
       adminCookie,
@@ -582,4 +582,52 @@ test("password management through actual HTTP composition and PostgreSQL", async
     }),
     (error) => error.code === "INVALID_CREDENTIALS",
   );
+});
+
+test("username-only identity migration preserves legacy accounts, rejects ambiguity and atomically reserves new identifiers", async t => {
+  const { readFile } = await import("node:fs/promises");
+  const { createPlatformAdminPortalService } = await import("../src/server/subscriptions/platform-admin-portal-service.mjs");
+  await provisionIntegrationDatabase();
+  const pool = await createAppPool(), control = await createControlPool(), administrator = await connectAdmin();
+  const pepper = "global-login-regression-pepper-long";
+  await seedPlan(control, { code: "GROWTH", provider: "manual" });
+  const admin = await createPlatformAdminService({ repository: createPlatformAdminRepository(control), passwordPepper: pepper })
+    .bootstrapAdmin({ username: "identityadmin", password: "AdminPassword123!" });
+  const portal = createPlatformAdminPortalService({ pool: control, passwordPepper: pepper });
+  // Simulate the pre-migration database, where tenant-scoped duplicates were legal.
+  await administrator.query("DROP TRIGGER users_claim_login_identifiers ON users; DROP FUNCTION claim_user_login_identifiers(); DROP TABLE user_login_identifiers;");
+  const create = (code, ownerUsername = "owner", ownerEmail = `${code}@example.com`) => portal.createRestaurant({
+    adminId: admin.admin.id, code, name: code, ownerUsername, ownerEmail, ownerPassword: "OwnerPassword123!", planCode: "GROWTH",
+  });
+  const first = await create("identity-first"), second = await create("identity-second");
+  await administrator.query(await readFile(new URL("../database/migrations/023_global_login_identifiers.sql", import.meta.url), "utf8"));
+  assert.equal((await control.query("SELECT username FROM users WHERE id=$1", [first.owner.id])).rows[0].username, "owner");
+  assert.equal((await administrator.query("SELECT user_id FROM user_login_identifiers WHERE identifier='owner'")).rows[0].user_id, null);
+  const server = await createServer({ pool, controlPool: control, env: { NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test",
+    PASSWORD_PEPPER: pepper, SESSION_SECRET: "identity-session-secret-long", TRUSTED_ORIGIN: "http://localhost:3000", PAYMENT_PROVIDER: "manual" } });
+  t.after(async () => { await server.close(); await pool.end(); await control.end(); await administrator.end(); });
+  const send = (username,password = "OwnerPassword123!") => server.app.inject({ method: "POST", url: "/api/auth/login", payload: { username,password } });
+  assert.equal((await send("owner")).statusCode, 401);
+  const emailLogin = await send("identity-first@example.com"); assert.equal(emailLogin.statusCode, 200, emailLogin.body);
+  await assert.rejects(create("identity-third"), error => error.code === "USERNAME_EXISTS" && error.statusCode === 409);
+  assert.equal(Number((await control.query("SELECT count(*) FROM restaurants WHERE code='identity-third'")).rows[0].count), 0);
+  await portal.editUser({ adminId: admin.admin.id, restaurantId: first.id, userId: first.owner.id, username: "identity_first_owner" });
+  assert.equal((await send("identity_first_owner")).statusCode, 200);
+  assert.equal((await send("owner")).json().user.id, second.owner.id);
+  const firstLogin = await send("identity_first_owner"), otherLogin = await send("identity_first_owner");
+  const cookie = result => result.headers["set-cookie"].split(";")[0];
+  const change = (session, newUsername) => server.app.inject({ method: "POST", url: "/api/auth/change-password", headers: { cookie: cookie(session) },
+    payload: { currentPassword: "OwnerPassword123!", newPassword: "ChangedPassword123!", newUsername } });
+  assert.equal((await change(firstLogin, "owner")).statusCode, 409);
+  assert.equal((await send("identity_first_owner")).statusCode, 200);
+  const renamed = await change(firstLogin, "identity_renamed_owner"); assert.equal(renamed.statusCode, 200, renamed.body);
+  assert.equal((await server.app.inject({ url: "/api/auth/me", headers: { cookie: cookie(firstLogin) } })).statusCode, 200);
+  assert.equal((await server.app.inject({ url: "/api/auth/me", headers: { cookie: cookie(otherLogin) } })).statusCode, 401);
+  assert.equal((await send("identity_renamed_owner", "ChangedPassword123!")).statusCode, 200);
+  const concurrent = await Promise.all([create("identity-race-a", "unique_race_owner"), create("identity-race-b", "unique_race_owner")].map(operation => operation.then(() => 201, error => error.statusCode)));
+  assert.deepEqual(concurrent.sort(), [201,409]);
+  // The registry is maintained by a scoped definer trigger, never writable by
+  // the production runtime role directly (test helpers grant broader fixtures).
+  const audit = (await control.query("SELECT metadata FROM audit_logs WHERE actor_user_id=$1 AND action='user.password_changed'", [first.owner.id])).rows;
+  assert.equal(audit[0].metadata.usernameChanged, true);
 });

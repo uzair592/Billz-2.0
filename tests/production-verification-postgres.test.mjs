@@ -35,7 +35,7 @@ test("production security, real HTTP load and snapshot backup restoration", { ti
   const fixtures = [];
   server = await start({});
   for (let index = 0; index < 10; index++) {
-    const fixture = { restaurantCode: `load-${index}`, username: "owner", password: "OwnerPassword123!" };
+    const fixture = { restaurantCode: `load-${index}`, username: `load_owner_${index}`, password: "OwnerPassword123!" };
     const restaurant = await portal.createRestaurant({ adminId: administrator.admin.id, name: `Load cafe ${index}`, code: fixture.restaurantCode,
       ownerUsername: fixture.username, ownerPassword: fixture.password, planCode: "LOAD" });
     const login = await server.app.inject({ method: "POST", url: "/api/auth/login", remoteAddress: "198.51.100.17",

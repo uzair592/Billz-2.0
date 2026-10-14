@@ -731,3 +731,23 @@ test("cloud status indicator reports subscription problems", async ({ page }) =>
     "Subscription problem",
   );
 });
+
+test("long invoice actions remain reachable by scrolling on a 1366x768 laptop", async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const detail = cloudOrderDetail();
+  detail.items = Array.from({ length: 60 }, (_, index) => ({ ...detail.items[0], name: `Invoice line ${index + 1}` }));
+  mockApi(page, (route, url) => url.pathname === `/api/pos/orders/${ORDER_ID}`
+    ? route.fulfill({ json: detail }) : route.fulfill({ json: cloudListResponse([]) }));
+  await openPos(page); await configureCloud(page);
+  await page.evaluate(id => showOrderInvoiceDetailsView(id), ORDER_ID);
+  const modal = page.locator("#invoice-modal-content");
+  await expect(modal).toContainText("Invoice line 60");
+  expect(await modal.evaluate(node => node.scrollHeight > node.clientHeight)).toBe(true);
+  const lastButton = modal.locator("button").last();
+  await lastButton.scrollIntoViewIfNeeded();
+  const modalBox = await modal.boundingBox(), buttonBox = await lastButton.boundingBox();
+  expect(modalBox.y).toBeGreaterThanOrEqual(0);
+  expect(modalBox.y + modalBox.height).toBeLessThanOrEqual(768);
+  expect(buttonBox.y).toBeGreaterThanOrEqual(modalBox.y);
+  expect(buttonBox.y + buttonBox.height).toBeLessThanOrEqual(modalBox.y + modalBox.height);
+});

@@ -86,7 +86,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           await client.query(`INSERT INTO users (id, restaurant_id, username, normalized_username, display_name, password_hash, status, email_verified_at)
             VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)`, [userId, restaurantId, username, username.toLowerCase(), displayName, passwordHash, clock()]);
         } catch (error) {
-          if (error.code === "23505") throw Object.assign(new Error("Username already exists in this restaurant."), { code: "USERNAME_EXISTS", statusCode: 409 });
+          if (error.code === "23505") throw Object.assign(new Error("This username is already in use. Choose a unique username."), { code: "USERNAME_EXISTS", statusCode: 409 });
           throw error;
         }
         await client.query(`INSERT INTO restaurant_memberships (restaurant_id, user_id, default_branch_id, role, status, joined_at)
@@ -106,7 +106,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           await client.query(`UPDATE users SET username = COALESCE($3, username), normalized_username = COALESCE(lower($3), normalized_username),
             display_name = COALESCE($4, display_name) WHERE id = $1 AND restaurant_id = $2`, [userId, restaurantId, username ?? null, displayName ?? null]);
         } catch (error) {
-          if (error.code === "23505") throw Object.assign(new Error("Username already exists in this restaurant."), { code: "USERNAME_EXISTS", statusCode: 409 });
+          if (error.code === "23505") throw Object.assign(new Error("This username is already in use. Choose a unique username."), { code: "USERNAME_EXISTS", statusCode: 409 });
           throw error;
         }
         if (username !== undefined) await client.query("UPDATE sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL", [userId, clock()]);
@@ -387,7 +387,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
             throw err;
           }
           if (/username/i.test(error.constraint ?? "")) {
-            const err = new Error("Username already exists in this restaurant.");
+            const err = new Error("This username is already in use. Choose a unique username.");
             err.code = "USERNAME_EXISTS";
             err.statusCode = 409;
             throw err;

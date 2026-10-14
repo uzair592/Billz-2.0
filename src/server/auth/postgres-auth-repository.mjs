@@ -124,7 +124,7 @@ export function createPostgresAuthRepository(pool) {
         await rollback(client, error);
         if (
           error.code === "23505" &&
-          /normalized_email/i.test(error.constraint ?? "")
+          /normalized_email|global_username/i.test(error.constraint ?? "")
         ) {
           const duplicate = new Error("Registration is already pending.");
           duplicate.code = "EMAIL_EXISTS";
@@ -377,12 +377,15 @@ export function createPostgresAuthRepository(pool) {
             user.restaurant_id,
             userId,
             userId,
-            JSON.stringify({ otherSessionsRevoked: true }),
+            JSON.stringify({ otherSessionsRevoked: true, ...(newUsername ? { usernameChanged: true } : {}) }),
           ],
         );
         await client.query("COMMIT");
       } catch (error) {
         await rollback(client, error);
+        if (error.code === "23505" && /username|login_identifier/i.test(error.constraint ?? "")) {
+          throw controlError("This username is already in use. Choose a unique username.", "USERNAME_EXISTS", 409);
+        }
         throw error;
       } finally {
         client.release();
@@ -473,10 +476,12 @@ export function createPostgresAuthRepository(pool) {
            FROM users u
            LEFT JOIN restaurants r ON r.id = u.restaurant_id
           WHERE (u.normalized_username = $1 OR u.normalized_email = $1)
-          ORDER BY (u.restaurant_id IS NOT NULL) DESC, u.created_at DESC`,
+          LIMIT 2`,
         [normUsername],
       );
-      if (userResult.rows.length === 0) return { restaurant: null, user: null };
+      // Older tenant-scoped usernames can collide. Never guess a tenant or
+      // test passwords across accounts; support can rename these accounts.
+      if (userResult.rows.length !== 1) return { restaurant: null, user: null };
       const row = userResult.rows[0];
       const restaurant = row.rest_id ? {
         id: row.rest_id,
@@ -548,9 +553,10 @@ export function createPostgresAuthRepository(pool) {
           /username/i.test(error.constraint ?? "")
         ) {
           const duplicate = new Error(
-            "Username already exists in this restaurant.",
+            "This username is already in use. Choose a unique username.",
           );
           duplicate.code = "USERNAME_EXISTS";
+          duplicate.statusCode = 409;
           throw duplicate;
         }
         throw error;

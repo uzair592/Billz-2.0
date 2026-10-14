@@ -16,24 +16,28 @@ test.describe("Production server readiness journeys", () => {
     test.setTimeout(120000);
     await page.setViewportSize(size);
     const code = `readiness-${size.name}`;
+    const ownerUsername = `readiness_owner_${size.name}`, cashierUsername = `readiness_cashier_${size.name}`;
     const device = await browser.newContext({ viewport: { width: size.width, height: size.height } }); const second = await device.newPage();
     const errors = [];
     page.on("pageerror", error => errors.push(error.message)); second.on("pageerror", error => errors.push(error.message));
     page.on("dialog", dialog => dialog.accept()); second.on("dialog", dialog => dialog.accept());
     async function goTo(target, screen) {
       if (await target.locator("#mobile-menu-toggle").isVisible()) await target.locator("#mobile-menu-toggle").click();
-      await target.locator(`button.menu-btn[onclick="switchScreen('${screen}')"]`).click();
+      if (["inventory", "purchases"].includes(screen)) {
+        await target.locator(`button.menu-btn[onclick="switchScreen('kitchen-stock')"]`).click();
+        if (screen === "purchases") await target.locator(`#screen-inventory button[onclick="switchScreen('purchases')"]`).click();
+      } else await target.locator(`button.menu-btn[onclick="switchScreen('${screen}')"]`).click();
       await expect(target.locator(`#screen-${screen}`)).toBeVisible();
       if (await target.locator("#mobile-menu-toggle").isVisible()) await expect.poll(() => target.locator("#app-sidebar").evaluate(node => node.getBoundingClientRect().right)).toBeLessThanOrEqual(0);
     }
     async function login(target, username) {
-      await target.goto("/"); await target.fill("#cloud-restaurant-code", code); await target.fill("#cloud-username", username); await target.fill("#cloud-password", "OwnerPassword123!");
+      await target.goto("/"); await target.fill("#cloud-username", username); await target.fill("#cloud-password", "OwnerPassword123!");
       await target.click("#cloud-signin-button"); await expect(target.locator(".app-container")).toBeVisible();
     }
     try {
       await page.goto("/platform-admin/"); await page.fill("#username", "readinessadmin"); await page.fill("#password", "AdminPassword123!"); await page.click("#login-form button[type=submit]");
       await expect(page.locator("#portal-view")).toBeVisible(); await page.click('[data-view="restaurants"]');
-      await page.click("#open-create-modal"); await page.fill("#create-code", code); await page.fill("#create-name", `Readiness ${size.name}`); await page.fill("#create-owner-user", "owner"); await page.fill("#create-owner-pass", "OwnerPassword123!");
+      await page.click("#open-create-modal"); await page.fill("#create-code", code); await page.fill("#create-name", `Readiness ${size.name}`); await page.fill("#create-owner-user", ownerUsername); await page.fill("#create-owner-pass", "OwnerPassword123!");
       await page.click("#create-restaurant-form button[type=submit]"); await expect(page.locator("#create-modal")).toBeHidden();
       await page.fill("#search-input", code); await page.locator("#restaurants-tbody .btn-manage").click(); await expect(page.locator("#create-user-btn")).toBeVisible();
       await page.fill("#pay-ref", `READINESS-${size.name}`); await page.click("#record-pay-form button[type=submit]"); await expect(page.locator(".btn-approve")).toBeVisible();
@@ -41,20 +45,19 @@ test.describe("Production server readiness journeys", () => {
       const pending = page.locator("#payments-tbody tr").filter({ hasText: code }); await expect(pending).toContainText("pending");
       await pending.locator(".btn-approve").click(); await page.click("#confirm-accept"); await expect(pending).toHaveCount(0);
       await page.selectOption("#payment-filter", "approved"); const paid = page.locator("#payments-tbody tr").filter({ hasText: code }); await expect(paid).toContainText("approved"); await paid.locator(".payment-restaurant").click();
-      await page.click("#create-user-btn"); await page.fill("#user-username", "cashier"); await page.fill("#user-display-name", "Counter staff"); await page.selectOption("#user-role", "cashier"); await page.fill("#user-password", "OwnerPassword123!"); await page.click("#user-form button[type=submit]");
+      await page.click("#create-user-btn"); await page.fill("#user-username", cashierUsername); await page.fill("#user-display-name", "Counter staff"); await page.selectOption("#user-role", "cashier"); await page.fill("#user-password", "OwnerPassword123!"); await page.click("#user-form button[type=submit]");
       await expect(page.locator("#users-tbody")).toContainText("Counter staff");
       await expect(page.locator("#users-tbody td:nth-child(3)").first()).toHaveCSS("white-space", "nowrap");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
       await page.screenshot({ path: `tests/browser/screenshots/readiness-admin-${size.name}.png`, fullPage: true });
       // Create category and menu item through the actual UI, without seeding browser collections.
-      await login(page, "owner"); await goTo(page, "edit-menu");
+      await login(page, ownerUsername); await goTo(page, "edit-menu");
       await page.locator('button[onclick="openManageCategoriesModal()"]').click(); await page.fill("#new-category-name", "Burgers"); await page.click("#category-form-submit-btn");
       await page.locator('button[onclick="closeManageCategoriesModal()"]').click();
       await page.fill("#menu-item-name", "Readiness Burger"); await page.fill("#menu-item-number", "101"); await page.selectOption("#menu-item-category", "Burgers"); await page.fill("#menu-item-price", "100"); await page.fill("#menu-item-others", "20"); await page.click("#menu-submit-btn");
       await expect(page.locator("#management-menu-rows")).toContainText("Readiness Burger");
-      await page.evaluate(() => openCloudAccountModal()); await page.click("#cloud-import-button"); await expect(page.locator("#cloud-account-status")).toContainText("Copied 1 menu items"); await page.evaluate(() => closeCloudAccountModal());
       // A completely separate browser context has no seeded IndexedDB catalog. It must download it.
-      await login(second, "cashier");
+      await login(second, cashierUsername);
       expect(await second.evaluate(() => businessName)).toBe(`Readiness ${size.name}`);
       for (const target of [page, second]) {
         await goTo(target, "new-order"); await target.evaluate(() => setOrderType("Takeaway"));

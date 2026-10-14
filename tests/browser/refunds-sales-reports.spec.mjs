@@ -806,7 +806,7 @@ test("local checkout keeps working while the cloud is offline", async ({ page })
     .toBe(1);
 });
 
-test("the reports screen switches between local and cloud tabs", async ({ page }) => {
+test("legacy device reports and shared sales reports retain their separate data sources", async ({ page }) => {
   let reportCalls = 0;
   mockApi(page, (route, url) => {
     if (url.pathname === "/api/pos/reports/sales") {
@@ -824,7 +824,7 @@ test("the reports screen switches between local and cloud tabs", async ({ page }
   await expect(page.locator("#local-reports-view")).not.toHaveClass(/hidden/);
   await expect(page.locator("#cloud-sales-report-view")).toHaveClass(/hidden/);
 
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-view")).not.toHaveClass(/hidden/);
   await expect(page.locator("#local-reports-view")).toHaveClass(/hidden/);
   await expect(page.locator("#reports-tab-cloud")).toHaveClass(/active-switch/);
@@ -836,11 +836,11 @@ test("the reports screen switches between local and cloud tabs", async ({ page }
   );
   expect(reportCalls).toBe(1);
 
-  await page.click("#reports-tab-local");
+  await page.evaluate(() => showLocalReports());
   await expect(page.locator("#local-reports-view")).not.toHaveClass(/hidden/);
   await expect(page.locator("#cloud-sales-report-view")).toHaveClass(/hidden/);
   // Going back to the cloud tab reloads the server figures.
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -858,7 +858,7 @@ test("the cloud report renders gross sales, refunds and net sales", async ({ pag
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
 
   const container = page.locator("#cloud-sales-report-container");
   await expect(container).toContainText("Gross Sales");
@@ -889,7 +889,7 @@ test("custom date filters are sent to the report API", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -919,7 +919,7 @@ test("detailed rows render for the requested page", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
 
   const container = page.locator("#cloud-sales-report-container");
   await expect(container).toContainText("Detailed Sales Rows");
@@ -950,7 +950,7 @@ test("CSV export downloads the current filter range", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -987,7 +987,7 @@ test("the payment-method filter is sent to the report API", async ({ page }) => 
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -1017,7 +1017,7 @@ test("the order-type filter is sent to the report API", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -1052,7 +1052,7 @@ test("pagination controls request the next page", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
 
   const container = page.locator("#cloud-sales-report-container");
   await expect(container).toContainText("Page 1 of 3 · 120 rows");
@@ -1085,7 +1085,7 @@ test("an empty result set renders a clear empty state", async ({ page }) => {
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
 
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "No orders match the selected filters",
@@ -1112,7 +1112,7 @@ test("the payment-method filter persists across pagination", async ({ page }) =>
   await openPos(page);
   await configureCloud(page);
   await page.evaluate(() => switchScreen("reports"));
-  await page.click("#reports-tab-cloud");
+  await page.evaluate(() => showCloudSalesReport());
   await expect(page.locator("#cloud-sales-report-container")).toContainText(
     "Net Sales",
   );
@@ -1175,4 +1175,21 @@ test("a refund success dialog is accepted exactly once and does not block", asyn
   await expect.poll(() => dialogs.acceptedCount()).toBeGreaterThanOrEqual(1);
   // The page is not blocked: the modal closed cleanly.
   await expect(page.locator("#cloud-refund-modal-overlay")).toHaveCount(0);
+});
+
+test("managed Reports opens shared figures directly and cannot fall back to local totals", async ({ page }) => {
+  mockApi(page, (route,url) => url.pathname === "/api/pos/reports/sales"
+    ? route.fulfill({ json: salesReportPayload() })
+    : url.pathname === "/api/pos/reports/profit-loss"
+      ? route.fulfill({ json: { netSalesMinor: 10000, costOfGoodsMinor: 2000, grossProfitMinor: 8000, operatingExpensesMinor: 1000, netProfitMinor: 7000 } })
+      : route.fulfill({ json: {} }));
+  await openPos(page); await configureCloud(page);
+  await page.evaluate(() => { window.BILLZ_MANAGED = true; switchScreen("reports"); });
+  await expect(page.locator("#local-reports-view")).toBeHidden();
+  await expect(page.locator("#cloud-sales-report-view")).toBeVisible();
+  await expect(page.locator("#cloud-profit-loss-container")).toBeVisible();
+  await expect(page.locator("#cloud-profit-loss-container")).toContainText("70.00");
+  await expect(page.locator("#cloud-sales-report-container")).toContainText("Net Sales");
+  await page.evaluate(() => showLocalReports());
+  await expect(page.locator("#local-reports-view")).toBeHidden();
 });

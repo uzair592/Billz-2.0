@@ -25,7 +25,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
   const cookie = r => r.headers["set-cookie"].split(";")[0];
   const adminCookie = cookie(await send("POST", "/platform-admin/api/auth/login", { username: "auditadmin", password: "AdminPassword123!" }));
   const create = async code => {
-    const r = await send("POST", "/platform-admin/api/restaurants", { code, name: code, ownerUsername: "owner", ownerPassword: "OwnerPassword123!" }, adminCookie);
+    const r = await send("POST", "/platform-admin/api/restaurants", { code, name: code, ownerUsername: code === "readiness-cafe" ? "owner" : "other_readiness_owner", ownerPassword: "OwnerPassword123!" }, adminCookie);
     assert.equal(r.statusCode, 201, r.body); return r.json();
   };
   const restaurant = await create("readiness-cafe"), other = await create("other-readiness");
@@ -113,7 +113,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     assert.equal((await control.query("SELECT count(*) FROM audit_logs WHERE action='expense.created' AND resource_id=$1", [id])).rows[0].count, "1");
     const report = await send("GET", "/api/pos/expenses?startDate=2026-10-13&endDate=2026-10-13", undefined, second, restaurant.id);
     assert.equal(report.json().totalMinor, 5000); assert.equal(report.json().expenses[0].description, input.description);
-    const foreign = await signIn("owner", other.code);
+    const foreign = await signIn("other_readiness_owner", other.code);
     assert.equal((await send("GET", "/api/pos/expenses?startDate=2026-10-13&endDate=2026-10-13", undefined, foreign, other.id)).json().totalMinor, 0);
     const cashierCookie = await signIn("new_cashier");
     assert.equal((await send("POST", "/api/pos/expenses", input, cashierCookie, restaurant.id)).statusCode, 403);

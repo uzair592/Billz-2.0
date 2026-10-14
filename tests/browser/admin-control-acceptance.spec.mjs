@@ -26,11 +26,10 @@ test("admin creates a dynamic plan and restaurant, enforces seats, resets creden
   const code = "ui_cafe (01)";
   const signIn = async (
     target,
-    username = "owner",
+    username = "control_owner",
     password = "OwnerPassword123!",
   ) => {
     await target.goto("/");
-    await target.fill("#cloud-restaurant-code", code);
     await target.fill("#cloud-username", username);
     await target.fill("#cloud-password", password);
     const response = target.waitForResponse(
@@ -70,7 +69,7 @@ test("admin creates a dynamic plan and restaurant, enforces seats, resets creden
     await page.click("#open-create-modal");
     await page.fill("#create-name", "Enterprise UI Cafe");
     await page.fill("#create-code", code);
-    await page.fill("#create-owner-user", "owner");
+    await page.fill("#create-owner-user", "control_owner");
     await page.fill("#create-owner-pass", "OwnerPassword123!");
     await page.fill("#create-owner-email", "owner.ui@example.com");
     await page.selectOption("#create-plan", "ENTERPRISE_UI");

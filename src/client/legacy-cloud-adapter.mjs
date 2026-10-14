@@ -190,16 +190,26 @@ export function createLegacyCloudAdapter({
     async checkoutOnline(order) {
       const current = await session.currentUser();
       if (!current?.user) throw new Error("Sign in before completing online checkout.");
+      if (!current.restaurantId) throw new OrderSyncError("Choose your restaurant before checkout.", { code: "RESTAURANT_REQUIRED", status: 400 });
       let context = await storage.get(CLOUD_CONTEXT_KEY);
-      if (!context || context.restaurantId !== current.restaurantId) {
-        try {
-          const imported = await this.importCatalog({ restaurantId: current.restaurantId });
-          context = imported.context;
-        } catch (importErr) {
-          console.warn("Auto-catalog import failed:", importErr);
-        }
+      if (!context || context.restaurantId !== current.restaurantId || order.items.some(item => !context.mappings?.menuItems?.[String(item.id)])) {
+        // A fresh till only needs the published UUID mappings. Reading them is
+        // allowed for cashiers; publishing here would require menu permission
+        // and could overwrite a newer menu or the restaurant's stock.
+        const response = await fetchImpl("/api/pos/catalog", {
+          credentials: "same-origin", cache: "no-store",
+          headers: { "x-restaurant-id": current.restaurantId },
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new OrderSyncError(data?.error || "Could not load the restaurant menu.", {
+          status: response.status, code: data?.code || "CATALOG_READ_FAILED", retriable: response.status >= 500,
+        });
+        if (!data?.mappings) throw new OrderSyncError("Your restaurant menu is not available yet. Ask the owner to save menu items before taking orders.", { code: "CATALOG_NOT_READY", status: 409 });
+        const authorized = await session.currentUser();
+        if (!authorized.user || authorized.restaurantId !== current.restaurantId) throw new OrderSyncError("The signed-in restaurant changed. Sign in again before checkout.", { code: "CLOUD_TENANT_MISMATCH", status: 403 });
+        context = { version: 1, restaurantId: current.restaurantId, revision: data.revision, mappings: data.mappings };
+        await storage.set(CLOUD_CONTEXT_KEY, context);
       }
-      if (!context || context.restaurantId !== current.restaurantId) throw new Error("Could not synchronize catalog with the restaurant server before checkout.");
       if (order.items.some(item => (item.extras || []).length)) throw new Error("Cloud checkout does not yet support ingredient extras. Remove extras before taking payment.");
       const payload = buildCloudOrderPayload(order, context.mappings);
       payload.expectedTotalMinor = minor(order.totalBill);
