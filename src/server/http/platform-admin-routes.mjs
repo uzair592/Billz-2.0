@@ -1,17 +1,18 @@
 import { z } from "zod";
+import { passwordSchema } from "../auth/password-policy.mjs";
 
 const PLATFORM_COOKIE_NAME = "platform_admin_session";
 
 const adminLoginSchema = z.object({
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(1).max(200),
+  password: passwordSchema,
 });
 
 const createRestaurantSchema = z.object({
   name: z.string().trim().min(1).max(160),
   code: z.string().trim().min(2).max(64),
   ownerUsername: z.string().trim().min(2).max(64),
-  ownerPassword: z.string().min(8).max(200),
+  ownerPassword: passwordSchema,
   ownerDisplayName: z.string().trim().min(1).max(120).optional(),
   planCode: z.string().trim().min(1).max(64).default("GROWTH"),
 });
@@ -37,26 +38,68 @@ const updateStorageSchema = z.object({
   maxStorageBytes: z.number().int().min(0),
 });
 
-export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true }) {
+const restaurantUserParams = z.object({ id: z.uuid(), userId: z.uuid() });
+const resetPasswordSchema = z.union([
+  z.object({ newPassword: passwordSchema }).strict(),
+  z.object({ generateTemporary: z.literal(true) }).strict(),
+]);
+
+const restaurantParams = z.object({ id: z.uuid() });
+const editRestaurantSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  code: z.string().trim().min(2).max(64).optional(),
+  phone: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  contactEmail: z.email().max(320).nullable().optional(),
+}).strict().refine(value => Object.keys(value).length > 0, "At least one field is required.");
+const userStatusSchema = z.object({ status: z.enum(["active", "disabled"]) }).strict();
+const paginationSchema = z.object({
+  page: z.coerce.number().int().min(1).max(1000000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+const restaurantListSchema = paginationSchema.extend({
+  search: z.string().trim().max(200).default(""),
+  status: z.enum(["all", "active", "suspended", "deactivated"]).default("all"),
+  includeTotal: z.enum(["true", "false"]).default("false"),
+});
+const auditListSchema = paginationSchema.extend({
+  restaurantId: z.uuid().optional(),
+  action: z.string().trim().max(200).default(""),
+});
+const userSchema = z.object({
+  username: z.string().trim().min(2).max(64),
+  displayName: z.string().trim().min(1).max(120),
+  role: z.enum(["owner", "manager", "cashier", "waiter", "kitchen", "accountant"]),
+  password: passwordSchema,
+}).strict();
+const editUserSchema = userSchema.pick({ username: true, displayName: true }).partial()
+  .refine(value => Object.keys(value).length > 0, "At least one field is required.");
+const paymentParams = z.object({ paymentId: z.uuid() });
+const paymentListSchema = paginationSchema.extend({ status: z.enum(["all", "pending", "approved", "rejected"]).default("pending") });
+const suspensionSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+
+export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true, loginThrottle = null }) {
   // Authentication Guard Helper for Platform Admin Routes
   async function requirePlatformAdmin(request, reply) {
     const token = request.cookies[PLATFORM_COOKIE_NAME];
     const session = await platformAdminService.authenticate(token);
     if (!session) {
-      return reply.code(401).send({ error: "Platform administrator authentication is required.", code: "UNAUTHENTICATED" });
+      return reply.code(request.url.split("?")[0].endsWith("/reset-password") ? 403 : 401).send({ error: "Platform administrator authentication is required.", code: "UNAUTHENTICATED" });
     }
     request.adminSession = session;
   }
 
   // Guard: Reject non-admins trying to access /platform-admin
   app.addHook("onRequest", async (request, reply) => {
-    if (request.url.startsWith("/platform-admin/api/") && !request.url.startsWith("/platform-admin/api/auth/login")) {
+    if (request.url.startsWith("/platform-admin/api/") && request.url.split("?")[0] !== "/platform-admin/api/auth/login") {
       await requirePlatformAdmin(request, reply);
     }
   });
 
   app.post("/platform-admin/api/auth/login", { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async (request, reply) => {
     const input = adminLoginSchema.parse(request.body);
+    const attempt = { scope: "platform_admin", username: input.username, ipAddress: request.ip };
+    await loginThrottle?.check(attempt);
     try {
       const session = await platformAdminService.login({
         username: input.username,
@@ -64,6 +107,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
         ipAddress: request.ip,
         userAgent: request.headers["user-agent"] ?? null,
       });
+      await loginThrottle?.succeeded(attempt);
       reply.setCookie(PLATFORM_COOKIE_NAME, session.token, {
         path: "/",
         httpOnly: true,
@@ -74,6 +118,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
       return { admin: { id: session.admin.id, username: session.admin.username, displayName: session.admin.displayName, status: session.admin.status } };
     } catch (err) {
       if (err.code === "INVALID_ADMIN_CREDENTIALS") {
+        await loginThrottle?.failed(attempt);
         return reply.code(401).send({ error: err.message, code: err.code });
       }
       if (err.code === "ADMIN_DISABLED") {
@@ -103,16 +148,52 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
     return platformAdminPortalService.getDashboardStats();
   });
 
+  app.get("/platform-admin/api/plans", async () => platformAdminPortalService.listPlans());
+  app.get("/platform-admin/api/payments", async request => {
+    const query = paymentListSchema.parse(request.query || {});
+    return platformAdminPortalService.listPayments({ ...query, status: query.status === "all" ? null : query.status });
+  });
+  app.post("/platform-admin/api/restaurants/:id/users", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async (request, reply) => {
+    const { id } = restaurantParams.parse(request.params);
+    const result = await platformAdminPortalService.createUser({ adminId: request.adminSession.admin.id, restaurantId: id, ...userSchema.parse(request.body) });
+    return reply.code(201).send(result);
+  });
+  app.patch("/platform-admin/api/restaurants/:id/users/:userId", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async request => {
+    const { id, userId } = restaurantUserParams.parse(request.params);
+    return platformAdminPortalService.editUser({ adminId: request.adminSession.admin.id, restaurantId: id, userId, ...editUserSchema.parse(request.body) });
+  });
+
+  app.post("/platform-admin/api/restaurants/:id/users/:userId/reset-password",
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } }, async request => {
+      const { id, userId } = restaurantUserParams.parse(request.params);
+      const input = resetPasswordSchema.parse(request.body);
+      return platformAdminPortalService.resetUserPassword({ adminId: request.adminSession.admin.id, restaurantId: id, userId, ...input });
+    });
+
   app.get("/platform-admin/api/restaurants", async (request) => {
-    const query = request.query || {};
-    const statusVal = (query.status && query.status.trim() !== "" && query.status !== "all") ? query.status.trim() : null;
+    const query = restaurantListSchema.parse(request.query || {});
     return platformAdminPortalService.listRestaurants({
-      search: query.search || null,
-      status: statusVal,
-      limit: query.limit ? Number(query.limit) : 50,
-      page: query.page ? Number(query.page) : 1,
+      search: query.search,
+      status: query.status === "all" ? null : query.status,
+      limit: query.limit,
+      page: query.page,
+      includeTotal: query.includeTotal === "true",
     });
   });
+
+  app.patch("/platform-admin/api/restaurants/:id", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async request => {
+    const { id } = restaurantParams.parse(request.params);
+    const input = editRestaurantSchema.parse(request.body);
+    return platformAdminPortalService.editRestaurant({ adminId: request.adminSession.admin.id, restaurantId: id, ...input });
+  });
+
+  app.post("/platform-admin/api/restaurants/:id/users/:userId/status", { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } }, async request => {
+    const { id, userId } = restaurantUserParams.parse(request.params);
+    const input = userStatusSchema.parse(request.body);
+    return platformAdminPortalService.setUserStatus({ adminId: request.adminSession.admin.id, restaurantId: id, userId, ...input });
+  });
+
+  app.get("/platform-admin/api/audit-logs", async request => platformAdminPortalService.listAuditLogs(auditListSchema.parse(request.query || {})));
 
   app.post("/platform-admin/api/restaurants", async (request, reply) => {
     const input = createRestaurantSchema.parse(request.body);
@@ -124,14 +205,14 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.get("/platform-admin/api/restaurants/:id", async (request, reply) => {
-    const { id } = request.params;
+    const { id } = restaurantParams.parse(request.params);
     const details = await platformAdminPortalService.getRestaurantDetails(id);
     if (!details) return reply.code(404).send({ error: "Restaurant not found." });
     return details;
   });
 
   app.post("/platform-admin/api/restaurants/:id/payments", async (request, reply) => {
-    const { id } = request.params;
+    const { id } = restaurantParams.parse(request.params);
     const input = manualPaymentSchema.parse(request.body);
     const result = await platformAdminPortalService.recordManualPayment({
       adminId: request.adminSession.admin.id,
@@ -142,7 +223,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.post("/platform-admin/api/payments/:paymentId/approve", async (request) => {
-    const { paymentId } = request.params;
+    const { paymentId } = paymentParams.parse(request.params);
     return platformAdminPortalService.approveManualPayment({
       adminId: request.adminSession.admin.id,
       paymentId,
@@ -150,7 +231,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.post("/platform-admin/api/payments/:paymentId/reject", async (request) => {
-    const { paymentId } = request.params;
+    const { paymentId } = paymentParams.parse(request.params);
     const input = rejectPaymentSchema.parse(request.body || {});
     return platformAdminPortalService.rejectManualPayment({
       adminId: request.adminSession.admin.id,
@@ -160,8 +241,8 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.post("/platform-admin/api/restaurants/:id/suspend", async (request) => {
-    const { id } = request.params;
-    const body = request.body || {};
+    const { id } = restaurantParams.parse(request.params);
+    const body = suspensionSchema.parse(request.body || {});
     return platformAdminPortalService.suspendRestaurant({
       adminId: request.adminSession.admin.id,
       restaurantId: id,
@@ -170,7 +251,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.post("/platform-admin/api/restaurants/:id/restore", async (request) => {
-    const { id } = request.params;
+    const { id } = restaurantParams.parse(request.params);
     return platformAdminPortalService.restoreRestaurant({
       adminId: request.adminSession.admin.id,
       restaurantId: id,
@@ -178,7 +259,7 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
   });
 
   app.put("/platform-admin/api/restaurants/:id/storage-allowance", async (request) => {
-    const { id } = request.params;
+    const { id } = restaurantParams.parse(request.params);
     const input = updateStorageSchema.parse(request.body);
     return platformAdminPortalService.updateStorageAllowance({
       adminId: request.adminSession.admin.id,

@@ -165,7 +165,7 @@ jobs:
           TEST_DATABASE_ADMIN_URL: postgresql://postgres:validation-only@localhost:5432/restaurant_pos_test
           TEST_DATABASE_URL: postgresql://pos_integration_app:integration-only@localhost:5432/restaurant_pos_test
         run: |
-          node --test tests/saas-core-fullstack.test.mjs
+          npm run test:fullstack
           node --test tests/launch-regressions-postgres.test.mjs
           node --test tests/inventory-purchasing-postgres.test.mjs
 
@@ -495,9 +495,10 @@ jobs:
           TEST_CONTROL_DATABASE_URL: postgresql://pos_control_test:control-test-only@localhost:5432/restaurant_pos_test
         run: npm run test:browser:saas-core
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: saas-playwright-report
           path: |
             playwright-report/
             test-results/
+            tests/browser/screenshots/

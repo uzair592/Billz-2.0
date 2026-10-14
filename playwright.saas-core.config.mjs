@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: "saas-core-acceptance.spec.mjs",
+  testMatch: ["saas-core-acceptance.spec.mjs", "launch-readiness-acceptance.spec.mjs"],
   timeout: 60_000,
   expect: { timeout: 10_000 },
   retries: 0,
@@ -19,7 +19,7 @@ export default defineConfig({
       SESSION_SECRET: "test-session-secret-development-32bytes",
       TRUSTED_ORIGIN: "http://127.0.0.1:3000",
       DISABLE_RATE_LIMIT: "true",
-      NODE_ENV: "development",
+      NODE_ENV: "test",
     },
   },
   use: {

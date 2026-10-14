@@ -61,12 +61,35 @@ export async function restockInventoryRecipe(client, { restaurantId, orderId, re
       notes: "Refund using frozen sale recipe", actorUserId: userId, now });
   }
 }
-export async function reverseRemainingInventory(client, { restaurantId, orderId, userId, now }) {
+export async function nonRestockedRefundUsage(client, { restaurantId, orderId }) {
+  const rows = (await client.query(`SELECT oi.recipe_snapshot, SUM(ri.quantity) AS refunded_quantity
+    FROM order_refund_items ri JOIN order_refunds r ON r.id = ri.refund_id AND r.restaurant_id = ri.restaurant_id
+    JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+    WHERE r.restaurant_id = $1 AND r.order_id = $2 AND r.status = 'completed' AND ri.restock = false
+    GROUP BY oi.id, oi.recipe_snapshot`, [restaurantId, orderId])).rows;
+  const inventory = new Map(), legacy = new Map();
+  for (const row of rows) {
+    const recipe = row.recipe_snapshot ?? {};
+    if (recipe.version !== 2) continue; // Historical snapshots require reconciliation.
+    const quantity = Number(row.refunded_quantity);
+    for (const item of recipe.inventoryItems || []) inventory.set(item.inventoryItemId, (inventory.get(item.inventoryItemId) || 0) + quantity * Number(item.quantityPerUnit));
+    for (const item of recipe.items || []) legacy.set(item.stockItemId, (legacy.get(item.stockItemId) || 0) + quantity * Number(item.quantityBaseUnits));
+  }
+  return { inventory, legacy };
+}
+export async function reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned = new Map() }) {
+  const restocked = [];
   const rows = (await client.query(`SELECT inventory_item_id, -SUM(quantity_delta) AS remaining
     FROM inventory_movements WHERE restaurant_id = $1 AND reference_type = 'order' AND reference_id = $2
       AND movement_type IN ('sale_consumption', 'sale_reversal') GROUP BY inventory_item_id
       HAVING SUM(quantity_delta) < 0 ORDER BY inventory_item_id`, [restaurantId, orderId])).rows;
-  for (const row of rows) await applyStockChange(client, { restaurantId, inventoryItemId: row.inventory_item_id,
-    movementType: "sale_reversal", quantityDelta: Number(row.remaining), referenceType: "order", referenceId: orderId,
+  for (const row of rows) {
+    const quantity = Math.max(0, Number(row.remaining) - (unreturned.get(row.inventory_item_id) || 0));
+    if (!quantity) continue;
+    await applyStockChange(client, { restaurantId, inventoryItemId: row.inventory_item_id,
+    movementType: "sale_reversal", quantityDelta: quantity, referenceType: "order", referenceId: orderId,
     idempotencyKey: operationId(`cancel:${orderId}:${row.inventory_item_id}`), notes: "Cancellation of remaining consumed stock", actorUserId: userId, now });
+    restocked.push({ inventoryItemId: row.inventory_item_id, quantityBaseUnits: quantity });
+  }
+  return restocked;
 }

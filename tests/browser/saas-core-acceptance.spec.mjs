@@ -61,6 +61,8 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
         await page.screenshot({ path: `tests/browser/screenshots/platform-admin-dashboard-${vp.name}.png` });
       }
 
+      await page.click('[data-view="restaurants"]');
+
       // 2. Create Restaurant via Platform Admin Portal UI
       await page.click("#open-create-modal");
       await page.waitForSelector("#create-modal:not(.hidden)");
@@ -79,6 +81,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       await page.waitForSelector("#create-modal", { state: "hidden" });
 
       // 3. View created restaurant details, record & approve manual payment
+      await page.click('[data-view="restaurants"]');
       await page.fill("#search-input", restCode);
       await expect(page.locator("#restaurants-tbody")).toContainText(restCode);
       await page.click(`.btn-manage[data-id]`);
@@ -89,6 +92,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
 
       await page.waitForSelector(".btn-approve");
       await page.click(".btn-approve");
+      await page.click("#confirm-accept");
 
       // Verify payment status updated to approved
       await expect(page.locator("#detail-content")).toContainText("approved");
@@ -175,12 +179,14 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       // 8. Platform Admin Suspends Restaurant
       await page.goto("http://127.0.0.1:3000/platform-admin/");
       await page.waitForSelector("#portal-view:not(.hidden)");
+      await page.click('[data-view="restaurants"]');
       await page.fill("#search-input", restCode);
       await page.waitForSelector(`.btn-manage[data-id]`);
       await page.click(`.btn-manage[data-id]`);
 
       await page.waitForSelector("#suspend-btn");
       await page.click("#suspend-btn");
+      await page.click("#confirm-accept");
       await page.waitForSelector("#restore-btn");
 
       // 9. Cashier receives suspension response on POS API
@@ -201,6 +207,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
 
       // 10. Platform Admin Restores Restaurant
       await page.click("#restore-btn");
+      await page.click("#confirm-accept");
       await page.waitForSelector("#suspend-btn");
 
       // 11. Cashier regains access
@@ -218,4 +225,68 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       }
     });
   }
+
+  test("support reset revokes old sessions and passwords; admin text stays inert",async({page,browser})=>{
+    const ownerContext=await browser.newContext();const ownerPage=await ownerContext.newPage();
+    const code="reset-browser-cafe",username="reset_owner";
+    const canary='<img src=x onerror="globalThis.adminCanaryExecuted=true">';
+    try {
+      await page.goto("/platform-admin/");
+      await page.fill("#username","superadmin");await page.fill("#password","SuperAdminPassword123!");
+      await page.click("#login-form button[type=submit]");
+      await expect(page.locator("#portal-view")).toBeVisible();await page.click('[data-view="restaurants"]');
+      await page.evaluate(()=>{globalThis.adminCanaryExecuted=false;});
+      await page.click("#open-create-modal");await page.fill("#create-code",code);await page.fill("#create-name",canary);
+      await page.fill("#create-owner-user",username);await page.fill("#create-owner-pass","OriginalBrowserPassword!42");
+      await page.click("#create-restaurant-form button[type=submit]");await expect(page.locator("#create-modal")).toBeHidden();
+      await page.fill("#search-input",code);const row=page.locator("#restaurants-tbody tr").filter({hasText:code});
+      await expect(row).toContainText(canary);await expect(row.locator("img")).toHaveCount(0);
+      const rest=(await pool.query("SELECT id FROM restaurants WHERE code=$1",[code])).rows[0];
+      await pool.query("UPDATE users SET display_name=$2 WHERE restaurant_id=$1",[rest.id,canary]);
+      await pool.query("UPDATE plans SET name=$1 WHERE code='GROWTH'",[canary]);
+      await row.locator(".btn-manage").click();await expect(page.locator("#users-tbody")).toContainText(username);
+      await expect(page.locator("#detail-content")).toContainText(canary);await expect(page.locator("#detail-content img")).toHaveCount(0);
+      expect(await page.evaluate(()=>globalThis.adminCanaryExecuted)).toBe(false);
+      const ownerSignIn=async(password)=>{
+        await ownerPage.goto("http://127.0.0.1:3000/");await ownerPage.fill("#cloud-restaurant-code",code);await ownerPage.fill("#cloud-username",username);
+        await ownerPage.fill("#cloud-password",password);await ownerPage.click("#cloud-signin-button");await expect(ownerPage.locator(".app-container")).toBeVisible();
+      };
+      await ownerSignIn("OriginalBrowserPassword!42");
+      const oldSession=(await ownerContext.cookies()).find(cookie=>cookie.name==="pos_session");expect(Boolean(oldSession)).toBe(true);
+      await page.locator("#users-tbody .user-reset").click();await page.uncheck("#reset-generate");await page.fill("#reset-new-password","ResetBrowserPassword!42");
+      await page.click("#reset-password-form button[type=submit]");await page.click("#confirm-accept");await expect(page.locator("#reset-modal")).toBeHidden();
+      expect((await ownerContext.request.get("http://127.0.0.1:3000/api/auth/me")).status()).toBe(401);
+      expect((await ownerContext.request.post("http://127.0.0.1:3000/api/auth/login",{data:{restaurantCode:code,username,password:"OriginalBrowserPassword!42"}})).status()).toBe(401);
+      // This is the real bounded failed-login delay, not a disabled account guard.
+      await ownerPage.waitForTimeout(300);
+      await ownerSignIn("ResetBrowserPassword!42");
+      expect((await ownerContext.request.get("http://127.0.0.1:3000/api/auth/me")).status()).toBe(200);
+      expect((await ownerContext.request.get("http://127.0.0.1:3000/api/auth/me",{headers:{cookie:`pos_session=${oldSession.value}`}})).status()).toBe(401);
+      const audit=(await pool.query("SELECT metadata FROM audit_logs WHERE restaurant_id=$1 AND action='user.password_reset'",[rest.id])).rows;
+      expect(audit.length).toBe(1);expect(JSON.stringify(audit).includes("ResetBrowserPassword")).toBe(false);
+
+      await page.locator("#users-tbody .user-reset").click();await page.click("#reset-password-form button[type=submit]");await page.click("#confirm-accept");
+      let generatedIsStrong=false;
+      try {
+        await expect(page.locator("#temporary-password-modal")).toBeVisible();
+        generatedIsStrong=await page.locator("#temporary-password").evaluate(input=>/^[A-Za-z0-9_-]{32}$/.test(input.value));
+        await page.click('[data-close="temporary-password-modal"]');
+      }finally{
+        // Never retain a generated password in screenshots or failure artifacts.
+        await page.evaluate(()=>{document.getElementById("temporary-password").value="";document.getElementById("temporary-password-modal").close();}).catch(()=>{});
+      }
+      expect(generatedIsStrong).toBe(true);await expect(page.locator("#temporary-password")).toHaveValue("");
+      expect((await ownerContext.request.get("http://127.0.0.1:3000/api/auth/me")).status()).toBe(401);
+      await page.click("#edit-restaurant-btn");await page.fill("#edit-name","Reset Test Cafe");await page.fill("#edit-phone","03001234567");
+      await page.fill("#edit-email","support@example.com");await page.click("#edit-restaurant-form button[type=submit]");
+      await expect(page.locator("#edit-modal")).toBeHidden();await expect(page.locator("#detail-content")).toContainText("support@example.com");
+      await page.locator("#users-tbody .user-status").click();await page.click("#confirm-accept");await expect(page.locator("#users-tbody")).toContainText("disabled");
+      await page.locator("#users-tbody .user-status").click();await page.click("#confirm-accept");await expect(page.locator("#users-tbody .user-status")).toHaveText("Disable");
+      await page.click('[data-view="audits"]');await page.fill("#audit-search","user.password_reset");await expect(page.locator("#audits-tbody")).toContainText("user.password_reset");
+      await page.screenshot({path:"tests/browser/screenshots/admin-audit-reset.png"});
+    }finally{
+      await page.evaluate(()=>{const input=document.getElementById("temporary-password");if(input)input.value="";}).catch(()=>{});
+      await ownerContext.close();
+    }
+  });
 });

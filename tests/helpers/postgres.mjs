@@ -92,15 +92,17 @@ export async function provisionIntegrationDatabase() {
       DO $$
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
-          CREATE ROLE ${APP_ROLE} LOGIN PASSWORD 'integration-only' NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE ${APP_ROLE};
         END IF;
+        ALTER ROLE ${APP_ROLE} LOGIN PASSWORD 'integration-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
       END
       $$;
     `);
     await admin.query(`DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pos_control_test') THEN
-        CREATE ROLE pos_control_test LOGIN PASSWORD 'control-test-only' NOSUPERUSER BYPASSRLS;
+        CREATE ROLE pos_control_test;
       END IF;
+      ALTER ROLE pos_control_test LOGIN PASSWORD 'control-test-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
     END $$;`);
     await admin.query(`GRANT USAGE ON SCHEMA public TO pos_control_test;
       GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_control_test;
@@ -142,8 +144,8 @@ export async function createAppPool() {
     max: 10,
     options: "-c statement_timeout=15000",
   });
-  await pool.query("SELECT 1");
-  return pool;
+  try { await pool.query("SELECT 1"); return pool; }
+  catch (error) { await pool.end(); throw error; }
 }
 
 export async function isDatabaseAvailable() {
@@ -241,6 +243,6 @@ export function controlDatabaseUrl() {
 }
 export async function createControlPool() {
   const pool = new pg.Pool({ connectionString: controlDatabaseUrl(), max: 5 });
-  await pool.query("SELECT 1");
-  return pool;
+  try { await pool.query("SELECT 1"); return pool; }
+  catch (error) { await pool.end(); throw error; }
 }

@@ -53,7 +53,7 @@ application refuses placeholder values in production.
 | `STRIPE_WEBHOOK_SECRET` | conditional | required when `PAYMENT_PROVIDER=stripe` |
 | `STRIPE_PUBLISHABLE_KEY` | no | publishable key for checkout |
 | `LOG_LEVEL` | no | `info` recommended for production |
-| `TRUST_PROXY` | conditional | `true` only behind a trusted reverse proxy |
+| `TRUST_PROXY` | conditional | `true` on Render; requires verified `TRUSTED_PROXY_CIDRS` |
 
 Generate secrets with a CSPRNG, for example:
 
@@ -222,3 +222,17 @@ container replacement.
 Because the database is separate from the application container, you can
 redeploy, scale, or roll back the application without touching tenant
 data.
+
+### Launch configuration alignment
+
+Render launch uses `PAYMENT_PROVIDER=manual`; Stripe credentials are unnecessary. Set `TRUST_PROXY=true` and supply `TRUSTED_PROXY_CIDRS` with the verified proxy chain addresses/CIDRs for your deployment. Do not guess the forwarding depth or trust all private networks. Untrusted immediate peers cannot supply trusted `X-Forwarded-For` values; forged prefixes before the first untrusted hop are ignored. Test two different client IPs and a forged header on staging. This repository cannot infer Render's runtime proxy addresses. Startup fails closed if proxy trust is enabled without the allowlist.
+
+Provision a non-superuser NOBYPASSRLS POS connection in `DATABASE_URL` and a separate non-superuser BYPASSRLS auth/admin connection in `CONTROL_DATABASE_URL` (not the database-owner URL). Apply migrations with an owner connection and grant the runtime roles their required privileges. `render.yaml` leaves the control connection and proxy allowlist for operator configuration.
+
+Failed-login counters live in PostgreSQL, scoped to account and IP. Successful login clears that counter; failed credentials impose a progressive 250 ms–5 s delay, not a 15-minute account lock. Existing per-IP request limits remain. Admin scripts are external and admin routes have a scoped CSP; the legacy POS CSP is unchanged.
+
+Password recovery is support-assisted. Set `SUPPORT_CONTACT` to the public support phone/email/text; `/api/public/config` exposes only that text and the login help renders it with `textContent`. Admin reset accepts exactly `{newPassword}` or `{generateTemporary:true}`, revokes every session and records an audit without credentials. A generated password is returned only by that mutation and is never persisted in plaintext. Logged-in users can change their password with the current password; other sessions are revoked. The unused email reset-token table is removed by migration 016.
+
+The admin portal uses local CSS/JavaScript with no CDN or build step. Its route-scoped CSP disallows inline scripts and styles. The portal provides dashboard totals, restaurant search/status filtering and pagination, subscription/payment information, actual file allowances, restaurant contact edits, user password/status controls, and a read-only paginated audit viewer. Generated passwords are cleared from the dialog when it closes and are not retained in browser storage.
+
+New admin endpoints: `PATCH /platform-admin/api/restaurants/:id`, `POST /platform-admin/api/restaurants/:id/users/:userId/status` and `GET /platform-admin/api/audit-logs`. Mutations require platform-admin authentication and write audit entries; disabling a user revokes their sessions, and enabling them does not revive old sessions. The restaurant list keeps its existing array response unless `includeTotal=true` requests pagination metadata. Migration 017 adds a restaurant contact-email field and an audit pagination index. Audit responses redact nested credential fields.

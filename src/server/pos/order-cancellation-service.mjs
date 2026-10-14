@@ -1,4 +1,4 @@
-import { reverseRemainingInventory } from "./inventory-sale-snapshot.mjs";
+import { reverseRemainingInventory, nonRestockedRefundUsage } from "./inventory-sale-snapshot.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
 
@@ -74,7 +74,8 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
             );
           }
 
-          await reverseRemainingInventory(client, { restaurantId, orderId, userId, now });
+          const unreturned = await nonRestockedRefundUsage(client, { restaurantId, orderId });
+          const restocked = await reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned: unreturned.inventory });
           const reversalResult = await client.query(
             `WITH sales AS (
                SELECT stock_item_id, SUM(-quantity_delta) AS quantity
@@ -87,6 +88,8 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
                 WHERE restaurant_id = $1 AND order_id = $2
                   AND movement_type = 'sale_reversal'
                 GROUP BY stock_item_id
+             ), unreturned AS (
+               SELECT * FROM jsonb_to_recordset($6::jsonb) AS x(stock_item_id uuid, quantity numeric)
              )
              INSERT INTO stock_movements (
                id, restaurant_id, branch_id, stock_item_id, order_id,
@@ -94,17 +97,17 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
                created_by_user_id
              )
              SELECT gen_random_uuid(), $1, $3, s.stock_item_id, $2,
-                    'sale_reversal', s.quantity - COALESCE(r.quantity, 0),
+                    'sale_reversal', s.quantity - COALESCE(r.quantity, 0) - COALESCE(u.quantity, 0),
                     gen_random_uuid(), $4, $5
                FROM sales s
                LEFT JOIN reversals r ON r.stock_item_id = s.stock_item_id
-              WHERE s.quantity - COALESCE(r.quantity, 0) <> 0
+               LEFT JOIN unreturned u ON u.stock_item_id = s.stock_item_id
+              WHERE s.quantity - COALESCE(r.quantity, 0) - COALESCE(u.quantity, 0) > 0
              ON CONFLICT (restaurant_id, idempotency_key) DO NOTHING
              RETURNING stock_item_id, quantity_delta`,
-            [restaurantId, orderId, order.branch_id, now, userId],
+            [restaurantId, orderId, order.branch_id, now, userId, JSON.stringify([...unreturned.legacy].map(([stock_item_id, quantity]) => ({ stock_item_id, quantity })))],
           );
 
-          const restocked = [];
           for (const movement of reversalResult.rows) {
             await client.query(
               `UPDATE inventory_balances
@@ -173,7 +176,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
 
           const restockedSummary = restocked.length
             ? restocked
-              .map((entry) => `${entry.stockItemId} +${entry.quantityBaseUnits}`)
+              .map((entry) => `${entry.stockItemId ?? entry.inventoryItemId} +${entry.quantityBaseUnits}`)
               .join("; ")
             : "Nothing restocked";
           const cancellationResult = await client.query(

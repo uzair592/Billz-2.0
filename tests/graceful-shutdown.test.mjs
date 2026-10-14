@@ -1,6 +1,6 @@
 import { APP_DATABASE_URL, controlDatabaseUrl, provisionIntegrationDatabase } from "./helpers/postgres.mjs";
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -68,6 +68,7 @@ function waitForExit(child, timeoutMs = 15_000) {
 }
 
 describe("graceful startup and shutdown", () => {
+  before(async () => { await provisionIntegrationDatabase(); });
   it("starts and serves liveness", async () => {
     const port = 34_800 + Math.floor(Math.random() * 300);
     const server = await startServer({

@@ -55,7 +55,32 @@ function maskedAccountNumber(value) {
 
 export function createLegacyCatalogImportService(pool) {
   return Object.freeze({
-    async import({ restaurantId, branchId, userId, snapshot }) {
+    async read({ restaurantId, branchId, userId, includeCosts = true }) {
+      return withTenantTransaction(pool, { restaurantId, userId }, async client => {
+        const row = (await client.query("SELECT revision, snapshot, mappings FROM tenant_catalogs WHERE restaurant_id = $1", [restaurantId])).rows[0];
+        if (!row?.snapshot) return { revision: Number(row?.revision ?? 0), snapshot: null, mappings: null };
+        const snapshot = structuredClone(row.snapshot);
+        const balances = (await client.query(`SELECT s.legacy_key, b.quantity_base_units, b.average_cost_minor_per_base_unit
+          FROM inventory_balances b JOIN stock_items s ON s.id = b.stock_item_id AND s.restaurant_id = b.restaurant_id
+          WHERE b.branch_id = $1`, [branchId])).rows;
+        for (const balance of balances) {
+          const key = balance.legacy_key;
+          const quantity = Number(balance.quantity_base_units), cost = Number(balance.average_cost_minor_per_base_unit) / 100;
+          if (snapshot.pos_ingredient_stock[key]) Object.assign(snapshot.pos_ingredient_stock[key], { stockGrams: quantity, avgCostPerGram: cost });
+          if (snapshot.pos_softdrink_stock[key]) Object.assign(snapshot.pos_softdrink_stock[key], { stockUnits: quantity, avgCostPerUnit: cost });
+          if (snapshot.pos_icecream_stock[key]) Object.assign(snapshot.pos_icecream_stock[key], { stockGrams: quantity, avgCostPerGram: cost });
+        }
+        if (!includeCosts) {
+          for (const item of snapshot.pos_menu) item.recipeOthersCost = 0;
+          for (const stock of Object.values(snapshot.pos_ingredient_stock)) stock.avgCostPerGram = 0;
+          for (const stock of Object.values(snapshot.pos_softdrink_stock)) stock.avgCostPerUnit = 0;
+          for (const stock of Object.values(snapshot.pos_icecream_stock)) stock.avgCostPerGram = 0;
+          for (const account of snapshot.pos_bank_accounts) account.openingBalance = 0;
+        }
+        return { revision: Number(row.revision), snapshot, mappings: row.mappings };
+      });
+    },
+    async import({ restaurantId, branchId, userId, snapshot, expectedRevision }) {
       unique(snapshot.pos_categories, "category");
       unique(snapshot.pos_menu.map((item) => item.id), "legacy menu item ID");
       const itemNumbers = snapshot.pos_menu.map((item) => item.itemNumber ?? item.id);
@@ -170,6 +195,14 @@ export function createLegacyCatalogImportService(pool) {
       for (const legacyItemId of componentsByItem.keys()) visit(legacyItemId);
 
       return withTenantTransaction(pool, { restaurantId, userId }, async (client) => {
+        await client.query("INSERT INTO tenant_catalogs (restaurant_id) VALUES ($1) ON CONFLICT DO NOTHING", [restaurantId]);
+        const catalog = (await client.query("SELECT revision FROM tenant_catalogs WHERE restaurant_id = $1 FOR UPDATE", [restaurantId])).rows[0];
+        const revision = Number(catalog?.revision ?? 0);
+        // Existing catalogs require a version: a stale till must never overwrite another device's edits.
+        if ((revision > 0 && expectedRevision === undefined) || (expectedRevision !== undefined && expectedRevision !== revision)) {
+          throw Object.assign(new Error("Another device updated the catalog. Refresh it before publishing your changes."), { code: "CATALOG_CONFLICT", statusCode: 409 });
+        }
+        await client.query("UPDATE menu_items SET is_active = false WHERE legacy_item_id IS NOT NULL AND NOT (legacy_item_id = ANY($1::bigint[]))", [snapshot.pos_menu.map(item => item.id)]);
         const categoryIds = new Map();
         for (let index = 0; index < snapshot.pos_categories.length; index += 1) {
           const name = snapshot.pos_categories[index];
@@ -329,9 +362,7 @@ export function createLegacyCatalogImportService(pool) {
                average_cost_minor_per_base_unit
              ) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (restaurant_id, branch_id, stock_item_id)
-             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
-               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
-               version = inventory_balances.version + 1`,
+             DO NOTHING`,
             [
               restaurantId, branchId, stockItemId,
               Number(balance.stockGrams) || 0,
@@ -368,9 +399,7 @@ export function createLegacyCatalogImportService(pool) {
                average_cost_minor_per_base_unit
              ) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (restaurant_id, branch_id, stock_item_id)
-             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
-               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
-               version = inventory_balances.version + 1`,
+             DO NOTHING`,
             [restaurantId, branchId, stockItemId, balance.stockUnits, minor(balance.avgCostPerUnit)],
           );
         }
@@ -403,9 +432,7 @@ export function createLegacyCatalogImportService(pool) {
                average_cost_minor_per_base_unit
              ) VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (restaurant_id, branch_id, stock_item_id)
-             DO UPDATE SET quantity_base_units = EXCLUDED.quantity_base_units,
-               average_cost_minor_per_base_unit = EXCLUDED.average_cost_minor_per_base_unit,
-               version = inventory_balances.version + 1`,
+             DO NOTHING`,
             [restaurantId, branchId, stockItemId, balance.stockGrams, minor(balance.avgCostPerGram)],
           );
         }
@@ -491,8 +518,6 @@ export function createLegacyCatalogImportService(pool) {
              DO UPDATE SET display_name = EXCLUDED.display_name,
                bank_name = EXCLUDED.bank_name,
                masked_account_number = EXCLUDED.masked_account_number,
-               opening_balance_minor = EXCLUDED.opening_balance_minor,
-               opening_balance_date = EXCLUDED.opening_balance_date,
                is_active = EXCLUDED.is_active
              RETURNING id`,
             [
@@ -505,7 +530,7 @@ export function createLegacyCatalogImportService(pool) {
           financialAccountIds.set(legacyAccountId, result.rows[0].id);
         }
 
-        return {
+        const result = {
           categories: Object.fromEntries(categoryIds),
           subcategories: Object.fromEntries(subcategoryIds),
           menuItems: Object.fromEntries(menuItemIds),
@@ -522,6 +547,11 @@ export function createLegacyCatalogImportService(pool) {
             financialAccounts: financialAccountIds.size,
           },
         };
+        // Retain only masked account numbers; read overlays authoritative stock balances.
+        const sharedSnapshot = { ...snapshot, pos_bank_accounts: snapshot.pos_bank_accounts.map(account => ({ ...account, accountNumber: maskedAccountNumber(account.accountNumber) })) };
+        await client.query(`UPDATE tenant_catalogs SET revision = revision + 1, snapshot = $2, mappings = $3, updated_at = now() WHERE restaurant_id = $1`,
+          [restaurantId, JSON.stringify(sharedSnapshot), JSON.stringify(result)]);
+        return { ...result, revision: revision + 1 };
       });
     },
   });

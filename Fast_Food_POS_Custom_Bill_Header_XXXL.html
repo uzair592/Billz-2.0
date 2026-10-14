@@ -2390,64 +2390,6 @@
           display: block;
         }
 
-        .sidebar,
-        .sidebar:not(.collapsed),
-        .sidebar.collapsed {
-          position: sticky;
-          top: 0;
-          z-index: 1000;
-          width: 100%;
-          height: auto;
-          max-height: none;
-          padding: 8px;
-          overflow-x: auto;
-          overflow-y: hidden;
-        }
-
-        .sidebar .logo-area {
-          min-height: 46px;
-          padding: 3px 7px 8px;
-          justify-content: space-between !important;
-        }
-
-        .sidebar .logo-text-block {
-          display: block !important;
-        }
-
-        .sidebar .logo-area h2 {
-          font-size: 14px !important;
-          white-space: nowrap;
-        }
-
-        .sidebar .status-badge {
-          display: none !important;
-        }
-
-        .sidebar .menu {
-          flex-direction: row;
-          gap: 5px;
-          margin-top: 7px;
-          overflow-x: auto;
-          padding-bottom: 2px;
-        }
-
-        .sidebar .menu-btn,
-        .sidebar.collapsed .menu-btn {
-          min-width: 46px;
-          min-height: 42px;
-          padding: 8px 11px;
-          justify-content: center;
-          white-space: nowrap;
-        }
-
-        .sidebar .menu-btn-label {
-          display: none !important;
-        }
-
-        .sidebar-footer {
-          display: none;
-        }
-
         .content-area {
           height: auto;
           min-height: calc(100vh - 105px);
@@ -3310,71 +3252,9 @@
           display: block;
         }
 
-        .sidebar,
-        .sidebar:not(.collapsed),
-        .sidebar.collapsed {
-          position: fixed;
-          inset: auto 0 0 0;
-          z-index: 1500;
-          display: block;
-          width: 100%;
-          height: 64px;
-          padding: 7px 8px;
-          overflow: hidden;
-          border-top: 1px solid #273247;
-          background: #111827;
-        }
-
-        .sidebar .logo-area,
-        .sidebar .sidebar-footer,
-        .sidebar .menu-section-label {
-          display: none !important;
-        }
-
-        .sidebar .menu {
-          display: flex;
-          flex-direction: row;
-          gap: 3px;
-          height: 100%;
-          margin: 0;
-          overflow-x: auto;
-          scrollbar-width: none;
-        }
-
-        .sidebar .menu-btn,
-        .sidebar.collapsed .menu-btn {
-          display: grid;
-          grid-template-rows: 25px 12px;
-          place-items: center;
-          min-width: 62px;
-          min-height: 48px;
-          padding: 2px 5px;
-          gap: 1px;
-          border-radius: 8px;
-        }
-
-        .sidebar .menu-btn-label,
-        .sidebar.collapsed .menu-btn-label {
-          display: block !important;
-          max-width: 58px;
-          overflow: hidden;
-          font-size: 7px;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .sidebar .menu-btn-icon {
-          background: transparent;
-          font-size: 16px;
-        }
-
-        .sidebar .menu-btn.active {
-          box-shadow: inset 0 -2px #f97316;
-        }
-
         .content-area {
           width: 100%;
-          padding: 0 0 64px;
+          padding: 0;
         }
 
         .app-topbar {
@@ -11281,7 +11161,7 @@
           <div id="ledger-movement-modal" class="modal-overlay hidden" style="z-index:9999;"><div class="modal-card" style="max-width:430px;"><h2>Record Money Movement</h2><div style="display:grid; gap:8px;"><select id="ledger-movement-destination"></select><select id="ledger-movement-type"><option value="opening">Opening balance / Adjustment In</option><option value="deposit">Deposit / Other Income</option><option value="withdrawal">Withdrawal / Other Expense</option></select><input id="ledger-movement-amount" type="number" min="0.01" step="0.01" placeholder="Amount"><input id="ledger-movement-date" type="date"><input id="ledger-movement-description" placeholder="Description"><div style="display:flex; gap:8px;"><button type="button" class="btn-sm primary" onclick="saveLedgerMovement()">Save</button><button type="button" class="btn-sm" onclick="closeLedgerMovementModal()">Cancel</button></div></div></div></div>
         </section>
 
-        <section id="screen-expenses" class="screen-view hidden">
+        <section id="screen-expenses" class="screen-view hidden"><div id="cloud-expenses-container" class="hidden"></div><div id="local-expenses-container">
           <div
             style="
               display: flex;
@@ -11760,9 +11640,9 @@
               </div>
             </div>
           </div>
-        </section>
+        </div></section>
 
-        <section id="screen-reports" class="screen-view hidden">
+        <section id="screen-reports" class="screen-view hidden"><div id="cloud-profit-loss-container" class="hidden" style="margin-bottom:24px"></div>
           <div
             style="
               display: flex;
@@ -13609,9 +13489,16 @@
           >
             Sign in
           </button>
+          <button type="button" id="cloud-forgot-password" onclick="showCloudPasswordHelp()" style="margin-top:10px;background:none;border:0;color:#2563eb;cursor:pointer">Forgot password?</button>
+          <p id="cloud-password-help" class="hidden" role="status" style="font-size:13px;line-height:1.5"></p>
         </div>
 
         <div id="cloud-restaurant-panel" class="hidden" style="margin-top: 18px">
+          <details style="margin-bottom:16px"><summary>Change password</summary>
+            <label for="cloud-current-password">Current password</label><input id="cloud-current-password" type="password" autocomplete="current-password" maxlength="200" style="width:100%" />
+            <label for="cloud-new-password">New password (10–200 characters)</label><input id="cloud-new-password" type="password" autocomplete="new-password" minlength="10" maxlength="200" style="width:100%" />
+            <button type="button" id="cloud-change-password-button" onclick="submitCloudPasswordChange()">Change password</button>
+          </details>
           <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-restaurant-select">
             Restaurant
           </label>
@@ -13636,7 +13523,8 @@
             style="width: 100%; padding: 11px 14px; border: none; border-radius: 8px; background: #059669; color: white; font-size: 14px; font-weight: 700; cursor: pointer"
           >
             Copy this till's menu, tables &amp; stock to the cloud
-          </button>
+          </button><button type="button" id="cloud-refresh-button" onclick="submitCloudRefresh()">Refresh shared menu</button>
+          <p style="font-size:12px;color:#475569">Publish menu edits from this device to share them. New devices load the published menu automatically. Conflicting edits require a refresh. Checkout needs an internet connection.</p>
           <p style="margin: 8px 0 0; font-size: 11px; color: #94a3b8; line-height: 1.5">
             This copies your current menu, tables, halls, bank accounts and kitchen
             stock. Nothing on this device is deleted, and you can repeat it safely.
@@ -13747,6 +13635,32 @@
         }
       }
 
+      async function showCloudPasswordHelp() {
+        const help = document.getElementById("cloud-password-help");
+        help.classList.remove("hidden");
+        let contact = "Contact your restaurant owner or Billz customer support.";
+        try {
+          const response = await fetch("/api/public/config", { credentials: "same-origin" });
+          if (response.ok) contact = (await response.json()).supportContact || contact;
+        } catch {}
+        help.textContent = "Contact customer support to have your password reset. " + contact;
+      }
+
+      async function submitCloudPasswordChange() {
+        const button = document.getElementById("cloud-change-password-button");
+        const current = document.getElementById("cloud-current-password");
+        const next = document.getElementById("cloud-new-password");
+        button.disabled = true;
+        try {
+          const response = await fetch("/api/auth/change-password", { method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: current.value, newPassword: next.value }) });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Password change failed.");
+          cloudSetStatus("Password changed. Other devices have been signed out.");
+        } catch (error) { cloudSetStatus(error.message, true); }
+        finally { current.value = ""; next.value = ""; button.disabled = false; }
+      }
+
       async function submitCloudSignIn() {
         const sessionClient = window.BiteTechCloudSession;
         if (!sessionClient) return;
@@ -13784,6 +13698,22 @@
         } catch (error) {
           cloudSetStatus(error.message || "That restaurant could not be selected.", "error");
         }
+      }
+
+      async function refreshCloudCatalog(force = false) {
+        if (!window.BILLZ_MANAGED || !window.BILLZ_TENANT_ID) return;
+        const { refreshSharedCatalog } = await import("/src/client/cloud-catalog.mjs");
+        return refreshSharedCatalog({ storage: Storage, restaurantId: window.BILLZ_TENANT_ID, force });
+      }
+
+      async function submitCloudRefresh() {
+        if (cart.length) { cloudSetStatus("Finish or clear the current bill before refreshing the menu.", "error"); return; }
+        if (!confirm("Replace this device's unpublished menu edits with the shared menu?")) return;
+        try {
+          const result = await refreshCloudCatalog(true);
+          if (result?.status === "refreshed") { await initSystemData(); renderDynamicCategoryTabsRow(); renderFoodGridOrderingUI(); cloudSetStatus("Shared menu refreshed on this device."); }
+          else cloudSetStatus("The owner must publish the first menu from this restaurant's setup device.");
+        } catch (error) { cloudSetStatus(error.message, "error"); }
       }
 
       async function submitCloudImport() {
@@ -15720,7 +15650,12 @@
           }
         }
 
-        if (screenId === "expenses") {
+        if (screenId === "expenses" && window.BILLZ_MANAGED) {
+          document.getElementById("local-expenses-container").classList.add("hidden");
+          document.getElementById("cloud-expenses-container").classList.remove("hidden");
+          window.BillzCloudExpenses?.mount();
+        }
+        if (screenId === "expenses" && !window.BILLZ_MANAGED) {
           populateExpenseFieldSelect();
           populateExpenseFieldFilter();
           populateExpenseLedgerDestinations();
@@ -15737,7 +15672,11 @@
         }
 
         if (screenId === "reports") {
-          calculateAndRenderBusinessReports();
+          if (window.BILLZ_MANAGED) {
+            document.getElementById("cloud-profit-loss-container").classList.remove("hidden");
+            window.BillzCloudProfit?.mount();
+            window.showCloudSalesReport?.();
+          } else calculateAndRenderBusinessReports();
         }
 
         if (screenId === "ledger") {
@@ -19930,6 +19869,8 @@
               || (account.restaurants?.length === 1 ? account.restaurants[0] : null);
             if (!allowed) throw new Error("Choose a restaurant to continue.");
             window.BILLZ_TENANT_ID = allowed.restaurantId;
+            window.BILLZ_ROLE = allowed.role;
+            AppState.session.userRole = allowed.role;
             await idbSet("pos_cloud_session_v1", { user: account.user, restaurantId: allowed.restaurantId });
             const responseMenu = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": allowed.restaurantId } });
             if (!responseMenu.ok) {
@@ -19949,6 +19890,13 @@
         applySavedSidebarCollapseState();
 
         bootStep(2, "loading your data");
+        if (window.BILLZ_MANAGED) {
+          await refreshCloudCatalog();
+          const response = await fetch("/api/pos/receipt-business", { credentials: "same-origin", cache: "no-store", headers: { "x-restaurant-id": window.BILLZ_TENANT_ID } });
+          if (!response.ok) throw new Error("Could not load this restaurant's receipt details.");
+          const settings = await response.json();
+          await Storage.setMany({ pos_business_name: settings.businessName, pos_business_name_provided: true, pos_business_phone: settings.phone || "", pos_business_address: settings.address || "" });
+        }
         await initSystemData();
         // 🏪 Both of these MUST run after initSystemData, since businessName/businessPhone/businessAddress
         // are only loaded from storage in there — running them earlier would paint the defaults instead.
@@ -26228,6 +26176,7 @@
 
       let expenseEntrySaving = false;
       async function saveExpenseEntry(event) {
+        if (window.BILLZ_MANAGED) { event?.preventDefault(); window.BillzCloudExpenses?.mount(); return; }
         event.preventDefault();
         if (expenseEntrySaving) return;
 

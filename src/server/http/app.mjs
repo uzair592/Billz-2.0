@@ -10,7 +10,9 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { PERMISSION } from "../authorization/permissions.mjs";
+import { passwordSchema } from "../auth/password-policy.mjs";
+import { registerFinanceRoutes } from "./finance-routes.mjs";
+import { PERMISSION, requirePermission } from "../authorization/permissions.mjs";
 import { ACCESS_LEVEL } from "../subscriptions/access-policy.mjs";
 import { SESSION_COOKIE_NAME } from "./request-guards.mjs";
 import { createRequestGuards } from "./request-guards.mjs";
@@ -19,7 +21,7 @@ import { registerPlatformAdminRoutes } from "./platform-admin-routes.mjs";
 
 const registrationSchema = z.object({
   email: z.email().max(320),
-  password: z.string().min(10).max(200),
+  password: passwordSchema,
   displayName: z.string().trim().min(1).max(120),
   restaurantName: z.string().trim().min(1).max(160),
 });
@@ -28,11 +30,11 @@ const loginSchema = z.union([
   z.object({
     restaurantCode: z.string().trim().min(1).max(64),
     username: z.string().trim().min(1).max(64),
-    password: z.string().min(1).max(200),
+    password: passwordSchema,
   }),
   z.object({
     email: z.string().trim().email().max(320),
-    password: z.string().min(1).max(200),
+    password: passwordSchema,
   }),
 ]);
 
@@ -347,6 +349,10 @@ export const legacyCatalogSchema = z.object({
   }).passthrough()).max(1_000).default([]),
 }).strict();
 
+const legacyCatalogImportSchema = legacyCatalogSchema.extend({
+  expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+});
+
 function setSessionCookie(reply, session, secureCookies) {
   reply.setCookie(SESSION_COOKIE_NAME, session.token, {
     path: "/",
@@ -400,6 +406,7 @@ export async function buildHttpApp({
   inventoryService = null,
   recipeService = null,
   purchaseService = null,
+  financeService = null,
   catalogImportService = null,
   subscriptionService = null,
   billingWebhookService = null,
@@ -413,12 +420,15 @@ export async function buildHttpApp({
   serveClient = true,
   nodeEnv = "development",
   trustProxy = false,
+  loginThrottle = null,
+  supportContact = "Contact your restaurant owner or Billz customer support.",
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
 
   const originAllowlist = trustedOrigins ?? [trustedOrigin];
 
+  if (trustProxy === true) throw new TypeError("Proxy trust requires an explicit IP/CIDR allowlist.");
   const app = Fastify({
     logger,
     trustProxy,
@@ -427,16 +437,41 @@ export async function buildHttpApp({
       request.headers["x-request-id"]
         ?? randomUUID(),
   });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof z.ZodError) {
+      return reply.code(400).send({
+        error: error.issues.find(issue => issue.path.some(part => /password/i.test(String(part))))?.message ?? "Invalid request.",
+        issues: error.issues.map((issue) => ({
+          path: issue.path.join("."),
+          message: issue.message,
+        })),
+      });
+    }
+    const statusCode = Number(error.statusCode) || 500;
+    if (error.retryAfter) reply.header("Retry-After", String(error.retryAfter));
+    const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
+    return reply.code(statusCode).send({
+      error: publicMessage,
+      code: error.code,
+      ...(error.details === undefined ? {} : { details: error.details }),
+    });
+  });
+
   await app.register(cookie);
   await app.register(helmet, { contentSecurityPolicy: false });
-  const rateLimitMax = (nodeEnv === "test" || process.env.DISABLE_RATE_LIMIT === "true") ? 100_000 : 120;
-  await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute" });
+  const rateLimitMax = nodeEnv === "test" ? 100_000 : 120;
+  await app.register(rateLimit, { global: true, max: rateLimitMax, timeWindow: "1 minute",
+    allowList: nodeEnv === "test" && process.env.DISABLE_RATE_LIMIT === "true" ? () => true : undefined });
 
   // Security headers that do not depend on helmet's CSP. The legacy POS
   // uses inline event handlers and inline scripts, so a restrictive CSP
   // would break it; CSP is deliberately left off and this limitation is
   // documented.
   app.addHook("onSend", async (_request, reply) => {
+    if (new URL(_request.url, "http://internal").pathname === "/platform-admin" || _request.url.startsWith("/platform-admin/")) {
+      reply.header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'");
+      reply.header("Cache-Control", "no-store");
+    }
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -539,6 +574,7 @@ export async function buildHttpApp({
       platformAdminService,
       platformAdminPortalService,
       secureCookies,
+      loginThrottle,
     });
   }
 
@@ -605,28 +641,19 @@ export async function buildHttpApp({
     },
   );
 
-  const accountAttempts = new Map();
   app.post(
     "/api/auth/login",
-    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } },
-      preHandler: async (request, reply) => {
-        const b = request.body || {};
-        const key = b.email ? String(b.email).trim().toLowerCase()
-          : String(b.restaurantCode || "").trim().toLowerCase() + ":" + String(b.username || "").trim().toLowerCase();
-        const now = Date.now();
-        const attempt = accountAttempts.get(key);
-        if (attempt && attempt.until > now && attempt.count >= 10) return reply.code(429).send({ error: "Too many sign-in attempts. Try again later.", code: "LOGIN_RATE_LIMITED" });
-        for (const [k, value] of accountAttempts) if (value.until <= now) accountAttempts.delete(k);
-        if (accountAttempts.size >= 10000 && !accountAttempts.has(key)) accountAttempts.delete(accountAttempts.keys().next().value);
-        accountAttempts.set(key, { until: attempt?.until > now ? attempt.until : now + 900000, count: attempt?.until > now ? attempt.count + 1 : 1 });
-      } },
+    { config: { rateLimit: { max: 10, timeWindow: "15 minutes" } } },
     async (request, reply) => {
       const input = loginSchema.parse(request.body);
+      const attempt = { scope: "restaurant", ...input, password: undefined, ipAddress: request.ip };
+      await loginThrottle?.check(attempt);
       try {
         const session = await authService.login({
           ...input,
           ...requestMetadata(request),
         });
+        await loginThrottle?.succeeded(attempt);
         setSessionCookie(reply, session, secureCookies);
         return { user: publicUser(session.user) };
       } catch (err) {
@@ -644,6 +671,7 @@ export async function buildHttpApp({
           });
         }
         if (err.code === "INVALID_CREDENTIALS") {
+          await loginThrottle?.failed(attempt);
           return reply.code(401).send({
             error: err.message,
             code: "INVALID_CREDENTIALS",
@@ -663,6 +691,16 @@ export async function buildHttpApp({
       sameSite: "lax",
     });
     return reply.code(204).send();
+  });
+
+  app.get("/api/public/config", async () => ({ supportContact }));
+
+  app.post("/api/auth/change-password", { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } }, async (request, reply) => {
+    const sessionToken = request.cookies[SESSION_COOKIE_NAME];
+    const session = await authService.authenticate(sessionToken);
+    if (!session) return reply.code(401).send({ error: "Authentication is required.", code: "UNAUTHENTICATED" });
+    const input = z.object({ currentPassword: passwordSchema, newPassword: passwordSchema }).strict().parse(request.body);
+    return authService.changePassword({ userId: session.user.id, sessionToken, ...input });
   });
 
   app.get("/api/auth/me", async (request, reply) => {
@@ -691,9 +729,10 @@ export async function buildHttpApp({
       && (menuService || businessSettingsService || orderService
         || orderHistoryService || orderCancellationService || orderRefundService
         || salesReportService || supplierService || inventoryService
-        || recipeService || purchaseService || catalogImportService
+        || recipeService || purchaseService || financeService || catalogImportService
         || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
+    if (financeService) await registerFinanceRoutes(app, { guards, financeService });
 
     if (menuService) {
       app.get(
@@ -713,6 +752,10 @@ export async function buildHttpApp({
     }
 
     if (businessSettingsService) {
+      app.get("/api/pos/receipt-business", { preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_CREATE)] }, async request => {
+        const settings = await businessSettingsService.get({ restaurantId: request.tenant.restaurant.id, userId: request.auth.user.id });
+        return { businessName: settings?.businessName, phone: settings?.phone, address: settings?.address };
+      });
       app.get(
         "/api/pos/settings/business",
         {
@@ -755,10 +798,12 @@ export async function buildHttpApp({
           ],
         },
         async (request, reply) => {
+          const input = orderSchema.parse(request.body);
+          if (input.payment?.amountReceivedMinor > 0) requirePermission(request.tenant.membership.role, PERMISSION.PAYMENT_PROCESS);
           const result = await orderService.create({
             tenant: request.tenant,
             userId: request.auth.user.id,
-            input: orderSchema.parse(request.body),
+            input,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
         },
@@ -1293,6 +1338,8 @@ export async function buildHttpApp({
     }
 
     if (catalogImportService) {
+      app.get("/api/pos/catalog", { preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_CREATE)] }, async request =>
+        catalogImportService.read({ restaurantId: request.tenant.restaurant.id, branchId: request.tenant.membership.defaultBranchId, userId: request.auth.user.id, includeCosts: ["owner", "manager"].includes(request.tenant.membership.role) }));
       app.post(
         "/api/pos/import/legacy-catalog",
         {
@@ -1302,12 +1349,16 @@ export async function buildHttpApp({
             guards.tenant(PERMISSION.MENU_MANAGE),
           ],
         },
-        async (request) => catalogImportService.import({
-          restaurantId: request.tenant.restaurant.id,
-          branchId: request.tenant.membership.defaultBranchId,
-          userId: request.auth.user.id,
-          snapshot: legacyCatalogSchema.parse(request.body),
-        }),
+        async (request) => {
+          const { expectedRevision, ...snapshot } = legacyCatalogImportSchema.parse(request.body);
+          return catalogImportService.import({
+            restaurantId: request.tenant.restaurant.id,
+            branchId: request.tenant.membership.defaultBranchId,
+            userId: request.auth.user.id,
+            snapshot,
+            expectedRevision,
+          });
+        },
       );
     }
 
@@ -1457,24 +1508,7 @@ export async function buildHttpApp({
     }
   }
 
-  app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof z.ZodError) {
-      return reply.code(400).send({
-        error: "Invalid request.",
-        issues: error.issues.map((issue) => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
-      });
-    }
-    const statusCode = Number(error.statusCode) || 500;
-    const publicMessage = statusCode >= 500 ? "Internal server error." : error.message;
-    return reply.code(statusCode).send({
-      error: publicMessage,
-      code: error.code,
-      ...(error.details === undefined ? {} : { details: error.details }),
-    });
-  });
+
 
   return app;
 }

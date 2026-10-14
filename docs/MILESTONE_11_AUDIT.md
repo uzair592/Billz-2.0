@@ -9,7 +9,7 @@
 - **Order Cancellation**: `POST /api/pos/orders/:orderId/cancel` (idempotent, compensation)
 - **Billing APIs**: `/api/billing` (overview, checkout, change-plan, cancel, resume, payments)
 - **Cloud Account**: Sign in, restaurant selection, catalog import
-- **Authentication**: JWT sessions, email verification, password reset
+- **Authentication**: opaque server-side sessions, email verification, support-assisted password reset and authenticated password change (no email reset-token flow)
 - **Order History API**: `GET /api/pos/orders` with filters, cursor pagination
 - **Order Detail API**: `GET /api/pos/orders/:orderId` (full order snapshot)
 - **Order Cancellation**: `POST /api/pos/orders/:orderId/cancel` (idempotent)

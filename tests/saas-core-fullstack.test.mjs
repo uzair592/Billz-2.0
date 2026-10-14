@@ -12,6 +12,7 @@ import { createPlatformAdminPortalService } from "../src/server/subscriptions/pl
 import { createEntitlementService } from "../src/server/auth/entitlement-service.mjs";
 import { createStorageService } from "../src/server/storage/storage-service.mjs";
 import { createTenantContextService } from "../src/server/tenancy/tenant-context-service.mjs";
+import { createLoginThrottle } from "../src/server/auth/login-throttle.mjs";
 
 const pepper = "test-pepper-for-development-only";
 
@@ -20,7 +21,9 @@ async function setupTestApp() {
   const appPool = await createAppPool();
   const pool = await createControlPool();
   await seedPlan(pool, { code: "GROWTH", provider: "manual" });
-  const server = await createServer({ pool: appPool, controlPool: pool, env: {
+  let throttleTime = Date.now();
+  const loginThrottle = createLoginThrottle(pool, { clock: () => new Date(throttleTime += 10000) });
+  const server = await createServer({ pool: appPool, controlPool: pool, loginThrottle, env: {
     NODE_ENV: "test", DATABASE_URL: "postgresql://unused/test", PASSWORD_PEPPER: pepper,
     SESSION_SECRET: "test-session-secret-at-least-32-chars", TRUSTED_ORIGIN: "http://127.0.0.1:3000",
     OFFLINE_ENTITLEMENT_SECRET: "fixture-entitlement-signing-key-32-chars", PAYMENT_PROVIDER: "manual",
@@ -132,6 +135,7 @@ test("SaaS Core Fullstack Suite", async (t) => {
       url: "/api/auth/login",
       payload: { restaurantCode: "burger-haven", username: "cashier", password: "CashierPassA!" },
     });
+    assert.equal(userRes.statusCode, 200, userRes.body);
     const userCookie = userRes.headers["set-cookie"];
 
     const unauthorizedRes = await app.inject({

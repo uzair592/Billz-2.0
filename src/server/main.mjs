@@ -3,6 +3,7 @@ import path from "node:path";
 import { buildHttpApp } from "./http/app.mjs";
 import { createBillingWebhookService } from "./billing/billing-webhook-service.mjs";
 import { createSubscriptionService } from "./billing/subscription-service.mjs";
+import { createLoginThrottle } from "./auth/login-throttle.mjs";
 import { createAuthService } from "./auth/auth-service.mjs";
 import { createPostgresAuthRepository } from "./auth/postgres-auth-repository.mjs";
 import { createTenantContextService } from "./tenancy/tenant-context-service.mjs";
@@ -23,6 +24,7 @@ import { createSupplierService } from "./pos/supplier-service.mjs";
 import { createInventoryService } from "./pos/inventory-service.mjs";
 import { createRecipeService } from "./pos/recipe-service.mjs";
 import { createPurchaseService } from "./pos/purchase-service.mjs";
+import { createFinanceService } from "./pos/finance-service.mjs";
 import { createInventoryConsumptionService } from "./pos/inventory-consumption-service.mjs";
 import {
   loadBillingConfiguration,
@@ -52,6 +54,7 @@ export async function createServer({
   logger = { info() {}, warn() {}, error() {} },
   pool = null,
   controlPool = null,
+  loginThrottle = null,
   migrationsDir = "auto",
   verifyMigrations = true,
 } = {}) {
@@ -162,9 +165,12 @@ export async function createServer({
   const inventoryService = createInventoryService(database);
   const recipeService = createRecipeService(database);
   const purchaseService = createPurchaseService(database);
+  const financeService = createFinanceService(database);
 
   const app = await buildHttpApp({
     authService,
+    loginThrottle: loginThrottle ?? createLoginThrottle(controlDatabase),
+    supportContact: config.supportContact,
     platformAdminService,
     platformAdminPortalService,
     entitlementService,
@@ -184,6 +190,7 @@ export async function createServer({
     inventoryService,
     recipeService,
     purchaseService,
+    financeService,
     trustedOrigin: config.trustedOrigin,
     trustedOrigins: config.trustedOrigins,
     secureCookies: config.secureCookies,

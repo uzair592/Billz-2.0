@@ -8,7 +8,7 @@
     "test:postgres": "node tests/run-postgres-tests.mjs",
     "test:legacy": "node --test tests/legacy-*.test.mjs tests/money-engine.test.mjs tests/order-status.test.mjs",
     "test:integration": "node tests/helpers/check-db.mjs && node --test tests/billing-postgres.test.mjs && node --test tests/refund-sales-report-postgres.test.mjs",
-    "test:fullstack": "node --test tests/saas-core-fullstack.test.mjs",
+    "test:fullstack": "node --test --test-concurrency=1 tests/saas-core-fullstack.test.mjs tests/admin-launch-postgres.test.mjs tests/launch-readiness-postgres.test.mjs",
     "test:browser:saas-core": "npx playwright test --config=playwright.saas-core.config.mjs",
     "validate": "npm run validate:compose && npm run validate:database",
     "validate:compose": "docker compose -f compose.validation.yaml config",

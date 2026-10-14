@@ -45,7 +45,7 @@ Apply migrations using a migration/owner connection before updating the applicat
 
 Set `DATABASE_URL` to a non-superuser **NOBYPASSRLS** runtime role. Set `CONTROL_DATABASE_URL` to a different non-superuser **BYPASSRLS** role for account discovery, authentication and platform administration. The POS services never receive the control pool. Provision schema usage, required table/sequence privileges, and keep both connection strings server-side. Do not use a PostgreSQL superuser for either application role. Prefer limiting the POS role's privileges on authentication/platform tables in deployment.
 
-Set production HTTPS `TRUSTED_ORIGINS`, strong `PASSWORD_PEPPER` and `SESSION_SECRET`, and `PAYMENT_PROVIDER=manual`. Keep `TRUST_PROXY=false` unless a controlled reverse proxy replaces incoming forwarding headers. If configured, `OFFLINE_ENTITLEMENT_SECRET` must be a separate private secret of at least 32 characters; it is not shipped to the browser.
+Set production HTTPS `TRUSTED_ORIGINS`, strong `PASSWORD_PEPPER` and `SESSION_SECRET`, and `PAYMENT_PROVIDER=manual`. Use `TRUST_PROXY=true` on Render with `TRUSTED_PROXY_CIDRS` containing only verified platform proxy IPs/CIDRs. Keep it false for direct hosting. Fastify never receives unrestricted `true`. If configured, `OFFLINE_ENTITLEMENT_SECRET` must be a separate private secret of at least 32 characters; it is not shipped to the browser.
 
 Bootstrap first owner with `BOOTSTRAP_OWNER_PASSWORD` and optional `OWNER_USERNAME` (default `owner`). Platform admin bootstrap uses `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` (10+ characters), `PASSWORD_PEPPER`, and `CONTROL_DATABASE_URL`; passwords are not CLI arguments.
 
@@ -56,3 +56,11 @@ Legacy menus can be imported through the visible cloud panel after sign-in. Clou
 Local unit/regression results are recorded in the PR. Real PostgreSQL, browser and container tests must be green on this exact branch. Local PostgreSQL installation and Chromium download were unavailable in the execution environment; no passing result is claimed for those local runs. CI now supplies the missing service lifecycle.
 
 Before paid/public launch: verify the migration on a copy of current data; exercise visible owner/cashier access and suspension/renewal; test mixed old/new recipes and historical refund snapshots; complete browser XSS/print testing; confirm backup recovery and role grants in the hosting environment. Complete signed offline sales, extras/options, cross-device catalog/settings synchronization and local-attachment cloud upload before marketing those features.
+
+### Launch configuration alignment
+
+Render launch uses `PAYMENT_PROVIDER=manual`; Stripe credentials are unnecessary. Set `TRUST_PROXY=true` and supply `TRUSTED_PROXY_CIDRS` with the verified proxy chain addresses/CIDRs for your deployment. Do not guess the forwarding depth or trust all private networks. Untrusted immediate peers cannot supply trusted `X-Forwarded-For` values; forged prefixes before the first untrusted hop are ignored. Test two different client IPs and a forged header on staging. This repository cannot infer Render's runtime proxy addresses. Startup fails closed if proxy trust is enabled without the allowlist.
+
+Provision a non-superuser NOBYPASSRLS POS connection in `DATABASE_URL` and a separate non-superuser BYPASSRLS auth/admin connection in `CONTROL_DATABASE_URL` (not the database-owner URL). Apply migrations with an owner connection and grant the runtime roles their required privileges. `render.yaml` leaves the control connection and proxy allowlist for operator configuration.
+
+Failed-login counters live in PostgreSQL, scoped to account and IP. Successful login clears that counter; failed credentials impose a progressive 250 ms–5 s delay, not a 15-minute account lock. Existing per-IP request limits remain. Admin scripts are external and admin routes have a scoped CSP; the legacy POS CSP is unchanged.

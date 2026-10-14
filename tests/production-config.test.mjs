@@ -22,6 +22,7 @@ describe("production configuration", () => {
       HOST: "127.0.0.1",
       LOG_LEVEL: "info",
       TRUST_PROXY: "true",
+      TRUSTED_PROXY_CIDRS: "10.10.1.0/24",
     });
     assert.equal(config.port, 4000);
     assert.equal(config.host, "127.0.0.1");
@@ -29,7 +30,7 @@ describe("production configuration", () => {
     assert.deepEqual(config.trustedOrigins, ["https://pos.example.com"]);
     assert.equal(config.secureCookies, true);
     assert.equal(config.logLevel, "info");
-    assert.equal(config.trustProxy, true);
+    assert.deepEqual(config.trustProxy, ["10.10.1.0/24"]);
   });
 
   it("supports a comma-separated exact origin allowlist", () => {

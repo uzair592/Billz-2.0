@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { projectRoot } from "./helpers/legacy-source.mjs";
-import { isDatabaseAvailable } from "./helpers/postgres.mjs";
+import { isDatabaseAvailable, provisionIntegrationDatabase } from "./helpers/postgres.mjs";
 
 /**
  * Runner for the PostgreSQL-dependent Milestone 13 suites.
@@ -33,13 +33,11 @@ if (!await isDatabaseAvailable()) {
   process.exit(1);
 }
 
+// Tests manage schemas and roles; provision standalone runs and serialize them.
+await provisionIntegrationDatabase();
+
 const testsDir = path.join(projectRoot, "tests");
 const files = POSTGRES_TESTS
-  .filter((file) => {
-    // Only run files that actually exist so a renamed suite does not
-    // silently disappear from the report.
-    return true;
-  })
   .sort()
   .map((file) => path.join(testsDir, file));
 
@@ -54,7 +52,7 @@ if (missing.length > 0) {
 
 const result = spawnSync(
   process.execPath,
-  ["--test", ...files],
+  ["--test", "--test-concurrency=1", ...files],
   { stdio: "inherit" },
 );
 
