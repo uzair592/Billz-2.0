@@ -1,0 +1,17 @@
+{
+  "status": "connected",
+  "healthState": "client_mounted",
+  "serverReachable": true,
+  "clientMounted": true,
+  "clientLastToolCallAt": null,
+  "clientLastConnectedAt": "2026-10-11T05:55:38.169Z",
+  "clientLastActivityAt": "2026-10-11T05:55:38.169Z",
+  "lastActivityKind": "connect",
+  "clientLastClientName": "FridayAi",
+  "lastToolName": null,
+  "detail": "This chat client connected via MCP at 2026-10-11T05:55:38.169Z — memory tools are available for this session.",
+  "checkedAt": "2026-10-11T05:56:48.759Z",
+  "serverPath": "c:\\Users\\HP\\.vscode\\extensions\\hackerware.continuity-ultimate-3.0.175\\packages\\mcp-server\\dist\\index.js",
+  "error": null,
+  "transport": "stdio"
+}

@@ -17,3 +17,4 @@ backups/
 # Local smoke-test overrides.
 .env.smoke
 .kilo/
+scratch/

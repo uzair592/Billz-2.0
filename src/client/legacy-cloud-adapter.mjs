@@ -189,8 +189,17 @@ export function createLegacyCloudAdapter({
 
     async checkoutOnline(order) {
       const current = await session.currentUser();
-      const context = await storage.get(CLOUD_CONTEXT_KEY);
-      if (!current.user || !context || context.restaurantId !== current.restaurantId) throw new Error("Import this restaurant's catalog before checkout.");
+      if (!current?.user) throw new Error("Sign in before completing online checkout.");
+      let context = await storage.get(CLOUD_CONTEXT_KEY);
+      if (!context || context.restaurantId !== current.restaurantId) {
+        try {
+          const imported = await this.importCatalog({ restaurantId: current.restaurantId });
+          context = imported.context;
+        } catch (importErr) {
+          console.warn("Auto-catalog import failed:", importErr);
+        }
+      }
+      if (!context || context.restaurantId !== current.restaurantId) throw new Error("Could not synchronize catalog with the restaurant server before checkout.");
       if (order.items.some(item => (item.extras || []).length)) throw new Error("Cloud checkout does not yet support ingredient extras. Remove extras before taking payment.");
       const payload = buildCloudOrderPayload(order, context.mappings);
       payload.expectedTotalMinor = minor(order.totalBill);

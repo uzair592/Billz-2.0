@@ -1,0 +1,128 @@
+[
+  {
+    "id": "1791442425666-849en8ltv",
+    "type": "decision_logged",
+    "timestamp": 1791442425666,
+    "title": "Decision Logged",
+    "description": "Why use Fastify with TypeScript/JavaScript?",
+    "metadata": {
+      "decisionId": "muz6ke5s-8xqm4g"
+    }
+  },
+  {
+    "id": "1791442425821-dl00db8pu",
+    "type": "export_completed",
+    "timestamp": 1791442425821,
+    "title": "Export Completed",
+    "description": "Exported 1 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 1
+    }
+  },
+  {
+    "id": "1791442426249-zyzaq2tzh",
+    "type": "decision_logged",
+    "timestamp": 1791442426249,
+    "title": "Decision Logged",
+    "description": "Why use Docker for containerization?",
+    "metadata": {
+      "decisionId": "muz6kelf-gehafx"
+    }
+  },
+  {
+    "id": "1791442426418-xvtgbwx6v",
+    "type": "export_completed",
+    "timestamp": 1791442426418,
+    "title": "Export Completed",
+    "description": "Exported 2 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 2
+    }
+  },
+  {
+    "id": "1791442426729-dutvlcav3",
+    "type": "decision_logged",
+    "timestamp": 1791442426729,
+    "title": "Decision Logged",
+    "description": "Why use GitHub Actions for CI/CD?",
+    "metadata": {
+      "decisionId": "muz6kez5-w4bfnb"
+    }
+  },
+  {
+    "id": "1791442426768-mamuzmgog",
+    "type": "export_completed",
+    "timestamp": 1791442426768,
+    "title": "Export Completed",
+    "description": "Exported 3 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 3
+    }
+  },
+  {
+    "id": "1791442427386-kzja1denv",
+    "type": "decision_logged",
+    "timestamp": 1791442427386,
+    "title": "Decision Logged",
+    "description": "Why use PostgreSQL for data storage?",
+    "metadata": {
+      "decisionId": "muz6kff2-fiss48"
+    }
+  },
+  {
+    "id": "1791442427518-oeommf0t2",
+    "type": "export_completed",
+    "timestamp": 1791442427518,
+    "title": "Export Completed",
+    "description": "Exported 4 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 4
+    }
+  },
+  {
+    "id": "1791442427789-atc6k3mjc",
+    "type": "decision_logged",
+    "timestamp": 1791442427792,
+    "title": "Decision Logged",
+    "description": "Why use Playwright for end-to-end testing?",
+    "metadata": {
+      "decisionId": "muz6kfu5-chn3l2"
+    }
+  },
+  {
+    "id": "1791442427870-1q2axn23d",
+    "type": "export_completed",
+    "timestamp": 1791442427870,
+    "title": "Export Completed",
+    "description": "Exported 5 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 5
+    }
+  },
+  {
+    "id": "1791442428115-vdygt35df",
+    "type": "decision_logged",
+    "timestamp": 1791442428115,
+    "title": "Decision Logged",
+    "description": "Why use REST API architecture?",
+    "metadata": {
+      "decisionId": "muz6kg32-ygtwr7"
+    }
+  },
+  {
+    "id": "1791442434264-wmzr8rvwq",
+    "type": "export_completed",
+    "timestamp": 1791442434265,
+    "title": "Export Completed",
+    "description": "Exported 6 decisions to MARKDOWN",
+    "metadata": {
+      "exportFormat": "markdown",
+      "count": 6
+    }
+  }
+]

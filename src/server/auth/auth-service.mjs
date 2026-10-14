@@ -120,21 +120,29 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
     },
 
     async login({ restaurantCode, username, email, password, ipAddress = null, userAgent = null, previousSessionToken = null }) {
-      if (restaurantCode && username) {
-        if (typeof repository.findUserByRestaurantAndUsername !== "function") {
+      if (username) {
+        let lookup;
+        if (restaurantCode) {
+          if (typeof repository.findUserByRestaurantAndUsername !== "function") {
+            throw authenticationError();
+          }
+          lookup = await repository.findUserByRestaurantAndUsername({
+            restaurantCode,
+            username,
+          });
+        } else if (typeof repository.findUserByUsernameOnly === "function") {
+          lookup = await repository.findUserByUsernameOnly({ username });
+        } else {
           throw authenticationError();
         }
-        const { restaurant, user } = await repository.findUserByRestaurantAndUsername({
-          restaurantCode,
-          username,
-        });
+        const { restaurant, user } = lookup;
 
         const validPassword = await verifyPassword(user?.passwordHash, password, passwordPepper);
-        if (!restaurant || !user || !validPassword) {
+        if (!user || !validPassword) {
           throw authenticationError();
         }
 
-        if (restaurant.status === "suspended") {
+        if (restaurant && restaurant.status === "suspended") {
           const error = new Error("This restaurant subscription is currently suspended.");
           error.code = "RESTAURANT_SUSPENDED";
           error.statusCode = 403;
@@ -150,7 +158,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
           throw error;
         }
 
-        return createSessionForUser(user, { ipAddress, userAgent, now: clock(), restaurantCode: restaurant.code, previousSessionToken });
+        return createSessionForUser(user, { ipAddress, userAgent, now: clock(), restaurantCode: restaurant?.code ?? null, previousSessionToken });
       }
 
       const user = await repository.findUserByEmail(normalizeEmail(email));
@@ -172,11 +180,12 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       return repository.findActiveSession(hashOpaqueToken(token), clock());
     },
 
-    async changePassword({ userId, sessionToken, currentPassword, newPassword }) {
+    async changePassword({ userId, sessionToken, currentPassword, newPassword, newUsername }) {
       const passwordHash = await hashPassword(newPassword, passwordPepper);
       await repository.changePassword({
         userId, sessionTokenHash: hashOpaqueToken(sessionToken), passwordHash, now: clock(),
         verifyCurrentPassword: hash => verifyPassword(hash, currentPassword, passwordPepper),
+        newUsername,
       });
       return { changed: true };
     },

@@ -326,6 +326,7 @@ export function createPostgresAuthRepository(pool) {
       passwordHash,
       verifyCurrentPassword,
       now,
+      newUsername,
     }) {
       const client = await pool.connect();
       try {
@@ -353,10 +354,18 @@ export function createPostgresAuthRepository(pool) {
             code: "INVALID_CURRENT_PASSWORD",
             statusCode: 400,
           });
-        await client.query(
-          "UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1",
-          [userId, passwordHash, now],
-        );
+        if (newUsername) {
+          const normUsername = String(newUsername).trim().toLowerCase();
+          await client.query(
+            "UPDATE users SET password_hash = $2, username = $3, normalized_username = $4, updated_at = $5 WHERE id = $1",
+            [userId, passwordHash, String(newUsername).trim(), normUsername, now],
+          );
+        } else {
+          await client.query(
+            "UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1",
+            [userId, passwordHash, now],
+          );
+        }
         await client.query(
           "UPDATE sessions SET revoked_at = $3 WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL",
           [userId, sessionTokenHash, now],
@@ -450,6 +459,34 @@ export function createPostgresAuthRepository(pool) {
           status: restaurant.status,
         },
         user: mapUser(user),
+      };
+    },
+
+    async findUserByUsernameOnly({ username }) {
+      const normUsername = String(username ?? "")
+        .trim()
+        .toLowerCase();
+      const userResult = await pool.query(
+        `SELECT u.id, u.email, u.username, u.restaurant_id, u.display_name, u.platform_role, u.status,
+                u.email_verified_at, u.password_hash,
+                r.id as rest_id, r.name as rest_name, r.code as rest_code, r.status as rest_status
+           FROM users u
+           LEFT JOIN restaurants r ON r.id = u.restaurant_id
+          WHERE (u.normalized_username = $1 OR u.normalized_email = $1)
+          ORDER BY (u.restaurant_id IS NOT NULL) DESC, u.created_at DESC`,
+        [normUsername],
+      );
+      if (userResult.rows.length === 0) return { restaurant: null, user: null };
+      const row = userResult.rows[0];
+      const restaurant = row.rest_id ? {
+        id: row.rest_id,
+        name: row.rest_name,
+        code: row.rest_code,
+        status: row.rest_status,
+      } : null;
+      return {
+        restaurant,
+        user: mapUser(row),
       };
     },
 

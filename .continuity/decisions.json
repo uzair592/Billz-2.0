@@ -1,0 +1,681 @@
+[
+  {
+    "id": "0ab7da2a-ee44-4892-b947-62d2c2beaf89",
+    "question": "How was local work preserved before running the repository version at commit 9f8624b?",
+    "answer": "Saved all tracked and untracked local work in stash@{0}, then ran git pull --ff-only on feat/saas-core-manual-subscriptions; origin was already up to date at 9f8624b.",
+    "timestamp": "2026-10-08T16:38:16.827Z",
+    "tags": [
+      "development",
+      "git",
+      "how",
+      "sync"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "commitHash": "9f8624b",
+      "autoLink": {
+        "checkedAt": "2026-10-08T16:38:16.827Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [
+      "9f8624b"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-08T16:38:16.828Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "git"
+      ],
+      "patterns": [],
+      "concepts": []
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-08T16:38:16.803Z"
+    }
+  },
+  {
+    "id": "f8620370-5b83-4e69-b527-1e7509dfeab5",
+    "question": "What local repository revision and runtime were verified on 2026-10-08?",
+    "answer": "Branch feat/saas-core-manual-subscriptions was already synchronized with origin at 9f8624b. npm dependencies had zero known vulnerabilities, all 13 PostgreSQL migrations were current, and the POS plus platform-admin pages and both health endpoints passed on 127.0.0.1:3001. Previous workspace edits remain recoverable in stash@{0}.",
+    "timestamp": "2026-10-08T16:39:36.387Z",
+    "tags": [
+      "git",
+      "runtime",
+      "verification"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-08T16:39:36.387Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-08T16:39:36.390Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "postgres",
+        "postgresql"
+      ],
+      "patterns": [],
+      "concepts": [
+        "migration"
+      ]
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-08T16:39:36.281Z"
+    }
+  },
+  {
+    "id": "1791638971387-fqis1t",
+    "question": "Why: test(saas-core): add fullstack integration and Playwright browser acceptance test suites?",
+    "answer": "(Auto-drafted from commit 58fa038 on 2026-10-07.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-07T22:22:52+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "58fa038f4c687fd7fd39caf7d9f37e0877f08da8"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-giauvy",
+    "question": "Why: feat(db): add 013_saas_core_remediation.sql migration for multi-tenant usernames, platform admin, manual payments, storage allowances, and RLS?",
+    "answer": "(Auto-drafted from commit c5ca1ae on 2026-10-07.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-07T22:20:58+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "c5ca1ae2c5d9ce2db87ede0c3877ef491270b529"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-q8z40t",
+    "question": "Why: fix(test): expect 12 migrations in migration-runner test suite?",
+    "answer": "(Auto-drafted from commit 86e2b91 on 2026-10-06.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-06T23:57:44+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "86e2b91e8df05d9f1ab4395362671e3481d9df9b"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-4szl8x",
+    "question": "Why: merge: integrate production readiness into inventory milestone?",
+    "answer": "(Auto-drafted from commit 0843f07 on 2026-10-06.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-06T23:53:07+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "0843f0798cf2c78210fd4657f106dab5aad7c8e7"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-do157m",
+    "question": "Why: fix(ci): prefer PostgreSQL 17 client binaries?",
+    "answer": "(Auto-drafted from commit 51b953a on 2026-10-06.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-06T21:19:36+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "high",
+    "status": "draft",
+    "commitHashes": [
+      "51b953a50fb29faf4bd7a2456ff534a60533a9ca"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-sdn8vk",
+    "question": "Why: fix(test): use Promise.all to wait for search and item creation request/response in Playwright spec?",
+    "answer": "(Auto-drafted from commit 0197281 on 2026-10-06.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-06T21:05:02+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "0197281dbd8888825f0a39da9a9f1fc26ed9cae4"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-xftqiq",
+    "question": "Why: test(inventory): add PostgreSQL integration, Playwright browser suite, and operational documentation?",
+    "answer": "(Auto-drafted from commit e67715d on 2026-10-06.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-06T20:48:04+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "high",
+    "status": "draft",
+    "commitHashes": [
+      "e67715d03563ef77c8a9c324e10c378374982424"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-560z4d",
+    "question": "Why: fix(ci): select PostgreSQL 17 backup tools in validation job?",
+    "answer": "(Auto-drafted from commit 9c0fcae on 2026-10-05.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-05T21:23:31+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "high",
+    "status": "draft",
+    "commitHashes": [
+      "9c0fcaeeb85874172c05207515c1859981241b56"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-19wp20",
+    "question": "Why: fix(ci): install PostgreSQL 17 client tools for backup/restore tests?",
+    "answer": "(Auto-drafted from commit a4e64a1 on 2026-10-05.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-05T21:08:19+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "high",
+    "status": "draft",
+    "commitHashes": [
+      "a4e64a17825dc401b5b4f0dfe77ededc057dac82"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971387-nulz5p",
+    "question": "Why: fix(ci): run PostgreSQL-dependent tests against real PostgreSQL and smoke in production mode?",
+    "answer": "(Auto-drafted from commit b353922 on 2026-10-05.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-05T21:03:28+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "high",
+    "status": "draft",
+    "commitHashes": [
+      "b35392265d23a3b6d1243a368c0094dbae49d959"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.387Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791638971388-um2hf4",
+    "question": "Why: fix: validate billing migrations and resubscription?",
+    "answer": "(Auto-drafted from commit 1b06173 on 2026-10-03.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-03T20:52:02+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "1b0617356fbeac8387d3b5cb0f076d9eb24a4a3f"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-10T13:29:31.388Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791698126040-w1eyi4",
+    "question": "Why: Authenticate before using managed tenant storage; retain recipe warnings and dynamic migration assertions?",
+    "answer": "(Auto-drafted from commit ea54968 on 2026-10-10.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-10T16:59:03+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "ea54968632f8e2b28a04b2833e303471d520ba90"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-11T05:55:26.040Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "1791698126040-crg0kk",
+    "question": "Why: Hide legacy PIN overlay for managed login and report fresh database migrations as pending?",
+    "answer": "(Auto-drafted from commit 485210e on 2026-10-10.) Please review and expand with actual reasoning.",
+    "timestamp": "2026-10-10T16:54:35+05:00",
+    "tags": [
+      "auto-draft",
+      "needs-review",
+      "architectural"
+    ],
+    "files": [],
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "priority": "medium",
+    "status": "draft",
+    "commitHashes": [
+      "485210e47eb6ecb91dc95fca09aa069883f33f54"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-11T05:55:26.040Z",
+        "action": "created"
+      }
+    ]
+  },
+  {
+    "id": "6800f0e3-4bb8-4ecc-8d5d-b68fda72bdde",
+    "question": "Docker command not recognized after installation",
+    "answer": "Provided troubleshooting steps to ensure Docker is in PATH and Docker Desktop is running",
+    "timestamp": "2026-10-11T07:30:31.649Z",
+    "tags": [
+      "docker",
+      "environment"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-11T07:30:31.649Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-11T07:30:31.651Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "docker"
+      ],
+      "patterns": [],
+      "concepts": []
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-11T07:30:31.604Z"
+    }
+  },
+  {
+    "id": "decision-1a139bc23c1",
+    "question": "How was the updated repository fetched, verified, and loaded on 2026-10-14?",
+    "answer": "Saved tracked local state, pulled remote origin/main (fddea35), verified PostgreSQL 16 on 127.0.0.1:5432, ran all 20 migrations and seed plans, created default platform administrator, verified 642/642 tests passing, and loaded the Fastify server on 127.0.0.1:3000.",
+    "timestamp": "2026-10-14T09:26:33.665Z",
+    "tags": [
+      "git",
+      "runtime",
+      "verification",
+      "sync"
+    ],
+    "files": [
+      "package.json",
+      "tests/launch-regressions.test.mjs"
+    ],
+    "status": "active",
+    "priority": "high",
+    "commitHashes": [
+      "fddea35b0d09935ee5222dbbc2aa62f79c09bf87"
+    ]
+  },
+  {
+    "id": "8ed4ad6b-770e-4798-b24f-a875c0d8af22",
+    "question": "How were login credentials and password reset help updated for cashiers and support?",
+    "answer": "Removed the restaurant code field requirement from the login UI and added support contact number 03015929230 for forgot password help.",
+    "timestamp": "2026-10-14T18:18:04.929Z",
+    "tags": [
+      "auth",
+      "how",
+      "login",
+      "ui"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-14T18:18:04.928Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-14T18:18:04.930Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "rest"
+      ],
+      "patterns": [],
+      "concepts": []
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-14T18:18:04.654Z"
+    }
+  },
+  {
+    "id": "47dc8b87-280a-4eaa-9b73-a6104d75cc35",
+    "question": "How were recipe display bugs, stock navigation, expenses UI, reports, security settings, and 14-inch invoice modal scrolling fixed?",
+    "answer": "Fixed renderManualRecipeFields HTML escaping, consolidated Inventory and Purchases into Stock sub-tabs, redesigned Expenses into modern cards, removed cloud report clutter, replaced PIN settings with Username/Password updater, auto-imported catalog on checkout, and added max-height 88vh with overflow scrolling to the invoice modal.",
+    "timestamp": "2026-10-14T18:18:29.835Z",
+    "tags": [
+      "bugfix",
+      "expenses",
+      "how",
+      "modal",
+      "recipes",
+      "reports",
+      "security",
+      "settings",
+      "stock",
+      "ui"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "autoLink": {
+        "checkedAt": "2026-10-14T18:18:29.835Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [],
+    "history": [
+      {
+        "timestamp": "2026-10-14T18:18:29.837Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [],
+      "patterns": [],
+      "concepts": [
+        "security"
+      ]
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-14T18:18:29.596Z"
+    }
+  }
+]

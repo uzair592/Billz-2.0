@@ -34,9 +34,17 @@ test("static assets reject decoded traversal and symlink escapes", async t => {
   await mkdir(path.join(root,"platform-admin"));
   await writeFile(path.join(root,"package.json"),'private canary');
   await writeFile(path.join(root,"src/client/ok.mjs"),'export {}');
-  await symlink(path.join(root,"package.json"),path.join(root,"src/client/leak.mjs"));
+  let hasSymlink = true;
+  try {
+    await symlink(path.join(root,"package.json"),path.join(root,"src/client/leak.mjs"));
+  } catch (err) {
+    if (err.code === "EPERM") hasSymlink = false;
+    else throw err;
+  }
   const handler = createStaticFileHandler({ root });
-  for (const url of ["/src/client/..%2F..%2Fpackage.json","/platform-admin/..%2Fpackage.json","/src/client/leak.mjs"]) {
+  const testUrls = ["/src/client/..%2F..%2Fpackage.json","/platform-admin/..%2Fpackage.json"];
+  if (hasSymlink) testUrls.push("/src/client/leak.mjs");
+  for (const url of testUrls) {
     const reply = { status:200, code(value) {this.status=value;return this}, header(){return this}, send(body){return body} };
     await handler({url},reply);
     assert.equal(reply.status,403,url);

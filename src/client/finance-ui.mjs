@@ -31,7 +31,38 @@ export function createFinanceUI({ container, request = apiRequest, timezone = "A
         const select = container.querySelector("[name=financialAccountId]"), selected = select.value;
         select.innerHTML = accounts.accounts.map(account => `<option value="${escapeFinanceText(account.id)}">${escapeFinanceText(account.displayName)} · ${money(account.balanceMinor)}</option>`).join("");
         if (accounts.accounts.some(account => account.id === selected)) select.value = selected;
-        container.querySelector("[data-results]").innerHTML = `<p><strong>Expenses: ${money(data.totalMinor)}</strong> · ${data.totalCount} records</p><div style="overflow:auto"><table class="history-table"><thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead><tbody>${data.expenses.length ? data.expenses.map(expense => `<tr><td>${escapeFinanceText(expense.businessDate)}</td><td>${escapeFinanceText(expense.categoryName)}</td><td>${escapeFinanceText(expense.description)}</td><td>${money(expense.amountMinor)}</td></tr>`).join("") : '<tr><td colspan="4">No shared expenses in this period.</td></tr>'}</tbody></table></div>`;
+        container.querySelector("[data-results]").innerHTML = `
+          <div style="display:flex; gap:14px; margin-bottom:16px; flex-wrap:wrap;">
+            <div style="background:#fee2e2; border-left:4px solid #dc2626; border-radius:8px; padding:12px 18px; min-width:180px;">
+              <span style="font-size:11px; font-weight:700; color:#991b1b; text-transform:uppercase; letter-spacing:0.5px;">💸 Total Expenses</span>
+              <div style="font-size:20px; font-weight:800; color:#991b1b; margin-top:2px;">${money(data.totalMinor)}</div>
+            </div>
+            <div style="background:#f1f5f9; border-left:4px solid #64748b; border-radius:8px; padding:12px 18px; min-width:140px;">
+              <span style="font-size:11px; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.5px;">📋 Entries</span>
+              <div style="font-size:20px; font-weight:800; color:#1e293b; margin-top:2px;">${data.totalCount} records</div>
+            </div>
+          </div>
+          <div style="overflow-x:auto; border-radius:8px; border:1px solid #e2e8f0;">
+            <table class="history-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+              <thead>
+                <tr style="background:#f8fafc; text-align:left; border-bottom:1px solid #e2e8f0;">
+                  <th style="padding:10px 14px; font-weight:700; color:#475569;">Date</th>
+                  <th style="padding:10px 14px; font-weight:700; color:#475569;">Category</th>
+                  <th style="padding:10px 14px; font-weight:700; color:#475569;">Description</th>
+                  <th style="padding:10px 14px; font-weight:700; color:#475569; text-align:right;">Amount</th>
+                </tr>
+              </thead>
+              <tbody>${data.expenses.length ? data.expenses.map(expense => `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                  <td style="padding:10px 14px; color:#1e293b; font-weight:600;">${escapeFinanceText(expense.businessDate)}</td>
+                  <td style="padding:10px 14px;"><span style="background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:4px; font-weight:600; font-size:12px;">${escapeFinanceText(expense.categoryName)}</span></td>
+                  <td style="padding:10px 14px; color:#64748b;">${escapeFinanceText(expense.description || "—")}</td>
+                  <td style="padding:10px 14px; color:#dc2626; font-weight:700; text-align:right;">${money(expense.amountMinor)}</td>
+                </tr>`).join("") : '<tr><td colspan="4" style="padding:24px; text-align:center; color:#94a3b8;">No shared expenses found for this date range.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        `;
         container.querySelector("[data-prev]").disabled = page <= 1;
         container.querySelector("[data-next]").disabled = page * 20 >= data.totalCount;
         container.querySelector("[data-page]").textContent = `Page ${page} of ${Math.max(1, Math.ceil(data.totalCount / 20))}`;
@@ -43,10 +74,61 @@ export function createFinanceUI({ container, request = apiRequest, timezone = "A
     if (!container) return;
     if (!container.dataset.mounted) {
       container.dataset.mounted = "true";
-      container.innerHTML = `<h2>${reportOnly ? "Cloud profit & loss" : "Cloud expenses"}</h2><p>Shared across restaurant devices. ${reportOnly ? "Server financial totals for the selected business dates." : "Record an expense once; retries keep the same reference until confirmed. Existing local expenses require reconciliation before entering them here."}</p>
-        <div style="display:flex;flex-wrap:wrap;gap:12px"><label>From<input name="startDate" type="date" value="${today}" required></label><label>To<input name="endDate" type="date" value="${today}" required></label><button type="button" data-refresh>Refresh</button></div><p data-message role="status" aria-live="polite"></p>
-        ${reportOnly ? "" : `<form data-expense style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end"><label>Category<input name="categoryName" required maxlength="120" placeholder="e.g. Rent"></label><label>Amount (PKR)<input name="amount" type="number" min="0.01" step="0.01" required></label><label>Business date<input name="businessDate" type="date" value="${today}" required></label><label>Paid from<select name="financialAccountId" required></select></label><label>Description<input name="description" maxlength="1000"></label><button type="submit">Save expense</button></form>`}
-        <div data-results></div>${reportOnly ? "" : '<div style="display:flex;gap:12px;align-items:center;margin-top:12px"><button data-prev>Previous</button><span data-page></span><button data-next>Next</button></div>'}`;
+      container.innerHTML = `
+        <div style="background: white; border-radius: 12px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 24px;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; border-bottom:1px solid #e2e8f0; padding-bottom:14px; margin-bottom:18px;">
+            <div>
+              <h2 style="margin:0 0 4px; font-size:22px; color:#0f172a; font-weight:700;">${reportOnly ? "📊 Profit & Loss Statement" : "💵 Expenses Management"}</h2>
+              <p style="margin:0; font-size:14px; color:#64748b;">${reportOnly ? "Financial performance summary and cost analysis." : "Log and monitor operational expenses across all till terminals."}</p>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 12px; flex-wrap:wrap;">
+              <label style="font-size:12px; font-weight:600; color:#475569; display:flex; align-items:center; gap:4px;">From: <input name="startDate" type="date" value="${today}" required style="padding:5px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;"></label>
+              <label style="font-size:12px; font-weight:600; color:#475569; display:flex; align-items:center; gap:4px;">To: <input name="endDate" type="date" value="${today}" required style="padding:5px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;"></label>
+              <button type="button" data-refresh style="padding:6px 12px; background:#0f172a; color:white; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">🔄 Refresh</button>
+            </div>
+          </div>
+          <p data-message role="status" aria-live="polite" style="margin:0 0 14px; font-size:14px; font-weight:600;"></p>
+          ${reportOnly ? "" : `
+          <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:20px;">
+            <h3 style="margin:0 0 12px; font-size:14px; font-weight:700; color:#1e293b;">➕ Record New Expense</h3>
+            <form data-expense style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; align-items:end;">
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Category</label>
+                <input name="categoryName" required maxlength="120" placeholder="e.g. Rent, Gas, Supplies" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Amount (PKR)</label>
+                <input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Business Date</label>
+                <input name="businessDate" type="date" value="${today}" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Paid From Account</label>
+                <select name="financialAccountId" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:white;"></select>
+              </div>
+              <div>
+                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Description / Note</label>
+                <input name="description" maxlength="1000" placeholder="Optional notes" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+              </div>
+              <div>
+                <button type="submit" style="width:100%; padding:9px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer;">💾 Save Expense</button>
+              </div>
+            </form>
+          </div>
+          `}
+          <div data-results></div>
+          ${reportOnly ? "" : `
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid #e2e8f0;">
+            <div style="display:flex; gap:6px;">
+              <button data-prev style="padding:5px 12px; border:1px solid #cbd5e1; background:white; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Previous</button>
+              <button data-next style="padding:5px 12px; border:1px solid #cbd5e1; background:white; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">Next</button>
+            </div>
+            <span data-page style="font-size:12px; color:#64748b; font-weight:600;"></span>
+          </div>`}
+        </div>
+      `;
       container.querySelector("[data-refresh]").onclick = () => { page = 1; void refresh(); };
       if (!reportOnly) {
         container.querySelector("[data-prev]").onclick = () => { page--; void refresh(); };

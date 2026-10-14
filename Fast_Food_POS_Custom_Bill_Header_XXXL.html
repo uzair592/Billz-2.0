@@ -5119,24 +5119,7 @@
             <span class="menu-btn-icon">🥦</span
             ><span class="menu-btn-label">STOCK</span>
           </button>
-          <button
-            type="button"
-            class="menu-btn"
-            onclick="switchScreen('inventory')"
-            title="Inventory"
-          >
-            <span class="menu-btn-icon">🗄️</span
-            ><span class="menu-btn-label">INVENTORY</span>
-          </button>
-          <button
-            type="button"
-            class="menu-btn"
-            onclick="switchScreen('purchases')"
-            title="Purchases"
-          >
-            <span class="menu-btn-icon">🧾</span
-            ><span class="menu-btn-label">PURCHASES</span>
-          </button>
+          <!-- Inventory and Purchases are unified under the STOCK screen tabs -->
           <button
             type="button"
             class="menu-btn"
@@ -6494,6 +6477,9 @@
               background: white;
               width: 100%;
               max-width: 650px;
+              max-height: 88vh;
+              overflow-y: auto;
+              box-sizing: border-box;
               border-radius: 12px;
               box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15);
               padding: 25px;
@@ -8659,51 +8645,66 @@
 
           
           <div class="settings-tab-panel hidden" id="settings-tab-security">
-            <div class="menu-form-box" style="max-width: 420px">
-              <h3>🔑 Change PIN Code</h3>
+            <div class="menu-form-box" style="max-width: 440px">
+              <h3>🔐 Account Credentials &amp; Security</h3>
               <p style="font-size: 13px; color: #64748b; margin: -4px 0 16px 0">
-                This PIN is required whenever the browser is opened fresh, or
-                after using 🔒 Lock / Logout.
+                Update your login credentials below. You can change your username and password.
               </p>
               <div class="form-group">
-                <label for="current-pin-input">Current PIN:</label>
+                <label for="security-username-input">New Username (leave blank to keep current):</label>
                 <input
-                  type="password"
-                  id="current-pin-input"
-                  inputmode="numeric"
-                  maxlength="8"
-                  placeholder="Enter current PIN"
+                  type="text"
+                  id="security-username-input"
+                  placeholder="Enter new username"
+                  autocomplete="username"
                 />
               </div>
               <div class="form-group">
-                <label for="new-pin-input">New PIN (4–8 digits):</label>
+                <label for="security-current-password-input">Current Password:</label>
                 <input
                   type="password"
-                  id="new-pin-input"
-                  inputmode="numeric"
-                  maxlength="8"
-                  placeholder="Enter new PIN"
+                  id="security-current-password-input"
+                  placeholder="Enter current password"
+                  autocomplete="current-password"
                 />
               </div>
               <div class="form-group">
-                <label for="confirm-pin-input">Confirm New PIN:</label>
+                <label for="security-new-password-input">New Password:</label>
                 <input
                   type="password"
-                  id="confirm-pin-input"
-                  inputmode="numeric"
-                  maxlength="8"
-                  placeholder="Re-enter new PIN"
+                  id="security-new-password-input"
+                  placeholder="Enter new password (min. 10 chars)"
+                  autocomplete="new-password"
                 />
               </div>
+              <div class="form-group">
+                <label for="security-confirm-password-input">Confirm New Password:</label>
+                <input
+                  type="password"
+                  id="security-confirm-password-input"
+                  placeholder="Re-enter new password"
+                  autocomplete="new-password"
+                />
+              </div>
+              <input type="hidden" id="current-pin-input" value="" />
+              <input type="hidden" id="new-pin-input" value="" />
+              <input type="hidden" id="confirm-pin-input" value="" />
+              <button
+                type="button"
+                id="save-credentials-btn"
+                class="save-item-btn"
+                style="background-color: var(--primary-accent, #2563eb); color: white;"
+                onclick="updateAccountCredentials()"
+              >
+                💾 Update Credentials
+              </button>
               <button
                 type="button"
                 id="save-pin-btn"
-                class="save-item-btn"
-                style="background-color: var(--bg-dark-charcoal)"
+                style="display:none;"
                 onclick="changeSystemPinCode()"
-              >
-                💾 Update PIN
-              </button>
+              ></button>
+              <p id="security-status-message" style="margin-top: 12px; font-size: 13px; font-weight: 600;"></p>
             </div>
           </div>
 
@@ -8962,11 +8963,19 @@
         </section>
 
         <section id="screen-kitchen-stock" class="screen-view hidden">
-          <h1>Kitchen Stock Ledger</h1>
-          <p>
-            Track Dough, Chicken, Cheese & Ice Cream stock levels and real cost
-            per gram — deducted automatically as orders come in.
-          </p>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+            <div>
+              <h1 style="margin:0 0 4px;">🥦 Stock &amp; Inventory</h1>
+              <p style="margin:0; color:#64748b; font-size:14px;">
+                Track Dough, Chicken, Cheese, Ice Cream stock levels, inventory items, and supplier purchases.
+              </p>
+            </div>
+            <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
+              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
+            </div>
+          </div>
 
           
           
@@ -11237,7 +11246,7 @@
                 background: #e2e8f0;
                 padding: 4px;
                 border-radius: 8px;
-                display: flex;
+                display: none;
                 gap: 4px;
               "
             >
@@ -12295,10 +12304,36 @@
         </section>
 
         <section id="screen-inventory" class="screen-view hidden">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+            <div>
+              <h1 style="margin:0 0 4px;">🗄️ Inventory Items</h1>
+              <p style="margin:0; color:#64748b; font-size:14px;">
+                Manage restaurant inventory items, category groupings, and unit measures.
+              </p>
+            </div>
+            <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
+            </div>
+          </div>
           <div id="inventory-screen-container"></div>
         </section>
 
         <section id="screen-purchases" class="screen-view hidden">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+            <div>
+              <h1 style="margin:0 0 4px;">🧾 Purchases &amp; Suppliers</h1>
+              <p style="margin:0; color:#64748b; font-size:14px;">
+                Record and reconcile inventory restock bills, suppliers, and purchase orders.
+              </p>
+            </div>
+            <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
+            </div>
+          </div>
           <div id="purchases-screen-container"></div>
         </section>
 
@@ -13007,12 +13042,8 @@
         </div>
 
         <div id="cloud-signin-panel">
-          <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 5px" for="cloud-restaurant-code">
-            Restaurant code
-          </label>
-          <input id="cloud-restaurant-code" type="text" autocomplete="organization" required
-            style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" />
-          <label for="cloud-username" style="display:block;margin:12px 0 5px;font-size:12px;font-weight:700">Username</label>
+          <input id="cloud-restaurant-code" type="hidden" autocomplete="organization" />
+          <label for="cloud-username" style="display:block;margin:6px 0 5px;font-size:12px;font-weight:700">Username</label>
           <input id="cloud-username" type="text" autocomplete="username" required
             style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px" />
           <label style="display: block; font-size: 12px; font-weight: 700; color: #475569; margin: 12px 0 5px" for="cloud-password">
@@ -13181,7 +13212,7 @@
       async function showCloudPasswordHelp() {
         const help = document.getElementById("cloud-password-help");
         help.classList.remove("hidden");
-        let contact = "Contact your restaurant owner or Billz customer support.";
+        let contact = "Contact your restaurant owner or Billz customer support. 03015929230";
         try {
           const response = await fetch("/api/public/config", { credentials: "same-origin" });
           if (response.ok) contact = (await response.json()).supportContact || contact;
@@ -13208,11 +13239,11 @@
         const sessionClient = window.BiteTechCloudSession;
         if (!sessionClient) return;
         const button = document.getElementById("cloud-signin-button");
-        const restaurantCode = document.getElementById("cloud-restaurant-code")?.value.trim() ?? "";
+        const restaurantCode = document.getElementById("cloud-restaurant-code")?.value.trim() || undefined;
         const username = document.getElementById("cloud-username")?.value.trim() ?? "";
         const password = document.getElementById("cloud-password")?.value ?? "";
-        if (!restaurantCode || !username || !password) {
-          cloudSetStatus("Enter restaurant code, username and password.", "error");
+        if (!username || !password) {
+          cloudSetStatus("Enter username and password.", "error");
           return;
         }
         if (button) button.disabled = true;
@@ -15106,7 +15137,12 @@
 
         buttons.forEach((btn) => {
           const clickAttr = btn.getAttribute("onclick");
-          if (clickAttr && clickAttr.includes(screenId)) {
+          if (
+            clickAttr &&
+            (clickAttr.includes(`'${screenId}'`) ||
+              ((screenId === "inventory" || screenId === "purchases") &&
+                clickAttr.includes("'kitchen-stock'")))
+          ) {
             btn.classList.add("active");
           }
         });
@@ -15215,11 +15251,10 @@
         }
 
         if (screenId === "reports") {
+          calculateAndRenderBusinessReports();
           if (window.BILLZ_MANAGED) {
-            document.getElementById("cloud-profit-loss-container").classList.remove("hidden");
             window.BillzCloudProfit?.mount();
-            window.showCloudSalesReport?.();
-          } else calculateAndRenderBusinessReports();
+          }
         }
 
         if (screenId === "ledger") {
@@ -18441,6 +18476,97 @@
         submitOrder(true); // save to history AND print (customer + kitchen)
       });
 
+      // ⚙️ SETTINGS: change account username & password
+      async function updateAccountCredentials() {
+        const usernameInput = document.getElementById("security-username-input");
+        const currentPassInput = document.getElementById("security-current-password-input");
+        const newPassInput = document.getElementById("security-new-password-input");
+        const confirmPassInput = document.getElementById("security-confirm-password-input");
+        const statusEl = document.getElementById("security-status-message");
+
+        const newUsername = usernameInput?.value.trim() || undefined;
+        const currentPassword = currentPassInput?.value || "";
+        const newPassword = newPassInput?.value || "";
+        const confirmPassword = confirmPassInput?.value || "";
+
+        if (statusEl) {
+          statusEl.textContent = "";
+          statusEl.style.color = "#dc2626";
+        }
+
+        if (!currentPassword) {
+          alert("⚠️ Current password is required to update credentials.");
+          if (statusEl) statusEl.textContent = "Current password is required.";
+          return;
+        }
+
+        if (!newPassword) {
+          alert("⚠️ Please enter a new password.");
+          if (statusEl) statusEl.textContent = "Please enter a new password.";
+          return;
+        }
+
+        if (newPassword.length < 10) {
+          alert("⚠️ New password must be at least 10 characters long.");
+          if (statusEl) statusEl.textContent = "New password must be at least 10 characters long.";
+          return;
+        }
+
+        if (newPassword !== confirmPassword) {
+          alert("⚠️ New password and confirmation do not match.");
+          if (statusEl) statusEl.textContent = "New password and confirmation do not match.";
+          return;
+        }
+
+        const btn = document.getElementById("save-credentials-btn");
+        if (btn) btn.disabled = true;
+        if (statusEl) {
+          statusEl.textContent = "Updating credentials...";
+          statusEl.style.color = "#2563eb";
+        }
+
+        try {
+          const bodyPayload = { currentPassword, newPassword };
+          if (newUsername) bodyPayload.newUsername = newUsername;
+
+          const response = await fetch("/api/auth/change-password", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bodyPayload),
+          });
+
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to update credentials.");
+          }
+
+          if (newUsername) {
+            const usernameField = document.getElementById("cloud-username");
+            if (usernameField) usernameField.value = newUsername;
+          }
+
+          currentPassInput.value = "";
+          newPassInput.value = "";
+          confirmPassInput.value = "";
+          if (usernameInput) usernameInput.value = "";
+
+          alert("✅ Credentials updated successfully! Other sessions have been signed out.");
+          if (statusEl) {
+            statusEl.textContent = "✅ Credentials updated successfully!";
+            statusEl.style.color = "#16a34a";
+          }
+        } catch (error) {
+          alert("❌ " + (error.message || "Failed to update credentials."));
+          if (statusEl) {
+            statusEl.textContent = error.message || "Failed to update credentials.";
+            statusEl.style.color = "#dc2626";
+          }
+        } finally {
+          if (btn) btn.disabled = false;
+        }
+      }
+
       // ⚙️ SETTINGS: change the PIN code (requires the current PIN to confirm identity first)
       function changeSystemPinCode() {
         const currentInput = document
@@ -20339,7 +20465,7 @@
           html += `<p style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">No cost fields enabled for this category yet — tap "⚙️ Manage Cost Fields" above to choose some.</p>`;
         }
         for (let i = 0; i < cells.length; i += 2) {
-          html += `<div style="display: flex; gap: 10px;">${escapeHtmlForExport(cells[i])}${escapeHtmlForExport(cells[i + 1] || '<div style="flex:1;"></div>')}</div>`;
+          html += `<div style="display: flex; gap: 10px;">${cells[i]}${cells[i + 1] || '<div style="flex:1;"></div>'}</div>`;
         }
         const availableKeys = Object.keys(stockItemDefs).filter((key) => key !== "IceCream" && !stockItemDefs[key].deleted && !enabledKeys.includes(key));
         html += `<div style="display:flex; gap:6px; align-items:center; margin:4px 0 10px;"><select id="recipe-ingredient-select" class="styled-form-select" style="flex:1; min-width:0;"><option value="">Select another inventory ingredient</option>${availableKeys.map((key) => `<option value="${escapeHtmlForExport(key)}">${escapeHtmlForExport(stockItemDefs[key].label)}</option>`).join("")}</select><button type="button" class="btn-sm" onclick="addRecipeIngredientField()">+ Add ingredient</button></div>`;

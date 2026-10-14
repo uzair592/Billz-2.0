@@ -1,0 +1,70 @@
+{
+  "startedAt": "2026-10-10T13:13:29.981Z",
+  "completedAt": "2026-10-10T13:13:30.094Z",
+  "duration": 113,
+  "phases": {
+    "orient": {
+      "totalDecisions": 2,
+      "activeDecisions": 2,
+      "lastDreamTimestamp": null,
+      "sessionsSinceLastDream": 1,
+      "topTags": [
+        {
+          "tag": "git",
+          "count": 2
+        },
+        {
+          "tag": "development",
+          "count": 1
+        },
+        {
+          "tag": "how",
+          "count": 1
+        },
+        {
+          "tag": "sync",
+          "count": 1
+        },
+        {
+          "tag": "runtime",
+          "count": 1
+        },
+        {
+          "tag": "verification",
+          "count": 1
+        }
+      ]
+    },
+    "gatherSignal": {
+      "duplicatePairs": [],
+      "contradictions": [],
+      "staleCandidates": [],
+      "orphanedRelationships": []
+    },
+    "consolidate": {
+      "merged": [],
+      "statusUpdates": [],
+      "contradictionsResolved": 0,
+      "relationshipsAdded": 0,
+      "datesNormalized": 0
+    },
+    "pruneAndIndex": {
+      "archived": [],
+      "indexGenerated": true,
+      "indexPath": "c:\\Users\\HP\\Desktop\\updated pos latest version\\.continuity\\DECISION_INDEX.md"
+    }
+  },
+  "summary": {
+    "decisionsReviewed": 2,
+    "duplicatesMerged": 0,
+    "contradictionsFound": 0,
+    "contradictionsResolved": 0,
+    "staleArchived": 0,
+    "relationshipsDiscovered": 0,
+    "qualityScoresUpdated": 0,
+    "dateNormalizationsApplied": 0,
+    "exactQuestionDuplicates": 0,
+    "duplicatePairsDetected": 0,
+    "exactQuestionDuplicateRate": 0
+  }
+}

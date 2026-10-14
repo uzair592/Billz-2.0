@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": 1791638008993,
+  "links": [],
+  "indices": {
+    "symbolNameToLinkIds": {},
+    "filePathToLinkIds": {},
+    "decisionIdToLinkIds": {}
+  },
+  "meta": {
+    "backfillVersion": 1,
+    "backfillCompletedAt": "2026-10-10T13:29:31.009Z",
+    "backfillLinksCreated": 0,
+    "backfillDecisionsScanned": 2
+  }
+}

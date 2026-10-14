@@ -1,0 +1,22 @@
+{
+  "license": {
+    "tier": "trial",
+    "syncedAt": "2026-10-11T05:55:56.540Z"
+  },
+  "trial": {
+    "startedAt": 1791562730331,
+    "expiresAt": 1792772330331,
+    "trialPhase": "active",
+    "decisionsBeforeTrial": 13,
+    "hmac": "0c4f00b85774800778ec59d5e0d51ebf6ca7712a468eb7f82e08070f71baed2b",
+    "trialStartTrigger": "handoff_served",
+    "syncedAt": "2026-10-11T05:55:46.024Z"
+  },
+  "aiInstructionImportPrompted": true,
+  "aiInstructionImportPromptedAt": "2026-10-08T06:54:47.894Z",
+  "_internal": {
+    "decisionCounter": 15,
+    "lastLoggedAt": "2026-10-11T05:55:46.079Z",
+    "counterSignature": "e2d8c3eb508260c9"
+  }
+}

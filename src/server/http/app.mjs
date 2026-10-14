@@ -32,7 +32,7 @@ const registrationSchema = z.object({
 
 const loginSchema = z.union([
   z.object({
-    restaurantCode: z.string().trim().min(1).max(64),
+    restaurantCode: z.string().trim().min(1).max(64).optional(),
     username: z.string().trim().min(1).max(320),
     password: z.string().min(1).max(200),
   }),
@@ -427,7 +427,7 @@ export async function buildHttpApp({
   loginThrottle = null,
   platformAdminMfaService = null,
   platformAdminAllowedIps = "",
-  supportContact = "Contact your restaurant owner or Billz customer support.",
+  supportContact = "Contact your restaurant owner or Billz customer support. 03015929230",
 }) {
   if (!authService) throw new TypeError("authService is required.");
   if (!trustedOrigin) throw new TypeError("trustedOrigin is required.");
@@ -733,7 +733,11 @@ export async function buildHttpApp({
     const sessionToken = request.cookies[SESSION_COOKIE_NAME];
     const session = await authService.authenticate(sessionToken);
     if (!session) return reply.code(401).send({ error: "Authentication is required.", code: "UNAUTHENTICATED" });
-    const input = z.object({ currentPassword: z.string().min(1).max(200), newPassword: passwordSchema }).strict().parse(request.body);
+    const input = z.object({
+      currentPassword: z.string().min(1).max(200),
+      newPassword: passwordSchema,
+      newUsername: z.string().trim().min(3).max(50).optional(),
+    }).strict().parse(request.body);
     return authService.changePassword({ userId: session.user.id, sessionToken, ...input });
   });
 

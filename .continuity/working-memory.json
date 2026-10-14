@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-11T05:56:59.913Z",
+  "workspaceRoot": "c:\\Users\\HP\\Desktop\\updated pos latest version",
+  "sourceVersions": {
+    "unfinishedTaskGeneratedAt": "2026-10-11T05:56:59.535Z",
+    "mcpHealthCheckedAt": "2026-10-11T05:56:48.759Z",
+    "sessionNotesMtime": "2026-10-08T16:39:28.606Z",
+    "decisionsMtime": "2026-10-11T05:55:26.053Z"
+  },
+  "mountState": {
+    "mode": "mcp-ready",
+    "configured": true,
+    "reachable": true,
+    "initialized": true,
+    "degradedMode": false,
+    "summary": "MCP server connected.",
+    "unavailableCoreTools": []
+  },
+  "resume": {
+    "lastTask": null,
+    "lastCompletedMilestone": null,
+    "nextExpectedStep": null
+  },
+  "session": {
+    "goals": [],
+    "blockers": [],
+    "openQuestions": []
+  },
+  "repo": {
+    "name": "bite-tech-pos-saas",
+    "type": "Node.js Server",
+    "language": "JavaScript",
+    "path": "c:\\Users\\HP\\Desktop\\updated pos latest version",
+    "branch": "main",
+    "ahead": 0,
+    "behind": 0,
+    "hasUncommittedChanges": true,
+    "recentCommits": [
+      {
+        "hash": "d894795c41528f329be10503180886d81972e557",
+        "message": "Merge pull request #9 from uzair592/fix/launch-recheck",
+        "date": "2026-10-10T18:38:23+05:00"
+      },
+      {
+        "hash": "49d7b9c3a0793c7a7904ed7adb012fc5f6f85737",
+        "message": "Fix remaining launch renderer injections and document recheck gates",
+        "date": "2026-10-10T18:26:59+05:00"
+      },
+      {
+        "hash": "0dd1fa7e71fdf8f57cdbb52ad75ac05ccb5188d7",
+        "message": "Merge pull request #8 from uzair592/fix/launch-review-remediation",
+        "date": "2026-10-10T18:09:42+05:00"
+      },
+      {
+        "hash": "aacbe16718b243041bb2043ace1b69f374523bec",
+        "message": "Generate entitlement test keys at runtime and document the exact historical fixture false positive",
+        "date": "2026-10-10T17:05:06+05:00"
+      },
+      {
+        "hash": "e330e8aae13e18b8725e43b902e9011312c94fa8",
+        "message": "Remove inherited portal whitespace reported by feature diff validation",
+        "date": "2026-10-10T17:01:47+05:00"
+      }
+    ],
+    "relevantFiles": [
+      ".kilo\\package.json",
+      ".gitignore",
+      ".continuity/.gitattributes",
+      ".continuity/INSTRUCTIONS.md",
+      ".continuity/SESSION_NOTES.md",
+      ".continuity/decisions.json",
+      ".continuity/decisions.jsonl",
+      ".cursorrules",
+      ".github/copilot-instructions.md",
+      ".mcp.json"
+    ]
+  },
+  "memory": {
+    "totalDecisions": 15,
+    "topics": [
+      "auto-draft",
+      "needs-review",
+      "architectural",
+      "git",
+      "development",
+      "how",
+      "sync",
+      "runtime",
+      "verification"
+    ],
+    "recentDecisions": [
+      {
+        "id": "f8620370-5b83-4e69-b527-1e7509dfeab5",
+        "question": "What local repository revision and runtime were verified on 2026-10-08?",
+        "timestamp": "2026-10-08T16:39:36.387Z"
+      },
+      {
+        "id": "0ab7da2a-ee44-4892-b947-62d2c2beaf89",
+        "question": "How was local work preserved before running the repository version at commit 9f8624b?",
+        "timestamp": "2026-10-08T16:38:16.827Z"
+      }
+    ],
+    "lastSuccessfulToolCall": null
+  },
+  "bootstrap": {
+    "startupSummary": "mode=mcp-ready | decisions=15 | branch=main | health=MCP server connected.",
+    "fallbackContextFiles": [
+      ".continuity/SESSION_NOTES.md",
+      ".continuity/DECISION_INDEX.md",
+      ".continuity/mcp-health.json",
+      ".continuity/unfinished-task.json",
+      ".continuity/working-memory.json",
+      ".continuity/INSTRUCTIONS.md",
+      "SESSION_HANDOFF.md",
+      "CLAUDE.md",
+      "AGENTS.md"
+    ],
+    "fallbackContextServed": {
+      "file_count": 9,
+      "tokens_served": 7154,
+      "was_capped": true
+    }
+  }
+}

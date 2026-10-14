@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-11T05:56:59.535Z",
+  "workspaceRoot": "c:\\Users\\HP\\Desktop\\updated pos latest version",
+  "lastTask": null,
+  "lastCompletedMilestone": null,
+  "nextExpectedStep": null,
+  "currentGoals": [],
+  "blockers": [],
+  "openQuestions": [],
+  "relevantFiles": [
+    ".kilo\\package.json",
+    ".gitignore",
+    ".continuity/.gitattributes",
+    ".continuity/INSTRUCTIONS.md",
+    ".continuity/SESSION_NOTES.md",
+    ".continuity/decisions.json",
+    ".continuity/decisions.jsonl",
+    ".cursorrules",
+    ".github/copilot-instructions.md",
+    ".mcp.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md"
+  ],
+  "recentCommits": [
+    {
+      "hash": "d894795c41528f329be10503180886d81972e557",
+      "message": "Merge pull request #9 from uzair592/fix/launch-recheck",
+      "date": "2026-10-10T18:38:23+05:00"
+    },
+    {
+      "hash": "49d7b9c3a0793c7a7904ed7adb012fc5f6f85737",
+      "message": "Fix remaining launch renderer injections and document recheck gates",
+      "date": "2026-10-10T18:26:59+05:00"
+    },
+    {
+      "hash": "0dd1fa7e71fdf8f57cdbb52ad75ac05ccb5188d7",
+      "message": "Merge pull request #8 from uzair592/fix/launch-review-remediation",
+      "date": "2026-10-10T18:09:42+05:00"
+    },
+    {
+      "hash": "aacbe16718b243041bb2043ace1b69f374523bec",
+      "message": "Generate entitlement test keys at runtime and document the exact historical fixture false positive",
+      "date": "2026-10-10T17:05:06+05:00"
+    },
+    {
+      "hash": "e330e8aae13e18b8725e43b902e9011312c94fa8",
+      "message": "Remove inherited portal whitespace reported by feature diff validation",
+      "date": "2026-10-10T17:01:47+05:00"
+    }
+  ],
+  "lastCommit": {
+    "hash": "d894795c41528f329be10503180886d81972e557",
+    "message": "Merge pull request #9 from uzair592/fix/launch-recheck",
+    "date": "2026-10-10T18:38:23+05:00"
+  },
+  "pushState": {
+    "branch": "main",
+    "ahead": 0,
+    "behind": 0,
+    "hasUncommittedChanges": true
+  },
+  "workingTree": {
+    "modified": [
+      ".gitignore"
+    ],
+    "added": [],
+    "deleted": [],
+    "untracked": [
+      ".continuity/.gitattributes",
+      ".continuity/INSTRUCTIONS.md",
+      ".continuity/SESSION_NOTES.md",
+      ".continuity/decisions.json",
+      ".continuity/decisions.jsonl",
+      ".cursorrules",
+      ".github/copilot-instructions.md",
+      ".mcp.json",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md"
+    ]
+  },
+  "lastSuccessfulToolCall": null,
+  "recentDecisions": [
+    {
+      "id": "0ab7da2a-ee44-4892-b947-62d2c2beaf89",
+      "question": "How was local work preserved before running the repository version at commit 9f8624b?",
+      "timestamp": "2026-10-08T16:38:16.827Z"
+    },
+    {
+      "id": "f8620370-5b83-4e69-b527-1e7509dfeab5",
+      "question": "What local repository revision and runtime were verified on 2026-10-08?",
+      "timestamp": "2026-10-08T16:39:36.387Z"
+    },
+    {
+      "id": "1791698126040-w1eyi4",
+      "question": "Why: Authenticate before using managed tenant storage; retain recipe warnings and dynamic migration assertions?",
+      "timestamp": "2026-10-10T11:59:03.000Z"
+    },
+    {
+      "id": "1791698126040-crg0kk",
+      "question": "Why: Hide legacy PIN overlay for managed login and report fresh database migrations as pending?",
+      "timestamp": "2026-10-10T11:54:35.000Z"
+    }
+  ],
+  "session": {
+    "sessionId": "1791698145302",
+    "startTime": "2026-10-11T05:55:45.302Z",
+    "lastUpdate": "2026-10-11T05:56:58.601Z",
+    "activityCount": 0
+  },
+  "fallbackContextFiles": [
+    ".continuity/SESSION_NOTES.md",
+    ".continuity/DECISION_INDEX.md",
+    ".continuity/mcp-health.json",
+    ".continuity/unfinished-task.json",
+    ".continuity/working-memory.json",
+    ".continuity/INSTRUCTIONS.md",
+    "SESSION_HANDOFF.md",
+    "CLAUDE.md",
+    "AGENTS.md"
+  ]
+}
