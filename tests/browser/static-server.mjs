@@ -29,7 +29,10 @@ const server = createServer(async (request, response) => {
       response.end("Forbidden");
       return;
     }
-    const body = await readFile(filePath);
+    let body = await readFile(filePath);
+    if (pathname === "/Fast_Food_POS_Custom_Bill_Header_XXXL.html" && process.env.BILLZ_TEST_DEMO === "true") {
+      body = Buffer.from(body.toString().replace("<head>", '<head><script>window.BILLZ_DEVELOPMENT_DEMO=true;window.BILLZ_DEVELOPMENT_PIN="8429";</script>'));
+    }
     response.writeHead(200, {
       "content-type": MIME[extname(filePath).toLowerCase()]
         ?? "application/octet-stream",

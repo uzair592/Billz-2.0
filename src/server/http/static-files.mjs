@@ -76,7 +76,7 @@ export function createStaticFileHandler({ root = appRoot() } = {}) {
         return reply.code(403).send({ error: "Forbidden." });
       }
       let body = await readFile(canonicalFile);
-      if (isEntry) body = Buffer.from(body.toString("utf8").replace("<head>", "<head><script>window.BILLZ_MANAGED = true;</script>"));
+      if (isEntry) body = Buffer.from(body.toString("utf8").replace("<head>", "<head><script>window.BILLZ_MANAGED = true;window.BILLZ_DEVELOPMENT_DEMO = false;</script>"));
       return reply
         .header("Content-Type", MIME[extname(filePath).toLowerCase()] ?? "application/octet-stream")
         .header("Cache-Control", "no-store")
