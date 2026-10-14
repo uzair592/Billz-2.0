@@ -544,6 +544,11 @@ dialog::backdrop {
   }
 }
 @media (max-width: 760px) {
-  .sidebar nav { overflow-x:auto; }
-  .nav-item { min-width:85px; flex:0 0 auto; }
+  .sidebar nav {
+    overflow-x: auto;
+  }
+  .nav-item {
+    min-width: 85px;
+    flex: 0 0 auto;
+  }
 }

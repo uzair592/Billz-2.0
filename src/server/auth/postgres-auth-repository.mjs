@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import { withUserContextTransaction } from "../database/tenant-transaction.mjs";
 
 function slugFor(name, restaurantId) {
-  const base = String(name)
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 48) || "restaurant";
+  const base =
+    String(name)
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 48) || "restaurant";
   return `${base}-${restaurantId.slice(0, 8)}`;
 }
 
@@ -55,10 +56,9 @@ export function createPostgresAuthRepository(pool) {
       try {
         await client.query("BEGIN");
         await client.query("SET LOCAL statement_timeout = '15s'");
-        await client.query(
-          "SELECT set_config('app.restaurant_id', $1, true)",
-          [restaurantId],
-        );
+        await client.query("SELECT set_config('app.restaurant_id', $1, true)", [
+          restaurantId,
+        ]);
         const userResult = await client.query(
           `INSERT INTO users (
              id, email, normalized_email, password_hash, display_name,
@@ -66,12 +66,22 @@ export function createPostgresAuthRepository(pool) {
            ) VALUES ($1, $2, $3, $4, $5, 'user', 'pending_verification')
            RETURNING id, email, display_name, platform_role, status,
                      email_verified_at, password_hash`,
-          [userId, input.email, input.normalizedEmail, input.passwordHash, input.displayName],
+          [
+            userId,
+            input.email,
+            input.normalizedEmail,
+            input.passwordHash,
+            input.displayName,
+          ],
         );
         await client.query(
           `INSERT INTO restaurants (id, name, slug, status)
            VALUES ($1, $2, $3, 'active')`,
-          [restaurantId, input.restaurantName, slugFor(input.restaurantName, restaurantId)],
+          [
+            restaurantId,
+            input.restaurantName,
+            slugFor(input.restaurantName, restaurantId),
+          ],
         );
         await client.query(
           `INSERT INTO branches (id, restaurant_id, code, name, is_default)
@@ -100,13 +110,22 @@ export function createPostgresAuthRepository(pool) {
           `INSERT INTO email_verification_tokens (
              id, user_id, restaurant_id, token_hash, expires_at
            ) VALUES ($1, $2, $3, $4, $5)`,
-          [verificationId, userId, restaurantId, input.verificationTokenHash, input.verificationExpiresAt],
+          [
+            verificationId,
+            userId,
+            restaurantId,
+            input.verificationTokenHash,
+            input.verificationExpiresAt,
+          ],
         );
         await client.query("COMMIT");
         return mapUser(userResult.rows[0]);
       } catch (error) {
         await rollback(client, error);
-        if (error.code === "23505" && /normalized_email/i.test(error.constraint ?? "")) {
+        if (
+          error.code === "23505" &&
+          /normalized_email/i.test(error.constraint ?? "")
+        ) {
           const duplicate = new Error("Registration is already pending.");
           duplicate.code = "EMAIL_EXISTS";
           throw duplicate;
@@ -133,10 +152,9 @@ export function createPostgresAuthRepository(pool) {
           await client.query("ROLLBACK");
           return null;
         }
-        await client.query(
-          "SELECT set_config('app.restaurant_id', $1, true)",
-          [token.restaurant_id],
-        );
+        await client.query("SELECT set_config('app.restaurant_id', $1, true)", [
+          token.restaurant_id,
+        ]);
         await client.query(
           "UPDATE email_verification_tokens SET consumed_at = $2 WHERE id = $1",
           [token.id, now],
@@ -149,7 +167,8 @@ export function createPostgresAuthRepository(pool) {
                     email_verified_at, password_hash`,
           [token.user_id, now],
         );
-        if (!userResult.rows[0]) throw new Error("Verification account is no longer pending.");
+        if (!userResult.rows[0])
+          throw new Error("Verification account is no longer pending.");
         await client.query(
           `UPDATE restaurant_memberships
               SET status = 'active', joined_at = $3, updated_at = $3
@@ -176,57 +195,189 @@ export function createPostgresAuthRepository(pool) {
       return mapUser(result.rows[0]);
     },
 
-    async createSession({ userId, tokenHash, ipAddress, userAgent, expiresAt, expectedPasswordHash, expectedUsername = null,
-      expectedRestaurantId = null, expectedRestaurantCode = null, expectedEmail = undefined, previousTokenHash = null, now = new Date() }) {
+    async createSession({
+      userId,
+      tokenHash,
+      ipAddress,
+      userAgent,
+      expiresAt,
+      expectedPasswordHash,
+      expectedUsername = null,
+      expectedRestaurantId = null,
+      expectedRestaurantCode = null,
+      expectedEmail = undefined,
+      previousTokenHash = null,
+      now = new Date(),
+    }) {
       const client = await pool.connect();
       try {
         await client.query("BEGIN");
         await client.query("SET LOCAL statement_timeout='15s'");
-        const membership = (await client.query(`SELECT restaurant_id FROM restaurant_memberships WHERE user_id=$1 AND status='active'
-          AND ($2::uuid IS NULL OR restaurant_id=$2) ORDER BY restaurant_id LIMIT 1`, [userId,expectedRestaurantId])).rows[0];
-        const restaurantId=membership?.restaurant_id;
-        if(!restaurantId) throw controlError('Active restaurant membership is required.','INVALID_CREDENTIALS',401);
-        const initial=(await client.query('SELECT plan_id FROM subscriptions WHERE restaurant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[restaurantId])).rows[0];
-        await lockPlanSessions(client,initial?.plan_id);
-        const restaurant=(await client.query('SELECT code,status FROM restaurants WHERE id=$1 FOR UPDATE',[restaurantId])).rows[0];
-        if(!restaurant || restaurant.status!=='active') throw controlError('Restaurant access is suspended.','RESTAURANT_SUSPENDED',403);
-        if(expectedRestaurantCode && restaurant.code!==expectedRestaurantCode) throw controlError('Restaurant credentials changed. Please sign in again.','INVALID_CREDENTIALS',401);
-        const plan=(await client.query(`SELECT s.plan_id,p.max_devices FROM subscriptions s JOIN plans p ON p.id=s.plan_id
-          WHERE s.restaurant_id=$1 ORDER BY s.created_at DESC,s.id DESC LIMIT 1`,[restaurantId])).rows[0];
-        if((plan?.plan_id??null)!==(initial?.plan_id??null)) throw controlError('Subscription changed during login. Please try again.','SUBSCRIPTION_CHANGED',409);
-        const row=(await client.query('SELECT password_hash,status,username,email FROM users WHERE id=$1 FOR SHARE',[userId])).rows[0];
-        if(!row || row.status!=='active' || row.password_hash!==expectedPasswordHash || (expectedUsername && row.username!==expectedUsername)
-          || (expectedEmail!==undefined && row.email!==expectedEmail)) throw controlError('Credentials changed. Please sign in again.','INVALID_CREDENTIALS',401);
-        if(previousTokenHash) await client.query('UPDATE sessions SET revoked_at=$3 WHERE user_id=$1 AND token_hash=$2 AND restaurant_id=$4 AND revoked_at IS NULL',[userId,previousTokenHash,now,restaurantId]);
-        const limit=Number(plan?.max_devices??20);
-        const count=(await client.query(`SELECT count(*) AS total FROM sessions s JOIN users u ON u.id=s.user_id AND u.status='active'
+        const membership = (
+          await client.query(
+            `SELECT restaurant_id FROM restaurant_memberships WHERE user_id=$1 AND status='active'
+          AND ($2::uuid IS NULL OR restaurant_id=$2) ORDER BY restaurant_id LIMIT 1`,
+            [userId, expectedRestaurantId],
+          )
+        ).rows[0];
+        const restaurantId = membership?.restaurant_id;
+        if (!restaurantId)
+          throw controlError(
+            "Active restaurant membership is required.",
+            "INVALID_CREDENTIALS",
+            401,
+          );
+        const initial = (
+          await client.query(
+            "SELECT plan_id FROM subscriptions WHERE restaurant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1",
+            [restaurantId],
+          )
+        ).rows[0];
+        await lockPlanSessions(client, initial?.plan_id);
+        const restaurant = (
+          await client.query(
+            "SELECT code,status FROM restaurants WHERE id=$1 FOR UPDATE",
+            [restaurantId],
+          )
+        ).rows[0];
+        if (!restaurant || restaurant.status !== "active")
+          throw controlError(
+            "Restaurant access is suspended.",
+            "RESTAURANT_SUSPENDED",
+            403,
+          );
+        if (
+          expectedRestaurantCode &&
+          restaurant.code !== expectedRestaurantCode
+        )
+          throw controlError(
+            "Restaurant credentials changed. Please sign in again.",
+            "INVALID_CREDENTIALS",
+            401,
+          );
+        const plan = (
+          await client.query(
+            `SELECT s.plan_id,p.max_devices FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+          WHERE s.restaurant_id=$1 ORDER BY s.created_at DESC,s.id DESC LIMIT 1`,
+            [restaurantId],
+          )
+        ).rows[0];
+        if ((plan?.plan_id ?? null) !== (initial?.plan_id ?? null))
+          throw controlError(
+            "Subscription changed during login. Please try again.",
+            "SUBSCRIPTION_CHANGED",
+            409,
+          );
+        const row = (
+          await client.query(
+            "SELECT password_hash,status,username,email FROM users WHERE id=$1 FOR SHARE",
+            [userId],
+          )
+        ).rows[0];
+        if (
+          !row ||
+          row.status !== "active" ||
+          row.password_hash !== expectedPasswordHash ||
+          (expectedUsername && row.username !== expectedUsername) ||
+          (expectedEmail !== undefined && row.email !== expectedEmail)
+        )
+          throw controlError(
+            "Credentials changed. Please sign in again.",
+            "INVALID_CREDENTIALS",
+            401,
+          );
+        if (previousTokenHash)
+          await client.query(
+            "UPDATE sessions SET revoked_at=$3 WHERE user_id=$1 AND token_hash=$2 AND restaurant_id=$4 AND revoked_at IS NULL",
+            [userId, previousTokenHash, now, restaurantId],
+          );
+        const limit = Number(plan?.max_devices ?? 20);
+        const count = (
+          await client.query(
+            `SELECT count(*) AS total FROM sessions s JOIN users u ON u.id=s.user_id AND u.status='active'
           JOIN restaurant_memberships m ON m.user_id=s.user_id AND m.restaurant_id=s.restaurant_id AND m.status='active'
-          WHERE s.restaurant_id=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`,[restaurantId,now])).rows[0];
-        if(Number(count.total)>=limit) throw controlError(`The restaurant's ${limit}-device limit is reached. Sign out another device or contact support.`,'DEVICE_LIMIT_REACHED',409);
-        await client.query(`INSERT INTO sessions(user_id,token_hash,ip_address,user_agent,expires_at,restaurant_id)
-          VALUES($1,$2,$3,$4,$5,$6)`,[userId,tokenHash,ipAddress,userAgent,expiresAt,restaurantId]);
-        await client.query("COMMIT");
-      } catch(error){await rollback(client,error);throw error;} finally {client.release();}
-    },
-
-    async changePassword({ userId, sessionTokenHash, passwordHash, verifyCurrentPassword, now }) {
-      const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const user = (await client.query("SELECT id, restaurant_id, password_hash FROM users WHERE id = $1 AND status = 'active' FOR UPDATE", [userId])).rows[0];
-        const session = (await client.query(`SELECT id FROM sessions WHERE user_id = $1 AND token_hash = $2
-          AND revoked_at IS NULL AND expires_at > $3 FOR UPDATE`, [userId, sessionTokenHash, now])).rows[0];
-        if (!user || !session) throw Object.assign(new Error("Authentication is required."), { code: "UNAUTHENTICATED", statusCode: 401 });
-        if (!(await verifyCurrentPassword(user.password_hash))) throw Object.assign(new Error("Current password is incorrect."), { code: "INVALID_CURRENT_PASSWORD", statusCode: 400 });
-        await client.query("UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1", [userId, passwordHash, now]);
-        await client.query("UPDATE sessions SET revoked_at = $3 WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL", [userId, sessionTokenHash, now]);
-        await client.query(`INSERT INTO audit_logs(restaurant_id, actor_user_id, actor_type, action, resource_type, resource_id, metadata)
-          VALUES($1,$2,'user','user.password_changed','user',$3,$4)`, [user.restaurant_id, userId, userId, JSON.stringify({ otherSessionsRevoked: true })]);
+          WHERE s.restaurant_id=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`,
+            [restaurantId, now],
+          )
+        ).rows[0];
+        if (Number(count.total) >= limit)
+          throw controlError(
+            `The restaurant's ${limit}-device limit is reached. Sign out another device or contact support.`,
+            "DEVICE_LIMIT_REACHED",
+            409,
+          );
+        await client.query(
+          `INSERT INTO sessions(user_id,token_hash,ip_address,user_agent,expires_at,restaurant_id)
+          VALUES($1,$2,$3,$4,$5,$6)`,
+          [userId, tokenHash, ipAddress, userAgent, expiresAt, restaurantId],
+        );
         await client.query("COMMIT");
       } catch (error) {
         await rollback(client, error);
         throw error;
-      } finally { client.release(); }
+      } finally {
+        client.release();
+      }
+    },
+
+    async changePassword({
+      userId,
+      sessionTokenHash,
+      passwordHash,
+      verifyCurrentPassword,
+      now,
+    }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const user = (
+          await client.query(
+            "SELECT id, restaurant_id, password_hash FROM users WHERE id = $1 AND status = 'active' FOR UPDATE",
+            [userId],
+          )
+        ).rows[0];
+        const session = (
+          await client.query(
+            `SELECT id FROM sessions WHERE user_id = $1 AND token_hash = $2
+          AND revoked_at IS NULL AND expires_at > $3 FOR UPDATE`,
+            [userId, sessionTokenHash, now],
+          )
+        ).rows[0];
+        if (!user || !session)
+          throw Object.assign(new Error("Authentication is required."), {
+            code: "UNAUTHENTICATED",
+            statusCode: 401,
+          });
+        if (!(await verifyCurrentPassword(user.password_hash)))
+          throw Object.assign(new Error("Current password is incorrect."), {
+            code: "INVALID_CURRENT_PASSWORD",
+            statusCode: 400,
+          });
+        await client.query(
+          "UPDATE users SET password_hash = $2, updated_at = $3 WHERE id = $1",
+          [userId, passwordHash, now],
+        );
+        await client.query(
+          "UPDATE sessions SET revoked_at = $3 WHERE user_id = $1 AND token_hash <> $2 AND revoked_at IS NULL",
+          [userId, sessionTokenHash, now],
+        );
+        await client.query(
+          `INSERT INTO audit_logs(restaurant_id, actor_user_id, actor_type, action, resource_type, resource_id, metadata)
+          VALUES($1,$2,'user','user.password_changed','user',$3,$4)`,
+          [
+            user.restaurant_id,
+            userId,
+            userId,
+            JSON.stringify({ otherSessionsRevoked: true }),
+          ],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback(client, error);
+        throw error;
+      } finally {
+        client.release();
+      }
     },
 
     async findActiveSession(tokenHash, now) {
@@ -251,7 +402,13 @@ export function createPostgresAuthRepository(pool) {
         [tokenHash, now],
       );
       const row = result.rows[0];
-      return row ? { user: mapUser(row), expiresAt: row.expires_at, restaurantId: row.session_restaurant_id } : null;
+      return row
+        ? {
+            user: mapUser(row),
+            expiresAt: row.expires_at,
+            restaurantId: row.session_restaurant_id,
+          }
+        : null;
     },
 
     async revokeSession(tokenHash, now) {
@@ -263,8 +420,12 @@ export function createPostgresAuthRepository(pool) {
     },
 
     async findUserByRestaurantAndUsername({ restaurantCode, username }) {
-      const normCode = String(restaurantCode ?? "").trim().toLowerCase();
-      const normUsername = String(username ?? "").trim().toLowerCase();
+      const normCode = String(restaurantCode ?? "")
+        .trim()
+        .toLowerCase();
+      const normUsername = String(username ?? "")
+        .trim()
+        .toLowerCase();
 
       const restResult = await pool.query(
         `SELECT id, name, code, status FROM restaurants WHERE code = $1`,
@@ -292,14 +453,24 @@ export function createPostgresAuthRepository(pool) {
       };
     },
 
-    async createTenantUser({ restaurantId, username, passwordHash, displayName, role = "cashier" }) {
+    async createTenantUser({
+      restaurantId,
+      username,
+      passwordHash,
+      displayName,
+      role = "cashier",
+    }) {
       const client = await pool.connect();
       const userId = randomUUID();
-      const normUsername = String(username ?? "").trim().toLowerCase();
+      const normUsername = String(username ?? "")
+        .trim()
+        .toLowerCase();
 
       try {
         await client.query("BEGIN");
-        await client.query("SELECT set_config('app.restaurant_id', $1, true)", [restaurantId]);
+        await client.query("SELECT set_config('app.restaurant_id', $1, true)", [
+          restaurantId,
+        ]);
 
         const branchResult = await client.query(
           `SELECT id FROM branches WHERE restaurant_id = $1 AND is_default = true LIMIT 1`,
@@ -314,7 +485,14 @@ export function createPostgresAuthRepository(pool) {
            ) VALUES ($1, $2, $3, $4, $5, $6, 'user', 'active', now())
            RETURNING id, email, username, restaurant_id, display_name, platform_role, status,
                      email_verified_at, password_hash`,
-          [userId, restaurantId, String(username).trim(), normUsername, passwordHash, String(displayName).trim()],
+          [
+            userId,
+            restaurantId,
+            String(username).trim(),
+            normUsername,
+            passwordHash,
+            String(displayName).trim(),
+          ],
         );
 
         await client.query(
@@ -328,8 +506,13 @@ export function createPostgresAuthRepository(pool) {
         return mapUser(userResult.rows[0]);
       } catch (error) {
         await rollback(client, error);
-        if (error.code === "23505" && /username/i.test(error.constraint ?? "")) {
-          const duplicate = new Error("Username already exists in this restaurant.");
+        if (
+          error.code === "23505" &&
+          /username/i.test(error.constraint ?? "")
+        ) {
+          const duplicate = new Error(
+            "Username already exists in this restaurant.",
+          );
           duplicate.code = "USERNAME_EXISTS";
           throw duplicate;
         }
@@ -356,14 +539,16 @@ export function createPostgresAuthRepository(pool) {
             ORDER BY r.name`,
           [userId],
         );
-        return result.rows.map((row) => Object.freeze({
-          restaurantId: row.restaurant_id,
-          name: row.restaurant_name,
-          status: row.restaurant_status,
-          currencyCode: row.currency_code,
-          role: row.role,
-          defaultBranchId: row.defaultBranch_id ?? row.default_branch_id,
-        }));
+        return result.rows.map((row) =>
+          Object.freeze({
+            restaurantId: row.restaurant_id,
+            name: row.restaurant_name,
+            status: row.restaurant_status,
+            currencyCode: row.currency_code,
+            role: row.role,
+            defaultBranchId: row.defaultBranch_id ?? row.default_branch_id,
+          }),
+        );
       });
     },
   });
