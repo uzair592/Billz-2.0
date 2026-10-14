@@ -55,6 +55,7 @@ test("persisted customer, menu, supplier and expense text remains inert on POS s
   await inert();
   await page.evaluate(() => switchScreen("purchases"));
   await page.getByRole("button", { name: "Add supplier", exact: true }).click();
+  await expect(page.locator(".inventory-modal")).toBeVisible();
   await page.locator(".inventory-modal .inventory-input").first().fill(canary);
   await page.getByRole("button", { name: "Create supplier", exact: true }).click();
   await expect(page.locator(".inventory-supplier-name")).toContainText(canary); await inert();
