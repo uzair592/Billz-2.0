@@ -1,5 +1,6 @@
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError, businessDateInTimezone } from "./business-date.mjs";
+import { hasPermission, PERMISSION } from "../authorization/permissions.mjs";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const CURSOR_PATTERN = /^([0-9]{4}-[0-9]{2}-[0-9]{2})\.(\d{1,19})$/;
@@ -10,12 +11,12 @@ function minor(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-function mapSummary(row) {
+function mapSummary(row, canViewReports = true) {
   return {
     orderCount: Number(row.order_count),
     cancelledCount: Number(row.cancelled_count),
     salesMinor: minor(row.sales_minor),
-    costOfGoodsMinor: minor(row.cost_of_goods_minor),
+    ...(canViewReports ? { costOfGoodsMinor: minor(row.cost_of_goods_minor) } : {}),
     paidMinor: minor(row.paid_minor),
     dueMinor: minor(row.due_minor),
   };
@@ -201,9 +202,10 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
             parameters,
           );
 
+          const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
           return {
             orders: rows.map(mapOrderRow),
-            summary: mapSummary(summaryResult.rows[0] ?? {}),
+            summary: mapSummary(summaryResult.rows[0] ?? {}, canViewReports),
             nextCursor: hasMore && last
               ? encodeOrderCursor({ businessDate: last.business_date, orderNumber: last.order_number })
               : null,
@@ -285,12 +287,14 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
             ]);
 
           const cancellation = cancellationResult.rows[0];
+          const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
+          const canViewRecipes = tenant?.membership?.role ? (hasPermission(tenant.membership.role, PERMISSION.RECIPES_MANAGE) || hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW)) : true;
           return {
             order: {
               ...mapOrderRow(row),
               discountType: row.discount_type ?? null,
               discountValue: Number(row.discount_value ?? 0),
-              costOfGoodsMinor: minor(row.cost_of_goods_minor),
+              ...(canViewReports ? { costOfGoodsMinor: minor(row.cost_of_goods_minor) } : {}),
               completedAt: row.completed_at ?? null,
               legacyOrderId: row.legacy_order_id === null || row.legacy_order_id === undefined
                 ? null
@@ -303,8 +307,8 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
               quantity: Number(item.quantity),
               unitPriceMinor: minor(item.unit_price_minor),
               lineTotalMinor: minor(item.line_total_minor),
-              unitCostMinor: minor(item.unit_cost_minor),
-              recipe: item.recipe_snapshot ?? {},
+              ...(canViewReports ? { unitCostMinor: minor(item.unit_cost_minor) } : {}),
+              recipe: canViewRecipes ? (item.recipe_snapshot ?? {}) : {},
               notes: item.notes ?? null,
             })),
             charges: chargeResult.rows.map((charge) => ({

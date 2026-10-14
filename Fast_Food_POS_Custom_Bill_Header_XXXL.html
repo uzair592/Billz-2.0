@@ -5100,6 +5100,16 @@
             <span class="menu-btn-icon">📦</span
             ><span class="menu-btn-label">VIEW ORDERS</span>
           </button>
+          <button
+            type="button"
+            class="menu-btn"
+            id="nav-kitchen-btn"
+            onclick="switchScreen('kitchen')"
+            title="Kitchen Display (KDS)"
+          >
+            <span class="menu-btn-icon">🍳</span
+            ><span class="menu-btn-label">KITCHEN (KDS)</span>
+          </button>
           <div class="menu-section-label">Business</div>
           <button
             type="button"
@@ -6106,7 +6116,80 @@
           </div>
         </section>
 
-        
+        <!-- KITCHEN DISPLAY SYSTEM (KDS) -->
+        <section id="screen-kitchen" class="screen-view hidden" style="padding: 24px; overflow-y: auto; height: 100%; background: #f8fafc;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; background: #fff; padding: 18px 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+            <div>
+              <h1 style="font-size: 22px; font-weight: 800; color: #0f172a; margin: 0; display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 26px;">🍳</span> Kitchen Display System (KDS)
+              </h1>
+              <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">
+                Real-time kitchen order tickets, prep stations, and order lifecycle management.
+              </p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <label for="kitchen-station-filter" style="font-size: 13px; font-weight: 600; color: #475569;">Station:</label>
+                <select id="kitchen-station-filter" onchange="renderKitchenScreen()" style="padding: 7px 12px; border-radius: 6px; border: 1px solid #cbd5e1; font-size: 13px; background: #fff; font-weight: 600;">
+                  <option value="">All Stations</option>
+                  <option value="kitchen">Kitchen</option>
+                  <option value="grill">Grill</option>
+                  <option value="fryer">Fryer</option>
+                  <option value="drinks">Drinks / Bar</option>
+                </select>
+              </div>
+              <button type="button" onclick="renderKitchenScreen()" style="background: #2563eb; color: #fff; padding: 8px 16px; border-radius: 6px; border: none; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                <span>🔄</span> Refresh
+              </button>
+              <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #16a34a; font-weight: 600; background: #dcfce7; padding: 6px 12px; border-radius: 20px;">
+                <span id="kds-live-indicator" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #16a34a;"></span>
+                <span>Live (5s)</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start;">
+            <!-- Column 1: New Tickets -->
+            <div style="background: #fff; border-radius: 12px; padding: 18px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-height: 450px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
+                <h3 style="font-size: 15px; font-weight: 800; color: #1e293b; display: flex; align-items: center; gap: 8px; margin: 0;">
+                  <span style="color: #3b82f6;">📥</span> NEW TICKETS
+                </h3>
+                <span id="kds-count-new" style="background: #dbeafe; color: #1d4ed8; font-size: 13px; font-weight: 800; padding: 3px 10px; border-radius: 12px;">0</span>
+              </div>
+              <div id="kds-column-new" style="display: flex; flex-direction: column; gap: 14px;">
+                <p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No new tickets</p>
+              </div>
+            </div>
+
+            <!-- Column 2: In Preparation -->
+            <div style="background: #fff; border-radius: 12px; padding: 18px; border: 1px solid #fed7aa; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-height: 450px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 2px solid #fdba74; padding-bottom: 10px;">
+                <h3 style="font-size: 15px; font-weight: 800; color: #c2410c; display: flex; align-items: center; gap: 8px; margin: 0;">
+                  <span>🔥</span> IN PREPARATION
+                </h3>
+                <span id="kds-count-preparing" style="background: #ffedd5; color: #c2410c; font-size: 13px; font-weight: 800; padding: 3px 10px; border-radius: 12px;">0</span>
+              </div>
+              <div id="kds-column-preparing" style="display: flex; flex-direction: column; gap: 14px;">
+                <p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No tickets in prep</p>
+              </div>
+            </div>
+
+            <!-- Column 3: Ready for Pickup -->
+            <div style="background: #fff; border-radius: 12px; padding: 18px; border: 1px solid #bbf7d0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-height: 450px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 2px solid #86efac; padding-bottom: 10px;">
+                <h3 style="font-size: 15px; font-weight: 800; color: #15803d; display: flex; align-items: center; gap: 8px; margin: 0;">
+                  <span>🔔</span> READY FOR PICKUP
+                </h3>
+                <span id="kds-count-ready" style="background: #dcfce7; color: #15803d; font-size: 13px; font-weight: 800; padding: 3px 10px; border-radius: 12px;">0</span>
+              </div>
+              <div id="kds-column-ready" style="display: flex; flex-direction: column; gap: 14px;">
+                <p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No ready tickets</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="screen-view-orders" class="screen-view hidden">
           <div
             style="
@@ -13384,7 +13467,86 @@
       let currentPaymentAccountId = null;
       let cart = [];
       let cartAdditionalCharges = [];
-      let editDraftOrder = null;                                                                                             
+      let editDraftOrder = null;
+
+      function saveCartDraft() {
+        try {
+          if (!Array.isArray(cart) || cart.length === 0) {
+            localStorage.removeItem("pos_active_cart_draft");
+            return;
+          }
+          const draft = {
+            version: 1,
+            cart,
+            cartAdditionalCharges,
+            orderType: typeof currentOrderType !== "undefined" ? currentOrderType : "takeaway",
+            customerName: document.getElementById("customer-name-input")?.value || "",
+            customerPhone: document.getElementById("customer-phone-input")?.value || "",
+            riderName: document.getElementById("rider-name-input")?.value || "",
+            tableSelect: document.getElementById("table-select")?.value || "",
+            discountInput: document.getElementById("discount-input")?.value || "",
+            discountType: typeof currentDiscountType !== "undefined" ? currentDiscountType : "flat",
+            deliveryFeeInput: document.getElementById("delivery-fee-input")?.value || "",
+            orderNotes: document.getElementById("order-notes-input")?.value || "",
+            savedAt: Date.now(),
+          };
+          localStorage.setItem("pos_active_cart_draft", JSON.stringify(draft));
+        } catch (_) {}
+      }
+
+      function restoreCartDraft() {
+        try {
+          const raw = localStorage.getItem("pos_active_cart_draft");
+          if (!raw) return;
+          const draft = JSON.parse(raw);
+          if (draft && Array.isArray(draft.cart) && draft.cart.length > 0) {
+            cart = draft.cart;
+            if (Array.isArray(draft.cartAdditionalCharges)) cartAdditionalCharges = draft.cartAdditionalCharges;
+            if (draft.orderType && typeof setOrderType === "function") setOrderType(draft.orderType);
+            if (draft.customerName) {
+              const el = document.getElementById("customer-name-input");
+              if (el) el.value = draft.customerName;
+            }
+            if (draft.customerPhone) {
+              const el = document.getElementById("customer-phone-input");
+              if (el) el.value = draft.customerPhone;
+            }
+            if (draft.riderName) {
+              const el = document.getElementById("rider-name-input");
+              if (el) el.value = draft.riderName;
+            }
+            if (draft.tableSelect) {
+              const el = document.getElementById("table-select");
+              if (el) el.value = draft.tableSelect;
+            }
+            if (draft.discountInput) {
+              const el = document.getElementById("discount-input");
+              if (el) el.value = draft.discountInput;
+            }
+            if (draft.deliveryFeeInput) {
+              const el = document.getElementById("delivery-fee-input");
+              if (el) el.value = draft.deliveryFeeInput;
+            }
+            if (draft.orderNotes) {
+              const el = document.getElementById("order-notes-input");
+              if (el) el.value = draft.orderNotes;
+            }
+            renderCart();
+            renderAdditionalCharges();
+          }
+        } catch (_) {}
+      }
+
+      function clearCartDraft() {
+        try {
+          localStorage.removeItem("pos_active_cart_draft");
+        } catch (_) {}
+      }
+
+      window.addEventListener("beforeunload", () => { saveCartDraft(); });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") saveCartDraft();
+      });                                                                                             
 
 
 
@@ -14611,6 +14773,7 @@
         populateHallSelect();
         renderAdditionalCharges();
         renderCart();
+        restoreCartDraft();
         selectReceiptFormat(receiptDesignFormat);
         applyReceiptPaperWidth();
         populatePaymentBankAccounts();
@@ -14731,9 +14894,65 @@
         target.innerHTML = html.join("") || `<tr><td colspan="5" style="color:#64748b;">No transactions yet.</td></tr>`;
       }
       function getBankRows(accountId) { return bankTransactions.filter((row) => String(row.accountId) === String(accountId)); }
-      function renderCashBankScreen() {
-        const cashBalance = ledgerBalance(cashTransactions);
-        const bankTotal = bankAccounts.reduce((sum, account) => sum + ledgerBalance(getBankRows(account.id), ledgerMoney(account.openingBalance)), 0);
+      let syncingCloudAccounts = false;
+      async function syncCloudFinancialAccounts() {
+        if (!window.BILLZ_MANAGED || syncingCloudAccounts) return;
+        syncingCloudAccounts = true;
+        try {
+          const res = await fetch("/api/pos/finance/accounts", {
+            credentials: "same-origin",
+            headers: { "x-restaurant-id": window.BILLZ_TENANT_ID },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data.accounts)) {
+              window.BILLZ_FINANCIAL_ACCOUNTS = data.accounts;
+              const serverBankAccs = data.accounts.filter((a) => a.accountType === "bank");
+              if (serverBankAccs.length > 0) {
+                serverBankAccs.forEach((sAcc) => {
+                  const existing = bankAccounts.find((b) => b.id === sAcc.id || b.displayName === sAcc.displayName);
+                  if (existing) {
+                    existing.id = sAcc.id;
+                    existing.serverBalance = sAcc.balanceMinor / 100;
+                  } else {
+                    bankAccounts.push({
+                      id: sAcc.id,
+                      displayName: sAcc.displayName,
+                      bankName: sAcc.displayName,
+                      accountNumber: "",
+                      openingBalance: sAcc.balanceMinor / 100,
+                      serverBalance: sAcc.balanceMinor / 100,
+                      active: true,
+                    });
+                  }
+                });
+              }
+              renderCashBankScreen(true);
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to sync cloud accounts:", e);
+        } finally {
+          syncingCloudAccounts = false;
+        }
+      }
+
+      function renderCashBankScreen(skipSync = false) {
+        if (!skipSync && window.BILLZ_MANAGED) {
+          syncCloudFinancialAccounts();
+        }
+        let cashBalance = ledgerBalance(cashTransactions);
+        if (window.BILLZ_MANAGED && window.BILLZ_FINANCIAL_ACCOUNTS) {
+          const cashAcc = window.BILLZ_FINANCIAL_ACCOUNTS.find((a) => a.accountType === "cash");
+          if (cashAcc) cashBalance = cashAcc.balanceMinor / 100;
+        }
+        let bankTotal = 0;
+        if (window.BILLZ_MANAGED && window.BILLZ_FINANCIAL_ACCOUNTS) {
+          const bankAccs = window.BILLZ_FINANCIAL_ACCOUNTS.filter((a) => a.accountType === "bank");
+          bankTotal = bankAccs.reduce((sum, a) => sum + (a.balanceMinor / 100), 0);
+        } else {
+          bankTotal = bankAccounts.reduce((sum, account) => sum + ledgerBalance(getBankRows(account.id), ledgerMoney(account.openingBalance)), 0);
+        }
         const combined = ledgerMoney(cashBalance + bankTotal);
         const cards = document.getElementById("cash-bank-summary-cards"); if (cards) cards.innerHTML = `<div class="kpi-card"><span class="kpi-label">Cash</span><div class="kpi-value">Rs. ${cashBalance.toFixed(2)}</div></div><div class="kpi-card"><span class="kpi-label">All Bank Accounts</span><div class="kpi-value">Rs. ${bankTotal.toFixed(2)}</div></div><div class="kpi-card"><span class="kpi-label">Combined Balance</span><div class="kpi-value">Rs. ${combined.toFixed(2)}</div></div>`;
         const cashEl = document.getElementById("cash-bank-cash-balance"); if (cashEl) cashEl.innerText = `Rs. ${cashBalance.toFixed(2)}`;
@@ -14743,7 +14962,9 @@
         const accountCards = document.getElementById("bank-account-cards");
         if (accountCards) {
           accountCards.innerHTML = bankAccounts.map((account, index) => {
-            const balance = ledgerBalance(getBankRows(account.id), ledgerMoney(account.openingBalance));
+            const balance = (window.BILLZ_MANAGED && account.serverBalance !== undefined)
+              ? account.serverBalance
+              : ledgerBalance(getBankRows(account.id), ledgerMoney(account.openingBalance));
             const selected = selectedAccount && String(selectedAccount.id) === String(account.id);
             return `<div class="bank-account-card" data-bank-index="${escapeHtmlForExport(index)}" role="button" tabindex="0" aria-labelledby="bank-account-name-${escapeHtmlForExport(index)}" aria-pressed="${selected ? "true" : "false"}" style="border:2px solid ${selected ? "#2563eb" : "#cbd5e1"}; background:${selected ? "#eff6ff" : "#fff"}; border-radius:8px; padding:10px; cursor:pointer;">
               <div style="display:flex; justify-content:space-between; gap:4px;"><strong id="bank-account-name-${escapeHtmlForExport(index)}">${escapeHtmlForExport(account.displayName)}</strong><span style="font-size:11px; color:${account.active === false ? "#dc2626" : "#16a34a"}">${account.active === false ? "Inactive" : "Active"}</span></div>
@@ -14772,7 +14993,9 @@
         if (panel) {
           if (selectedAccount) {
             const accountRows = getBankRows(selectedAccount.id);
-            const balance = ledgerBalance(accountRows, ledgerMoney(selectedAccount.openingBalance));
+            const balance = (window.BILLZ_MANAGED && selectedAccount.serverBalance !== undefined)
+              ? selectedAccount.serverBalance
+              : ledgerBalance(accountRows, ledgerMoney(selectedAccount.openingBalance));
             panel.innerHTML = `<div style="display:flex; justify-content:space-between; align-items:start; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
               <div><h4 style="margin:0 0 3px;">${escapeHtmlForExport(selectedAccount.displayName)} — Bank Statement</h4><div style="font-size:12px; color:#64748b;">${escapeHtmlForExport(selectedAccount.bankName)}${selectedAccount.accountNumber ? ` · ${escapeHtmlForExport(selectedAccount.accountNumber)}` : ""}</div></div>
               <div style="text-align:right;"><div style="font-size:12px; color:#64748b;">Current balance</div><strong style="font-size:22px;">Rs. ${balance.toFixed(2)}</strong></div>
@@ -14883,33 +15106,73 @@
         const date = document.getElementById("ledger-transfer-date").value;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(new Date(date + "T00:00:00").getTime())) return fail("Select a valid transfer date.");
         const note = document.getElementById("ledger-transfer-note").value.trim();
+
+        if (window.BILLZ_MANAGED) {
+          ledgerTransferSaving = true;
+          const controls = [...document.querySelectorAll("#ledger-transfer-modal input, #ledger-transfer-modal select, #ledger-transfer-modal button")];
+          controls.forEach((control) => (control.disabled = true));
+          const save = document.getElementById("ledger-transfer-save");
+          if (save) save.textContent = "Saving…";
+
+          try {
+            const accounts = window.BILLZ_FINANCIAL_ACCOUNTS || [];
+            const cashAcc = accounts.find((a) => a.accountType === "cash");
+            const fromAccId = from.type === "cash" ? cashAcc?.id : from.id;
+            const toAccId = to.type === "cash" ? cashAcc?.id : to.id;
+
+            if (!fromAccId || !toAccId) {
+              return fail("Could not map accounts to cloud ledger IDs. Ensure accounts are synchronized.");
+            }
+
+            const transferIdempotencyKey = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `00000000-0000-4000-8000-${Date.now().toString(16).padStart(12, '0')}`;
+            const res = await fetch("/api/pos/finance/transfers", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: {
+                "content-type": "application/json",
+                "x-restaurant-id": window.BILLZ_TENANT_ID,
+              },
+              body: JSON.stringify({
+                idempotencyKey: transferIdempotencyKey,
+                fromAccountId: fromAccId,
+                toAccountId: toAccId,
+                amountMinor: Math.round(amount * 100),
+                description: note || undefined,
+              }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              return fail(err.error || err.message || "Cloud transfer failed.");
+            }
+            await syncCloudFinancialAccounts();
+          } catch (cloudErr) {
+            return fail("Network error saving transfer: " + cloudErr.message);
+          } finally {
+            ledgerTransferSaving = false;
+            controls.forEach((control) => (control.disabled = false));
+            if (save) save.textContent = "Transfer Funds";
+          }
+        }
+
         const transferId = `transfer:${typeof crypto.randomUUID === "function" ? crypto.randomUUID() : Date.now() + ":" + Math.random().toString(36).slice(2)}`;
         const out = makeLedgerRow({date, description: `Transfer to ${to.label}${note ? " — " + note : ""}`, type: "out", amount, source: "transfer", accountId: from.id, destinationType: from.type});
         const incoming = makeLedgerRow({date, description: `Transfer from ${from.label}${note ? " — " + note : ""}`, type: "in", amount, source: "transfer", accountId: to.id, destinationType: to.type});
         out.id = transferId + ":out"; incoming.id = transferId + ":in";
         out.sourceKey = transferId; incoming.sourceKey = transferId;
         out.transferId = transferId; incoming.transferId = transferId;
-        ledgerTransferSaving = true;
-        const controls = [...document.querySelectorAll("#ledger-transfer-modal input, #ledger-transfer-modal select, #ledger-transfer-modal button")];
-        controls.forEach((control) => control.disabled = true);
-        const save = document.getElementById("ledger-transfer-save"); save.textContent = "Saving…";
         addLedgerRow(out); addLedgerRow(incoming);
         try {
           // Both sides share one IndexedDB transaction, so no half-transfer is saved.
           await Storage.setMany({pos_cash_transactions: cashTransactions, pos_bank_transactions: bankTransactions});
-        } catch (failure) {
-          removeLedgerRows((row) => row.sourceKey === transferId);
-          return fail(`Transfer could not be saved. Both balances are unchanged. ${failure.message || failure}`);
-        } finally {
-          ledgerTransferSaving = false;
-          controls.forEach((control) => control.disabled = false); save.textContent = "Transfer Funds";
-        }
+        } catch (_) {}
         if (to.type === "bank") selectedBankAccountId = to.id;
         else if (from.type === "bank") selectedBankAccountId = from.id;
         closeLedgerTransferModal(); renderCashBankScreen();
         const feedback = document.getElementById("ledger-transfer-feedback");
-        feedback.textContent = `Transferred Rs. ${amount.toFixed(2)} from ${from.label} to ${to.label}.`;
-        feedback.classList.remove("hidden");
+        if (feedback) {
+          feedback.textContent = `Transferred Rs. ${amount.toFixed(2)} from ${from.label} to ${to.label}.`;
+          feedback.classList.remove("hidden");
+        }
         return true;
       }
 
@@ -15120,6 +15383,16 @@
 
       function switchScreen(screenId) {
         if (window.event) window.event.preventDefault();
+        if (window.BILLZ_MANAGED) {
+          const role = window.BILLZ_ROLE || AppState.session.userRole;
+          if (role === "kitchen" && screenId !== "kitchen" && screenId !== "kitchen-stock") {
+            screenId = "kitchen";
+          } else if (role === "accountant" && !["expenses", "cash-bank", "reports", "ledger"].includes(screenId)) {
+            screenId = "expenses";
+          } else if (role === "cashier" && ["settings", "billing", "edit-menu"].includes(screenId)) {
+            screenId = "new-order";
+          }
+        }
         closeMobileDrawer();
         AppState.session.currentScreen = screenId;
         updateProfessionalAppHeader(screenId);
@@ -15269,10 +15542,149 @@
           requestAnimationFrame(() => setupMenuManagementHeightSync());
         }
 
+        if (screenId === "kitchen") {
+          renderKitchenScreen();
+        }
+
         // ⚙️ ADDITION: Trigger category data rendering when viewing Settings tab
         if (screenId === "settings") {
           applySettingsValuesToSettingsScreen();
         }
+      }
+
+      let kdsPollingInterval = null;
+      async function renderKitchenScreen() {
+        const newCol = document.getElementById("kds-column-new");
+        const prepCol = document.getElementById("kds-column-preparing");
+        const readyCol = document.getElementById("kds-column-ready");
+        const countNew = document.getElementById("kds-count-new");
+        const countPrep = document.getElementById("kds-count-preparing");
+        const countReady = document.getElementById("kds-count-ready");
+        if (!newCol || !prepCol || !readyCol) return;
+
+        const station = document.getElementById("kitchen-station-filter")?.value || "";
+
+        let tickets = [];
+        if (window.BILLZ_MANAGED) {
+          try {
+            const q = new URLSearchParams();
+            if (station) q.set("station", station);
+            const res = await fetch(`/api/pos/kitchen/tickets?${q.toString()}`, {
+              credentials: "same-origin",
+              headers: { "x-restaurant-id": window.BILLZ_TENANT_ID },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              tickets = data.tickets || [];
+            }
+          } catch (e) {
+            console.warn("KDS poll error:", e);
+          }
+        } else {
+          // Local fallback from orders
+          tickets = (orders || []).filter(o => o.orderStatus !== "Completed" && o.orderStatus !== "Cancelled").map(o => ({
+            id: o.id,
+            ticketNumber: o.id,
+            orderNumber: o.id,
+            orderType: o.orderType || "takeaway",
+            tableName: o.tableNumber ? `Table ${o.tableNumber}` : null,
+            customerName: o.customerName || null,
+            status: o.orderStatus === "Preparing" ? "preparing" : (o.orderStatus === "Ready" ? "ready" : "new"),
+            items: (o.items || []).map(i => ({ name: i.name, quantity: i.qty, notes: "" })),
+            createdAt: o.date ? `${o.date}T${o.time || '12:00'}` : new Date().toISOString(),
+          }));
+        }
+
+        const newTickets = tickets.filter(t => t.status === "new");
+        const prepTickets = tickets.filter(t => t.status === "preparing");
+        const readyTickets = tickets.filter(t => t.status === "ready");
+
+        if (countNew) countNew.textContent = newTickets.length;
+        if (countPrep) countPrep.textContent = prepTickets.length;
+        if (countReady) countReady.textContent = readyTickets.length;
+
+        function renderTicketCard(t) {
+          const typeBadgeColor = t.orderType === "dine_in" ? "#4f46e5" : (t.orderType === "delivery" ? "#ea580c" : "#0284c7");
+          const typeLabel = t.orderType === "dine_in" ? `🍽️ ${t.tableName || 'Dine-In'}` : (t.orderType === "delivery" ? "🛵 Delivery" : "🛍️ Takeaway");
+          const itemsHtml = (t.items || []).map(item => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; font-size: 14px;">
+              <span style="font-weight: 700; color: #0f172a;"><span style="color: #ea580c; font-size: 15px; margin-right: 6px;">${escapeHtmlForExport(item.quantity)}x</span> ${escapeHtmlForExport(item.name)}</span>
+              ${item.notes ? `<small style="color: #94a3b8; font-style: italic;">(${escapeHtmlForExport(item.notes)})</small>` : ""}
+            </div>
+          `).join("");
+
+          let actionButtons = "";
+          if (t.status === "new") {
+            actionButtons = `<button type="button" onclick="updateKitchenTicketStatus('${t.id}', 'preparing')" style="flex: 1; background: #ea580c; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px;">🍳 Start Cooking</button>`;
+          } else if (t.status === "preparing") {
+            actionButtons = `<button type="button" onclick="updateKitchenTicketStatus('${t.id}', 'ready')" style="flex: 1; background: #16a34a; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px;">✅ Mark Ready</button>`;
+          } else if (t.status === "ready") {
+            actionButtons = `<button type="button" onclick="updateKitchenTicketStatus('${t.id}', 'served')" style="flex: 1; background: #2563eb; color: #fff; border: none; padding: 8px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 13px;">🍽️ Mark Served</button>`;
+          }
+
+          const cancelBtn = `<button type="button" onclick="updateKitchenTicketStatus('${t.id}', 'cancelled')" style="background: #f1f5f9; color: #94a3b8; border: 1px solid #cbd5e1; padding: 8px 10px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 12px;" title="Cancel Ticket">✕</button>`;
+
+          return `
+            <div class="kds-card" style="background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; padding: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px;">
+                <div>
+                  <strong style="font-size: 16px; color: #0f172a;">Ticket #${escapeHtmlForExport(t.ticketNumber || t.id)}</strong>
+                  <div style="font-size: 12px; color: #64748b; margin-top: 2px;">Order #${escapeHtmlForExport(t.orderNumber || t.orderId || '')} ${t.customerName ? `· ${escapeHtmlForExport(t.customerName)}` : ''}</div>
+                </div>
+                <span style="background: ${typeBadgeColor}15; color: ${typeBadgeColor}; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; border: 1px solid ${typeBadgeColor}30;">
+                  ${typeLabel}
+                </span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                ${itemsHtml}
+              </div>
+              ${t.notes ? `<div style="background: #fffbeb; border: 1px solid #fef3c7; padding: 6px 8px; border-radius: 6px; font-size: 12px; color: #92400e;"><strong>Note:</strong> ${escapeHtmlForExport(t.notes)}</div>` : ''}
+              <div style="display: flex; gap: 8px; margin-top: 4px;">
+                ${actionButtons}
+                ${cancelBtn}
+              </div>
+            </div>
+          `;
+        }
+
+        newCol.innerHTML = newTickets.map(renderTicketCard).join("") || `<p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No new tickets</p>`;
+        prepCol.innerHTML = prepTickets.map(renderTicketCard).join("") || `<p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No tickets in prep</p>`;
+        readyCol.innerHTML = readyTickets.map(renderTicketCard).join("") || `<p style="color: #94a3b8; font-size: 13px; text-align: center; margin-top: 40px;">No ready tickets</p>`;
+
+        if (!kdsPollingInterval) {
+          kdsPollingInterval = setInterval(() => {
+            if (AppState.session.currentScreen === "kitchen") renderKitchenScreen();
+          }, 5000);
+        }
+      }
+
+      async function updateKitchenTicketStatus(ticketId, status) {
+        if (window.BILLZ_MANAGED) {
+          try {
+            const res = await fetch(`/api/pos/kitchen/tickets/${ticketId}/status`, {
+              method: "PATCH",
+              credentials: "same-origin",
+              headers: {
+                "content-type": "application/json",
+                "x-restaurant-id": window.BILLZ_TENANT_ID,
+              },
+              body: JSON.stringify({ status }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              return alert(err.error || "Failed to update kitchen ticket status.");
+            }
+          } catch (e) {
+            return alert("Network error updating ticket: " + e.message);
+          }
+        } else {
+          const ord = orders.find(o => o.id === ticketId);
+          if (ord) {
+            ord.orderStatus = status === "preparing" ? "Preparing" : (status === "ready" ? "Ready" : (status === "served" ? "Completed" : "Cancelled"));
+            await saveToStorage();
+          }
+        }
+        renderKitchenScreen();
       }
 
 
@@ -15472,6 +15884,9 @@
       }
 
       async function saveBusinessInfoSetting() {
+        if (window.BILLZ_MANAGED && (window.BILLZ_ROLE === "cashier" || AppState.session.userRole === "cashier")) {
+          return alert("Cashiers cannot edit business settings. Contact an owner or manager.");
+        }
         const nameInput = document.getElementById("business-name-input");
         const typedName = nameInput ? nameInput.value.trim() : "";
         // The fallback remains available to the app, but never prints as an
@@ -15499,6 +15914,33 @@
             ? null : Math.min(36, Math.max(8, Number(raw) || 8));
         });
         applyBusinessHeaderTextStyles();
+
+        if (window.BILLZ_MANAGED) {
+          try {
+            const payload = {};
+            if (businessName) payload.businessName = businessName;
+            if (businessPhone !== undefined) payload.phone = businessPhone || null;
+            if (businessAddress !== undefined) payload.address = businessAddress || null;
+            if (businessSlogan !== undefined) payload.slogan = businessSlogan || null;
+
+            const res = await fetch("/api/pos/settings/business", {
+              method: "PUT",
+              credentials: "same-origin",
+              headers: {
+                "content-type": "application/json",
+                "x-restaurant-id": window.BILLZ_TENANT_ID,
+              },
+              body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              return alert(err.error || err.message || "Failed to update cloud business settings.");
+            }
+          } catch (e) {
+            return alert("Network error saving business settings: " + e.message);
+          }
+        }
+
         try { await saveToStorage(); }
         catch (error) { alert(`Business settings could not be saved: ${error.message || error}`); return; }
         applyBusinessNameEverywhere();
@@ -15904,6 +16346,7 @@
 
         syncOrderMenuQuantities();
         calculateCartTotal();
+        saveCartDraft();
       }
 
       function clearCurrentBill() {
@@ -15911,6 +16354,7 @@
         if (!confirm("Clear this unsaved bill and its discounts and charges?")) return;
         cart = [];
         cartAdditionalCharges = [];
+        clearCartDraft();
         document.getElementById("discount-value-input").value = 0;
         document.getElementById("amount-received-input").value = "";
         document.getElementById("cust-name").value = "";
@@ -17136,18 +17580,39 @@
       window.addEventListener("pywebviewready", () => updateReceiptPrintStatus());
 
       let receiptPrintBusy = false;
-      async function populateReceiptSlipAndPrint(orderData, copies = (receiptCopies === "customer" ? ["customer"] : receiptCopies === "kitchen" ? ["kitchen"] : ["customer", "kitchen"])) {
-        if (receiptPrintBusy) { updateReceiptPrintStatus("Another receipt is printing. Please wait."); return false; }
-        receiptPrintBusy = true;
+      const billzPrintQueue = [];
+
+      function persistPrintQueue() {
+        try {
+          localStorage.setItem("pos_print_queue", JSON.stringify(billzPrintQueue.slice(0, 50)));
+        } catch (_) {}
+      }
+
+      function loadPersistedPrintQueue() {
+        try {
+          const raw = localStorage.getItem("pos_print_queue");
+          if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) {
+              billzPrintQueue.push(...list.filter((j) => j && j.orderData));
+            }
+          }
+        } catch (_) {}
+      }
+
+      async function executeSingleReceiptPrint(orderData, copies) {
         let sent = 0;
         try {
-          applyBusinessContactInfoToReceipt(); applyBusinessLogoToReceipt(); applyReceiptPaperWidth();
+          applyBusinessContactInfoToReceipt();
+          applyBusinessLogoToReceipt();
+          applyReceiptPaperWidth();
           document.body.classList.remove("print-mode-report", "print-mode-kitchen");
           const api = receiptDesktopAPI();
           if (!api) {
-            populateCustomerReceiptSlip(orderData); populateKitchenReceiptSlip(orderData);
+            populateCustomerReceiptSlip(orderData);
+            populateKitchenReceiptSlip(orderData);
             const images = [...document.querySelectorAll("#print-receipt-slip img, #print-kitchen-receipt-slip img")].filter((img) => img.src && img.style.display !== "none");
-            await Promise.all(images.map((img) => img.decode ? img.decode().catch(() => {}) : Promise.resolve()));
+            await Promise.all(images.map((img) => (img.decode ? img.decode().catch(() => {}) : Promise.resolve())));
           }
           if (api) {
             for (const copy of copies) {
@@ -17160,14 +17625,59 @@
             await printBrowserReceipt(copies);
             sent = copies.length;
           }
-          updateReceiptPrintStatus(api ? "Receipt sent to the desktop print bridge. Check the paper and cutter." : `Print dialog closed (receipt page ${lastReceiptPageHeight}mm). Auto-cut is controlled by the printer driver.`);
+          updateReceiptPrintStatus(
+            api
+              ? "Receipt sent to the desktop print bridge. Check the paper and cutter."
+              : `Print dialog closed (receipt page ${lastReceiptPageHeight}mm). Auto-cut is controlled by the printer driver.`
+          );
           return true;
         } catch (error) {
           const message = `Receipt printing failed after ${sent} of ${copies.length} copies: ${error.message || error}. Your saved order is unchanged; reprint the missing copy from Order History.`;
-          updateReceiptPrintStatus(message, true); alert(message); return false;
+          updateReceiptPrintStatus(message, true);
+          throw error;
         } finally {
-          receiptPrintBusy = false; document.body.classList.remove("print-mode-kitchen");
+          document.body.classList.remove("print-mode-kitchen");
         }
+      }
+
+      async function processPrintQueue() {
+        if (receiptPrintBusy || billzPrintQueue.length === 0) return;
+        receiptPrintBusy = true;
+        const job = billzPrintQueue[0];
+        try {
+          await executeSingleReceiptPrint(job.orderData, job.copies);
+          billzPrintQueue.shift();
+          persistPrintQueue();
+        } catch (error) {
+          job.retries = (job.retries || 0) + 1;
+          if (job.retries >= 3) {
+            billzPrintQueue.shift();
+            persistPrintQueue();
+          }
+        } finally {
+          receiptPrintBusy = false;
+          if (billzPrintQueue.length > 0) {
+            setTimeout(processPrintQueue, 150);
+          }
+        }
+      }
+
+      async function populateReceiptSlipAndPrint(orderData, copies = (receiptCopies === "customer" ? ["customer"] : receiptCopies === "kitchen" ? ["kitchen"] : ["customer", "kitchen"])) {
+        const resolvedCopies = Array.isArray(copies) ? copies : [copies];
+        billzPrintQueue.push({
+          id: "print_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+          orderData,
+          copies: resolvedCopies,
+          retries: 0,
+        });
+        persistPrintQueue();
+        processPrintQueue();
+        return true;
+      }
+
+      loadPersistedPrintQueue();
+      if (billzPrintQueue.length > 0) {
+        setTimeout(processPrintQueue, 500);
       }
 
       async function testReceiptPrinter() {
@@ -18288,6 +18798,7 @@
         // 4. Reset Cart Interface Screen Clean for Next Guest Order
         cart = [];
         cartAdditionalCharges = [];
+        clearCartDraft();
         document.getElementById("cust-name").value = "";
         document.getElementById("cust-phone").value = "";
         document.getElementById("delivery-rider-input").value = "";
@@ -18420,10 +18931,42 @@
         }
       }
 
+      function applyRoleNavigationGuard() {
+        if (!window.BILLZ_MANAGED) return;
+        const role = window.BILLZ_ROLE || AppState.session.userRole || "cashier";
+
+        const buttons = document.querySelectorAll(".menu-btn");
+        buttons.forEach((btn) => {
+          const clickAttr = btn.getAttribute("onclick") || "";
+          if (!clickAttr.includes("switchScreen")) return;
+
+          let allowed = true;
+          if (role === "kitchen") {
+            allowed = clickAttr.includes("'kitchen'") || clickAttr.includes("'kitchen-stock'");
+          } else if (role === "accountant") {
+            allowed = clickAttr.includes("'expenses'") || clickAttr.includes("'cash-bank'") ||
+                      clickAttr.includes("'reports'") || clickAttr.includes("'ledger'");
+          } else if (role === "cashier") {
+            allowed = clickAttr.includes("'new-order'") || clickAttr.includes("'view-orders'") ||
+                      clickAttr.includes("'kitchen'") || clickAttr.includes("'dashboard'");
+          }
+          btn.style.display = allowed ? "" : "none";
+        });
+
+        if (role === "kitchen") {
+          switchScreen("kitchen");
+        } else if (role === "accountant") {
+          switchScreen("expenses");
+        } else if (role === "cashier") {
+          switchScreen("new-order");
+        }
+      }
+
       function showAppAfterUnlock() {
         AppState.session.unlocked = true;
         document.getElementById("pin-lock-overlay").classList.add("hidden");
         document.querySelector(".app-container").classList.remove("hidden");
+        applyRoleNavigationGuard();
       }
 
       function showPinLockScreen() {
@@ -29990,20 +30533,63 @@
 
       // 💾 Commit an edited "Remaining Due" figure typed into the View Bill modal — recomputes amountReceived
       // from it, and auto-flips the order to Paid the instant the remaining due reaches zero.
-      function updateOrderRemainingDue(orderId) {
-        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
+      async function updateOrderRemainingDue(orderId) {
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
-        if (getOrderStatus(order) !== "Completed") return alert("Cancelled bills cannot accept payments.");
+        if (getOrderStatus(order) !== "Completed" && order.orderStatus !== "new" && order.orderStatus !== "preparing" && order.orderStatus !== "ready") {
+          return alert("Cancelled bills cannot accept payments.");
+        }
 
         const input = document.getElementById("invoice-remaining-due-input");
         if (!input) return;
 
-        // 🛡️ Foolproof bounds — never allow a negative due or one bigger than the bill itself, and treat any
-        // blank/garbage input as fully paid rather than silently doing nothing.
         let remaining = parseFloat(input.value);
         if (isNaN(remaining) || remaining < 0) remaining = 0;
         if (remaining > order.totalBill) remaining = order.totalBill;
+
+        const currentRemaining = Math.max(
+          0,
+          (parseFloat(order.totalBill) || 0) - (parseFloat(order.amountReceived) || 0)
+        );
+        const amountToPay = currentRemaining - remaining;
+
+        if (window.BILLZ_MANAGED) {
+          if (amountToPay <= 0) {
+            return alert("Enter a lower remaining balance to record a payment.");
+          }
+          try {
+            const amountMinor = Math.round(amountToPay * 100);
+            const idempotencyKey = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `settle_${order.id}_${Date.now()}`;
+            const res = await fetch(`/api/pos/orders/${order.id}/payments`, {
+              method: "POST",
+              credentials: "same-origin",
+              headers: {
+                "content-type": "application/json",
+                "x-restaurant-id": window.BILLZ_TENANT_ID,
+              },
+              body: JSON.stringify({
+                amountMinor,
+                paymentMethod: "cash",
+                idempotencyKey,
+              }),
+            });
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              return alert(err.error || err.message || "Failed to record payment in cloud.");
+            }
+            const data = await res.json();
+            order.amountReceived = ((order.amountReceived || 0) + amountToPay);
+            order.paymentStatus = data.order?.paymentStatus === "paid" ? "Paid" : "Unpaid";
+            if (data.order?.paymentStatus === "paid") {
+              order.amountReceived = null;
+            }
+            showOrderInvoiceDetailsView(orderId);
+            refreshOrderDependentViews();
+            return;
+          } catch (e) {
+            return alert("Network error settling payment: " + e.message);
+          }
+        }
 
         const historyBefore = snapshotOrderForHistory(order); // 📝 for the Edit History trail
 
@@ -30051,11 +30637,49 @@
       }
 
       // ✅❌ Manual payment-status toggle inside the View Bill modal — mirrors the New Order screen's Paid/Unpaid buttons
-      function setInvoiceOrderPaymentStatus(orderId, status) {
-        if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
+      async function setInvoiceOrderPaymentStatus(orderId, status) {
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
-        if (getOrderStatus(order) !== "Completed") return alert("Cancelled bills cannot accept payments.");
+        if (getOrderStatus(order) !== "Completed" && order.orderStatus !== "new" && order.orderStatus !== "preparing" && order.orderStatus !== "ready") {
+          return alert("Cancelled bills cannot accept payments.");
+        }
+
+        if (window.BILLZ_MANAGED) {
+          if (status === "Paid" && order.paymentStatus === "Unpaid") {
+            const currentRemaining = Math.max(0, (parseFloat(order.totalBill) || 0) - (parseFloat(order.amountReceived) || 0));
+            if (currentRemaining > 0) {
+              try {
+                const amountMinor = Math.round(currentRemaining * 100);
+                const idempotencyKey = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `settle_${order.id}_${Date.now()}`;
+                const res = await fetch(`/api/pos/orders/${order.id}/payments`, {
+                  method: "POST",
+                  credentials: "same-origin",
+                  headers: {
+                    "content-type": "application/json",
+                    "x-restaurant-id": window.BILLZ_TENANT_ID,
+                  },
+                  body: JSON.stringify({
+                    amountMinor,
+                    paymentMethod: "cash",
+                    idempotencyKey,
+                  }),
+                });
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({}));
+                  return alert(err.error || err.message || "Failed to record payment in cloud.");
+                }
+                order.paymentStatus = "Paid";
+                order.amountReceived = null;
+                showOrderInvoiceDetailsView(orderId);
+                refreshOrderDependentViews();
+                return;
+              } catch (e) {
+                return alert("Network error: " + e.message);
+              }
+            }
+          }
+          return alert("Use the cloud refund or cancellation action to adjust paid bills.");
+        }
 
         const historyBefore = snapshotOrderForHistory(order); // 📝 for the Edit History trail
 

@@ -58,6 +58,34 @@ export function createFinanceService(pool) {
         return { expense: publicExpense({ ...row, category_name: input.categoryName }), replayed: false };
       });
     },
+    async createTransfer({ restaurantId, branchId, userId, input }) {
+      return withTenantTransaction(pool, { restaurantId, userId }, async client => {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`transfer:${restaurantId}:${input.idempotencyKey}`]);
+        const previous = (await client.query(`SELECT l.* FROM ledger_entries l WHERE l.restaurant_id = $1 AND l.source_key = $2`, [restaurantId, `transfer:${input.idempotencyKey}:out`])).rows[0];
+        if (previous) {
+          return { replayed: true };
+        }
+        const fromAccount = (await client.query("SELECT id, display_name FROM financial_accounts WHERE id = $1 AND is_active = true AND (branch_id IS NULL OR branch_id = $2) FOR UPDATE", [input.fromAccountId, branchId])).rows[0];
+        if (!fromAccount) throw error("From account not found or inactive.", "ACCOUNT_NOT_FOUND", 404);
+        const toAccount = (await client.query("SELECT id, display_name FROM financial_accounts WHERE id = $1 AND is_active = true AND (branch_id IS NULL OR branch_id = $2) FOR UPDATE", [input.toAccountId, branchId])).rows[0];
+        if (!toAccount) throw error("To account not found or inactive.", "ACCOUNT_NOT_FOUND", 404);
+        if (fromAccount.id === toAccount.id) throw error("Cannot transfer to the same account.", "INVALID_TRANSFER", 400);
+
+        const amountMinor = Number(input.amountMinor);
+        if (!Number.isInteger(amountMinor) || amountMinor <= 0) throw error("Transfer amount must be positive.", "INVALID_AMOUNT", 400);
+
+        const now = new Date();
+        const transferId = randomUUID();
+        await client.query(`INSERT INTO ledger_entries (id, restaurant_id, branch_id, financial_account_id, entry_type, amount_minor,
+          description, source_type, source_key, occurred_at) VALUES ($1, $2, $3, $4, 'debit', $5, $6, 'transfer', $7, $8)`,
+          [randomUUID(), restaurantId, branchId, fromAccount.id, amountMinor, `Transfer to ${fromAccount.display_name}: ${input.description || ''}`.trim(), `transfer:${input.idempotencyKey}:out`, now]);
+        await client.query(`INSERT INTO ledger_entries (id, restaurant_id, branch_id, financial_account_id, entry_type, amount_minor,
+          description, source_type, source_key, occurred_at) VALUES ($1, $2, $3, $4, 'credit', $5, $6, 'transfer', $7, $8)`,
+          [randomUUID(), restaurantId, branchId, toAccount.id, amountMinor, `Transfer from ${fromAccount.display_name}: ${input.description || ''}`.trim(), `transfer:${input.idempotencyKey}:in`, now]);
+
+        return { transferId, amountMinor, replayed: false };
+      });
+    },
     async profitLoss({ restaurantId, userId, startDate, endDate }) {
       return withTenantTransaction(pool, { restaurantId, userId }, async client => {
         const values = [startDate, endDate];
