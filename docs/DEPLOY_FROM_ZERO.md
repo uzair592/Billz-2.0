@@ -118,6 +118,8 @@ Expect readiness `200` with `{"status":"ready"}`, liveness `200` with `{"status"
 
 CI verifies clean PostgreSQL migrations, restricted-role isolation, authentication, actual browser journeys and production container startup/shutdown. Your real DNS, proxy, database permissions, restore process and physical receipt printer still require staging acceptance. See [audit/READINESS_AUDIT.md](audit/READINESS_AUDIT.md) for remaining product limits; plan device enforcement is now implemented by the admin control-center changes. Managed paid offline checkout remains disabled.
 
+Run the daily dump/restore verifier and staging load check described in [PRODUCTION_VERIFICATION.md](PRODUCTION_VERIFICATION.md) before launch and after major releases.
+
 ## 9. Rollback and recovery
 
 - Record the deployed commit/image digest and take a database backup before each release. Retain encrypted backups off the application host; test a restore on an isolated database.
