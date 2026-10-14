@@ -6,6 +6,7 @@ const MAX_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 export function createEntitlementService({
   secret = process.env.OFFLINE_ENTITLEMENT_SECRET,
   clock = () => new Date(),
+  authorizeSession = null,
 } = {}) {
   if (typeof secret !== "string" || secret.length < 32) throw new TypeError("A private entitlement signing secret of at least 32 characters is required.");
   function sign(payloadString) {
@@ -13,6 +14,11 @@ export function createEntitlementService({
   }
 
   return Object.freeze({
+    async issueForSession(input) {
+      if (typeof authorizeSession !== "function") throw Object.assign(new Error("Online session verification is required."), {code:"SESSION_REQUIRED",statusCode:403});
+      await authorizeSession(input);
+      return this.issueToken(input);
+    },
     issueToken({ restaurantId, userId, deviceId, permissions = [], subscriptionState = "active", validUntil, ttlMs = MAX_TTL_MS }) {
       if (!restaurantId || !userId || !deviceId) {
         throw new TypeError("restaurantId, userId, and deviceId are required.");

@@ -41,6 +41,8 @@ export function createRequestGuards({ authService, tenantContextService }) {
         return reject(reply, 400, "A valid restaurant context is required.", "RESTAURANT_REQUIRED");
       }
 
+      if (request.auth.restaurantId && request.auth.restaurantId !== restaurantId) return reject(reply, 403, "Sign in to this restaurant on a separate session.", "SESSION_TENANT_MISMATCH");
+
       const context = await tenantContextService.load({
         userId: request.auth.user.id,
         restaurantId,

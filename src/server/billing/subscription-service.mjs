@@ -11,6 +11,8 @@ function publicPlan(row) {
     name: row.name,
     description: row.description,
     features: row.features ?? {},
+    maxDevices: Number(row.max_devices ?? 20),
+    trialDays: Number(row.trial_days ?? 14),
     prices: row.prices ?? [],
   };
 }
@@ -191,7 +193,7 @@ export function createSubscriptionService(pool, {
 
   async function loadPlans(client, currencyCode) {
     const result = await client.query(
-      `SELECT p.id, p.code, p.name, p.description, p.features,
+      `SELECT p.id, p.code, p.name, p.description, p.features, p.max_devices, p.trial_days,
               COALESCE(
                 jsonb_agg(
                   jsonb_build_object(

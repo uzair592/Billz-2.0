@@ -234,7 +234,7 @@ export async function bootstrapFirstRestaurant({
       const priceRes = await client.query(
         `INSERT INTO plan_prices (plan_id, currency_code, amount_minor, billing_interval, provider, provider_price_id)
          VALUES ($1, $2, 0, 'month', 'manual', $3)
-         ON CONFLICT (plan_id, currency_code, billing_interval, provider) DO UPDATE
+         ON CONFLICT (plan_id, currency_code, billing_interval, provider) WHERE is_active DO UPDATE
            SET provider_price_id = EXCLUDED.provider_price_id
          RETURNING id`,
         [planId, safeCurrency, `manual_${subscriptionPlan.toLowerCase()}_month`],

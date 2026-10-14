@@ -31,13 +31,16 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
     throw new TypeError("A verification mailer is required.");
   }
 
-  async function createSessionForUser(user, { ipAddress, userAgent, now, restaurantCode }) {
+  async function createSessionForUser(user, { ipAddress, userAgent, now, restaurantCode, previousSessionToken }) {
     const session = createTokenPair();
     const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS);
     await repository.createSession({
       userId: user.id,
       expectedPasswordHash: user.passwordHash,
       expectedUsername: user.username ?? null,
+      expectedEmail: user.email,
+      previousTokenHash: previousSessionToken ? hashOpaqueToken(previousSessionToken) : null,
+      now,
       expectedRestaurantId: user.restaurantId ?? null,
       expectedRestaurantCode: restaurantCode ?? null,
       tokenHash: session.tokenHash,
@@ -116,7 +119,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       return createSessionForUser(user, { ipAddress, userAgent, now });
     },
 
-    async login({ restaurantCode, username, email, password, ipAddress = null, userAgent = null }) {
+    async login({ restaurantCode, username, email, password, ipAddress = null, userAgent = null, previousSessionToken = null }) {
       if (restaurantCode && username) {
         if (typeof repository.findUserByRestaurantAndUsername !== "function") {
           throw authenticationError();
@@ -146,7 +149,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
           throw error;
         }
 
-        return createSessionForUser(user, { ipAddress, userAgent, now: clock(), restaurantCode: restaurant.code });
+        return createSessionForUser(user, { ipAddress, userAgent, now: clock(), restaurantCode: restaurant.code, previousSessionToken });
       }
 
       const user = await repository.findUserByEmail(normalizeEmail(email));
@@ -159,7 +162,7 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
         error.statusCode = 403;
         throw error;
       }
-      return createSessionForUser(user, { ipAddress, userAgent, now: clock() });
+      return createSessionForUser(user, { ipAddress, userAgent, now: clock(), previousSessionToken });
     },
 
     async authenticate(token) {

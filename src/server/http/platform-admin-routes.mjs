@@ -13,6 +13,8 @@ const createRestaurantSchema = z.object({
   code: z.string().trim().min(2).max(64),
   ownerUsername: z.string().trim().min(2).max(64),
   ownerPassword: passwordSchema,
+  ownerEmail: z.string().trim().email().max(320).optional(),
+  phone: z.string().trim().max(40).optional(),
   ownerDisplayName: z.string().trim().min(1).max(120).optional(),
   planCode: z.string().trim().min(1).max(64).default("GROWTH"),
 });
@@ -77,6 +79,21 @@ const editUserSchema = userSchema.pick({ username: true, displayName: true }).pa
 const paymentParams = z.object({ paymentId: z.uuid() });
 const paymentListSchema = paginationSchema.extend({ status: z.enum(["all", "pending", "approved", "rejected"]).default("pending") });
 const suspensionSchema = z.object({ reason: z.string().trim().max(1000).optional() }).strict();
+
+const planSchema = z.object({
+  code:z.string().trim().toUpperCase().regex(/^[A-Z][A-Z0-9_]{0,63}$/, 'Use letters, digits and underscores, starting with a letter.'),
+  name:z.string().trim().min(1).max(160),billingInterval:z.enum(['month','quarter','year','trial']),
+  amountMinor:z.number().int().min(0).max(9000000000000),currencyCode:z.string().regex(/^[A-Z]{3}$/),
+  maxDevices:z.number().int().min(1).max(1000),trialDays:z.number().int().min(1).max(3650).default(14),isActive:z.boolean().default(true),
+}).strict().refine(v=>v.billingInterval!=='trial'||v.amountMinor===0,'Trial plans must have a zero price.');
+const planParams=z.object({planId:z.uuid()});
+const planQuery=paginationSchema.extend({includeInactive:z.enum(['true','false']).default('false')});
+const subscriptionUpdateSchema=z.object({planId:z.uuid(),mode:z.enum(['renew','trial']),expiresAt:z.iso.datetime({offset:true}).optional(),reason:z.string().trim().min(1).max(1000)}).strict();
+const ownerCredentialsSchema=z.object({email:z.string().trim().email().max(320).optional(),newPassword:passwordSchema.optional(),
+  generateTemporary:z.boolean().default(false),reason:z.string().trim().min(1).max(1000)}).strict()
+  .refine(v=>v.email||v.newPassword||v.generateTemporary,'Change the email or password.')
+  .refine(v=>!(v.newPassword&&v.generateTemporary),'Choose a new password or generate one, not both.');
+const logoutDevicesSchema=z.object({reason:z.string().trim().min(1).max(1000)}).strict();
 
 export async function registerPlatformAdminRoutes(app, { platformAdminService, platformAdminPortalService, secureCookies = true, loginThrottle = null }) {
   // Authentication Guard Helper for Platform Admin Routes
@@ -148,7 +165,19 @@ export async function registerPlatformAdminRoutes(app, { platformAdminService, p
     return platformAdminPortalService.getDashboardStats();
   });
 
-  app.get("/platform-admin/api/plans", async () => platformAdminPortalService.listPlans());
+  app.get("/platform-admin/api/plans", async request => {
+    const q=planQuery.parse(request.query);return platformAdminPortalService.listPlans({...q,includeInactive:q.includeInactive==='true'});
+  });
+  const mutation={config:{rateLimit:{max:20,timeWindow:'15 minutes'}}};
+  app.post('/platform-admin/api/plans',mutation,async(request,reply)=>reply.code(201).send(await platformAdminPortalService.createPlan({adminId:request.adminSession.admin.id,...planSchema.parse(request.body)})));
+  app.patch('/platform-admin/api/plans/:planId',mutation,async request=>platformAdminPortalService.editPlan({adminId:request.adminSession.admin.id,...planParams.parse(request.params),...planSchema.parse(request.body)}));
+  app.post('/platform-admin/api/plans/:planId/archive',mutation,async request=>platformAdminPortalService.archivePlan({adminId:request.adminSession.admin.id,...planParams.parse(request.params)}));
+  app.post('/platform-admin/api/plans/:planId/activate',mutation,async request=>platformAdminPortalService.activatePlan({adminId:request.adminSession.admin.id,...planParams.parse(request.params)}));
+  app.delete('/platform-admin/api/plans/:planId',mutation,async request=>platformAdminPortalService.deletePlan({adminId:request.adminSession.admin.id,...planParams.parse(request.params)}));
+  app.put('/platform-admin/api/restaurants/:id/subscription',mutation,async request=>platformAdminPortalService.setSubscription({adminId:request.adminSession.admin.id,restaurantId:restaurantParams.parse(request.params).id,...subscriptionUpdateSchema.parse(request.body)}));
+  app.post('/platform-admin/api/restaurants/:id/owner-credentials',mutation,async request=>platformAdminPortalService.manageOwnerCredentials({adminId:request.adminSession.admin.id,restaurantId:restaurantParams.parse(request.params).id,...ownerCredentialsSchema.parse(request.body)}));
+  app.get('/platform-admin/api/restaurants/:id/sessions',async request=>platformAdminPortalService.listSessions({restaurantId:restaurantParams.parse(request.params).id}));
+  app.post('/platform-admin/api/restaurants/:id/sessions/revoke-all',mutation,async request=>platformAdminPortalService.logoutDevices({adminId:request.adminSession.admin.id,restaurantId:restaurantParams.parse(request.params).id,...logoutDevicesSchema.parse(request.body)}));
   app.get("/platform-admin/api/payments", async request => {
     const query = paymentListSchema.parse(request.query || {});
     return platformAdminPortalService.listPayments({ ...query, status: query.status === "all" ? null : query.status });

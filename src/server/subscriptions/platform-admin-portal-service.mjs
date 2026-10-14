@@ -1,5 +1,12 @@
 import { randomUUID, randomBytes } from "node:crypto";
 import { hashPassword } from "../auth/passwords.mjs";
+import { createAdminControlService } from "./admin-control-service.mjs";
+import { lockPlanSessions, controlError } from "../auth/session-limits.mjs";
+
+export function restaurantSlug(code, id) {
+  const base = String(code).normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48).replace(/-$/, "") || "restaurant";
+  return `${base}-${id}`;
+}
 
 export function publicAuditMetadata(value) {
   if (Array.isArray(value)) return value.map(publicAuditMetadata);
@@ -34,7 +41,9 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
     } finally { client.release(); }
   }
 
+  const controls = createAdminControlService({ pool, passwordPepper, clock, recordAudit });
   return Object.freeze({
+    ...controls,
     async editRestaurant({ adminId, restaurantId, name, code, phone, address, contactEmail }) {
       return transaction(async client => {
         const existing = (await client.query("SELECT id FROM restaurants WHERE id = $1 FOR UPDATE", [restaurantId])).rows[0];
@@ -61,9 +70,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       });
     },
 
-    async listPlans() {
-      const result = await pool.query("SELECT code, name FROM plans WHERE is_active = true ORDER BY code");
-      return { plans: result.rows.map(row => ({ code: row.code, name: row.name })) };
+    async listPlans(input) {
+      return controls.listPlanCatalog(input);
     },
 
     async createUser({ adminId, restaurantId, username, displayName, role, password }) {
@@ -71,6 +79,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       return transaction(async client => {
         const branch = (await client.query("SELECT id FROM branches WHERE restaurant_id = $1 AND is_default = true LIMIT 1", [restaurantId])).rows[0];
         if (!branch) throw Object.assign(new Error("Restaurant not found."), { code: "RESTAURANT_NOT_FOUND", statusCode: 404 });
+        const conflict=await client.query('SELECT id FROM users WHERE restaurant_id=$1 AND normalized_email=lower($2)',[restaurantId,username]);
+        if(conflict.rows.length) throw controlError('Username conflicts with an existing login email.','USERNAME_EXISTS',409);
         const userId = randomUUID();
         try {
           await client.query(`INSERT INTO users (id, restaurant_id, username, normalized_username, display_name, password_hash, status, email_verified_at)
@@ -90,6 +100,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       return transaction(async client => {
         const user = (await client.query("SELECT id FROM users WHERE id = $1 AND restaurant_id = $2 FOR UPDATE", [userId, restaurantId])).rows[0];
         if (!user) throw Object.assign(new Error("Restaurant user not found."), { code: "USER_NOT_FOUND", statusCode: 404 });
+        if(username!==undefined && (await client.query('SELECT id FROM users WHERE restaurant_id=$1 AND id<>$2 AND normalized_email=lower($3)',[restaurantId,userId,username])).rows.length)
+          throw controlError('Username conflicts with an existing login email.','USERNAME_EXISTS',409);
         try {
           await client.query(`UPDATE users SET username = COALESCE($3, username), normalized_username = COALESCE(lower($3), normalized_username),
             display_name = COALESCE($4, display_name) WHERE id = $1 AND restaurant_id = $2`, [userId, restaurantId, username ?? null, displayName ?? null]);
@@ -185,7 +197,15 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
         const storageStats = await client.query(
           `SELECT COALESCE(sum(used_storage_bytes), 0) AS total_bytes FROM tenant_storage_allowances`,
         );
+        const kpis=(await client.query(`SELECT
+          (SELECT count(*) FROM plans WHERE is_active) AS active_plans,
+          count(*) FILTER(WHERE r.status='active' AND s.status='trialing' AND s.trial_ends_at>$1) AS trials,
+          count(*) FILTER(WHERE r.status='active' AND s.status IN ('active','trialing','cancel_at_period_end')
+            AND CASE WHEN s.status='trialing' THEN s.trial_ends_at ELSE s.current_period_end END>$1
+            AND CASE WHEN s.status='trialing' THEN s.trial_ends_at ELSE s.current_period_end END<=$1::timestamptz+interval '7 days') AS expiring
+          FROM restaurants r LEFT JOIN LATERAL(SELECT * FROM subscriptions WHERE restaurant_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) s ON true`,[clock()])).rows[0];
         return {
+          activePlans:Number(kpis.active_plans),activeTrials:Number(kpis.trials),expiringSoon:Number(kpis.expiring),
           totalRestaurants: Number(restStats.rows[0].total_count),
           activeRestaurants: Number(restStats.rows[0].active_count),
           suspendedRestaurants: Number(restStats.rows[0].suspended_count),
@@ -211,8 +231,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
                   COALESCE(sa.max_storage_bytes, 5368709120) AS max_storage_bytes,
                   COALESCE(sa.used_storage_bytes, 0) AS used_storage_bytes
              FROM restaurants r
-             LEFT JOIN subscriptions s ON s.restaurant_id = r.id
-                   AND s.status IN ('trialing', 'active', 'past_due', 'cancel_at_period_end', 'suspended')
+             LEFT JOIN LATERAL(SELECT * FROM subscriptions WHERE restaurant_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN tenant_storage_allowances sa ON sa.restaurant_id = r.id
             WHERE ($1::text IS NULL OR lower(r.name) LIKE $1 OR lower(r.code) LIKE $1 OR lower(r.slug) LIKE $1)
@@ -247,7 +266,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
       }
     },
 
-    async createRestaurant({ adminId, name, code, ownerUsername, ownerPassword, ownerDisplayName, planCode = "GROWTH" }) {
+    async createRestaurant({ adminId, name, code, ownerUsername, ownerPassword, ownerDisplayName, ownerEmail, phone, planCode = "GROWTH" }) {
       const client = await pool.connect();
       const restaurantId = randomUUID();
       const userId = randomUUID();
@@ -261,19 +280,22 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
 
         // Check if plan exists
         const planResult = await client.query(
-          `SELECT id, name FROM plans WHERE code = $1 AND is_active = true LIMIT 1`,
+          `SELECT id, name, trial_days FROM plans WHERE code = $1 AND is_active = true LIMIT 1`,
           [planCode.toUpperCase()],
         );
         const plan = planResult.rows[0];
         if (!plan) throw Object.assign(new Error("Choose an available plan."), { code: "PLAN_NOT_FOUND", statusCode: 404 });
+        await lockPlanSessions(client, plan.id);
+        if (!(await client.query("SELECT id FROM plans WHERE id=$1 AND is_active=true", [plan.id])).rows.length)
+          throw controlError("Choose an active plan.", "PLAN_NOT_FOUND", 404);
 
         const passwordHash = await hashPassword(ownerPassword, passwordPepper);
 
         // Insert restaurant
         await client.query(
-          `INSERT INTO restaurants (id, name, code, slug, status)
-           VALUES ($1, $2, $3, $3, 'active')`,
-          [restaurantId, String(name).trim(), normCode],
+          `INSERT INTO restaurants (id, name, code, slug, status, phone)
+           VALUES ($1, $2, $3, $4, 'active', $5)`,
+          [restaurantId, String(name).trim(), normCode, restaurantSlug(normCode, restaurantId), phone ?? null],
         );
 
         // Insert default branch
@@ -291,6 +313,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
            ) VALUES ($1, $2, $3, $4, $5, $6, 'user', 'active', now())`,
           [userId, restaurantId, String(ownerUsername).trim(), normUsername, passwordHash, String(ownerDisplayName || ownerUsername).trim()],
         );
+
+        if (ownerEmail) await client.query("UPDATE users SET email=$2,normalized_email=lower($2) WHERE id=$1", [userId, ownerEmail]);
 
         // Insert owner membership
         await client.query(
@@ -314,7 +338,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
 
         // Insert default trial subscription
         const now = clock();
-        const trialEnds = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000); // 14-day trial
+        const trialEnds = new Date(now.getTime() + Number(plan.trial_days ?? 14) * 24 * 60 * 60 * 1000);
         if (plan) {
           await client.query(
             `INSERT INTO subscriptions (restaurant_id, plan_id, status, current_period_start, current_period_end, trial_ends_at)
@@ -353,6 +377,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
         };
       } catch (error) {
         await client.query("ROLLBACK");
+        if (["42703", "42P01"].includes(error.code)) throw controlError("Database migrations are required before provisioning restaurants.", "SCHEMA_OUTDATED", 503);
+        if (error.code === "42501") throw controlError("The control database role needs provisioning grants.", "CONTROL_ROLE_GRANTS_REQUIRED", 503);
         if (error.code === "23505") {
           if (/restaurants_code_unique_idx|code/i.test(error.constraint ?? "")) {
             const err = new Error("Restaurant code already exists.");
@@ -366,6 +392,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
             err.statusCode = 409;
             throw err;
           }
+          if (/normalized_email/i.test(error.constraint ?? "")) throw controlError("Owner email is already in use.", "EMAIL_EXISTS", 409);
         }
         throw error;
       } finally {
@@ -379,12 +406,11 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
         const restResult = await client.query(
           `SELECT r.id, r.name, r.code, r.slug, r.status, r.phone, r.address, r.contact_email, r.created_at,
                   s.id AS subscription_id, s.status AS subscription_status, s.current_period_start, s.current_period_end,
-                  p.name AS plan_name, p.code AS plan_code, p.id AS plan_id,
+                  p.name AS plan_name, p.code AS plan_code, p.id AS plan_id, p.max_devices, p.trial_days,
                   COALESCE(sa.max_storage_bytes, 5368709120) AS max_storage_bytes,
                   COALESCE(sa.used_storage_bytes, 0) AS used_storage_bytes
              FROM restaurants r
-             LEFT JOIN subscriptions s ON s.restaurant_id = r.id
-                   AND s.status IN ('trialing', 'active', 'past_due', 'cancel_at_period_end', 'suspended')
+             LEFT JOIN LATERAL(SELECT * FROM subscriptions WHERE restaurant_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) s ON true
              LEFT JOIN plans p ON p.id = s.plan_id
              LEFT JOIN tenant_storage_allowances sa ON sa.restaurant_id = r.id
             WHERE r.id = $1`,
@@ -394,7 +420,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
         if (!restaurant) return null;
 
         const usersResult = await client.query(
-          `SELECT u.id, u.username, u.display_name, u.status, m.role
+          `SELECT u.id, u.username, u.email, u.display_name, u.status, m.role
              FROM users u
              JOIN restaurant_memberships m ON m.user_id = u.id AND m.restaurant_id = u.restaurant_id
             WHERE u.restaurant_id = $1 ORDER BY lower(u.username), u.id`,
@@ -440,6 +466,8 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
             planName: restaurant.plan_name ?? "No Plan",
             planCode: restaurant.plan_code ?? null,
             planId: restaurant.plan_id ?? null,
+            maxDevices: Number(restaurant.max_devices ?? 20),
+            trialDays: Number(restaurant.trial_days ?? 14),
             currentPeriodStart: restaurant.current_period_start,
             currentPeriodEnd: restaurant.current_period_end,
           },
@@ -450,6 +478,7 @@ export function createPlatformAdminPortalService({ pool, passwordPepper, clock =
           users: usersResult.rows.map((u) => ({
             id: u.id,
             username: u.username,
+            email: u.email,
             displayName: u.display_name,
             status: u.status,
             role: u.role,
