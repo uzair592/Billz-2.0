@@ -24,10 +24,12 @@ async function flush() {
   }
 }
 
-function setup({ context = null, outbox = [], billing = null, networkDown = false, online = true } = {}) {
+function setup({ context = null, outbox = [], billing = null, networkDown = false, online = true, managed = false } = {}) {
   const badges = [];
+  const storageReads = [];
   const storage = {
     async get(key) {
+      storageReads.push(key);
       if (key === "pos_cloud_context_v1") return context;
       if (key === "pos_cloud_order_outbox_v1") return outbox;
       return null;
@@ -99,10 +101,11 @@ function setup({ context = null, outbox = [], billing = null, networkDown = fals
   };
   globalThis.clearInterval = () => {};
 
-  const status = createCloudStatus({ storage, refreshIntervalMs: 60_000 });
+  const status = createCloudStatus({ storage, refreshIntervalMs: 60_000, managed });
 
   return {
     badges,
+    storageReads,
     intervals,
     status,
     async refreshAndWait() {
@@ -134,6 +137,36 @@ function latestLabel(badges) {
 }
 
 describe("cloud status indicator", () => {
+  it("waits for managed tenant selection before probing or reading business storage", async t => {
+    const previousTenant = globalThis.BILLZ_TENANT_ID;
+    delete globalThis.BILLZ_TENANT_ID;
+    const { badges, storageReads, refreshAndWait, restore } = setup({ managed: true });
+    t.after(() => { restore(); globalThis.BILLZ_TENANT_ID = previousTenant; });
+    let requests = 0;
+    globalThis.fetch = async () => { requests++; throw new Error("Not ready"); };
+    await refreshAndWait();
+    assert.equal(requests, 0);
+    assert.deepEqual(storageReads, []);
+    assert.equal(latestLabel(badges), "Sign in required — cloud features are limited");
+  });
+
+  it("discards a managed probe when tenant selection changes while it is pending", async t => {
+    const previousTenant = globalThis.BILLZ_TENANT_ID;
+    globalThis.BILLZ_TENANT_ID = restaurantId;
+    const { badges, status, restore } = setup({ managed: true, context: { restaurantId } });
+    t.after(() => { restore(); globalThis.BILLZ_TENANT_ID = previousTenant; });
+    await flush();
+    let finish;
+    globalThis.fetch = () => new Promise(resolve => { finish = resolve; });
+    const pending = status.refresh();
+    await flush();
+    const count = badges.length;
+    delete globalThis.BILLZ_TENANT_ID;
+    finish(jsonResponse({ plans: [], subscription: null }));
+    await pending;
+    assert.equal(badges.length, count);
+  });
+
   it("reports offline first, before any cloud state", async () => {
     const { badges, restore } = setup({ online: false });
     try {

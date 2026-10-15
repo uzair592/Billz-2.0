@@ -97,9 +97,9 @@ export function createCloudSessionClient({
     },
 
     async signIn(credentials) {
-      const body = credentials.restaurantCode && credentials.username
+      const body = credentials.username
         ? {
-            restaurantCode: String(credentials.restaurantCode ?? "").trim(),
+            ...(credentials.restaurantCode ? { restaurantCode: String(credentials.restaurantCode).trim() } : {}),
             username: String(credentials.username ?? "").trim(),
             password: String(credentials.password ?? ""),
           }

@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import pg from "pg";
 
 export const BACKUP_TABLES = Object.freeze([
-  "schema_migrations", "restaurants", "users", "restaurant_memberships", "plans", "subscriptions",
+  "schema_migrations", "restaurants", "users", "user_login_identifiers", "restaurant_memberships", "plans", "subscriptions",
   "menu_items", "orders", "order_items", "order_payments", "financial_accounts", "expenses",
   "business_settings", "menu_categories", "tenant_catalogs", "inventory_items", "stock_movements", "inventory_movements",
   "suppliers", "purchases", "purchase_items", "platform_administrators", "audit_logs", "manual_payments",

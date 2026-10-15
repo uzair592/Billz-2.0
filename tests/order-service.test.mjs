@@ -68,7 +68,7 @@ function fakePool({ existingOrder = null, stockQuantity = 10, menuRows = null } 
           id: values[0],
           order_number: values[4],
           order_type: values[5],
-          order_status: "completed",
+          order_status: values[22],
           payment_status: values[6],
           subtotal_minor: values[11],
           discount_minor: values[14],
@@ -111,6 +111,8 @@ describe("transactional order service", () => {
     assert.equal(result.order.businessDate, "2026-10-02");
 
     const orderInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO orders"));
+    assert.equal(orderInsert.values[24], now);
+    assert.equal(result.order.orderStatus, "completed");
     const itemInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO order_items"));
     const stockUpdate = pool.calls.find((call) => call.text.startsWith("UPDATE inventory_balances"));
     assert.equal(orderInsert.values[18], 46);
@@ -127,6 +129,17 @@ describe("transactional order service", () => {
     assert.ok(pool.calls.some((call) => call.text.startsWith("INSERT INTO ledger_entries")));
     assert.equal(pool.calls.at(-1).text, "COMMIT");
     assert.equal(pool.released, true);
+  });
+
+  it("leaves explicitly open orders without a completion timestamp", async () => {
+    const pool = fakePool();
+    const result = await createOrderService(pool, { clock: () => now }).create({
+      tenant: tenant(), userId, input: input({ orderStatus: "new" }),
+    });
+    const orderInsert = pool.calls.find((call) => call.text.startsWith("INSERT INTO orders"));
+    assert.equal(orderInsert.values[24], null);
+    assert.equal(result.order.orderStatus, "new");
+    assert.equal(pool.calls.at(-1).text, "COMMIT");
   });
 
   it("returns the original response for a repeated idempotency key", async () => {

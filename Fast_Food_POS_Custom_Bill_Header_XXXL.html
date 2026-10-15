@@ -9054,8 +9054,8 @@
               </p>
             </div>
             <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
-              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
-              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('kitchen-stock')" data-legacy-stock-tab>🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🥦 Stock Items</button>
               <button type="button" class="mode-switch-btn" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
             </div>
           </div>
@@ -11340,16 +11340,16 @@
                 onclick="showLocalReports()"
                 title="Local device reports (IndexedDB)"
               >
-                💾 Local Reports
+                Device Reports
               </button>
               <button
                 type="button"
                 id="reports-tab-cloud"
                 class="mode-switch-btn"
                 onclick="showCloudSalesReport()"
-                title="Server-authoritative cloud sales report"
+                title="Sales report"
               >
-                ☁️ Cloud Sales Report
+                Sales Report
               </button>
             </div>
           </div>
@@ -12389,14 +12389,14 @@
         <section id="screen-inventory" class="screen-view hidden">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
             <div>
-              <h1 style="margin:0 0 4px;">🗄️ Inventory Items</h1>
+              <h1 style="margin:0 0 4px;">🥦 Stock Items</h1>
               <p style="margin:0; color:#64748b; font-size:14px;">
                 Manage restaurant inventory items, category groupings, and unit measures.
               </p>
             </div>
             <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
-              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
-              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')" data-legacy-stock-tab>🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('inventory')">🥦 Stock Items</button>
               <button type="button" class="mode-switch-btn" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
             </div>
           </div>
@@ -12412,8 +12412,8 @@
               </p>
             </div>
             <div style="background:#e2e8f0; padding:4px; border-radius:8px; display:inline-flex; gap:4px;">
-              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')">🥦 Kitchen Stock</button>
-              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🗄️ Inventory Items</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('kitchen-stock')" data-legacy-stock-tab>🥦 Kitchen Stock</button>
+              <button type="button" class="mode-switch-btn" onclick="switchScreen('inventory')">🥦 Stock Items</button>
               <button type="button" class="mode-switch-btn active-switch" onclick="switchScreen('purchases')">🧾 Purchases &amp; Suppliers</button>
             </div>
           </div>
@@ -13423,6 +13423,10 @@
 
 
       function getLocalDateString(d = new Date()) {
+        if (window.BILLZ_MANAGED) {
+          return new Intl.DateTimeFormat("en-CA", { timeZone: window.BILLZ_TIMEZONE || "Asia/Karachi",
+            year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+        }
         const year = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, "0");
         const day = String(d.getDate()).padStart(2, "0");
@@ -15382,6 +15386,9 @@
       });
 
       function switchScreen(screenId) {
+        // Managed Stock uses the shared inventory/purchase ledger, never local purchases.
+        if (window.BILLZ_MANAGED && screenId === "kitchen-stock") screenId = "inventory";
+        document.querySelectorAll("[data-legacy-stock-tab]").forEach((tab) => { tab.classList.toggle("hidden", !!window.BILLZ_MANAGED); });
         if (window.event) window.event.preventDefault();
         if (window.BILLZ_MANAGED) {
           const role = window.BILLZ_ROLE || AppState.session.userRole;
@@ -15524,10 +15531,10 @@
         }
 
         if (screenId === "reports") {
-          calculateAndRenderBusinessReports();
           if (window.BILLZ_MANAGED) {
-            window.BillzCloudProfit?.mount();
-          }
+            window.showCloudSalesReport?.();
+            document.querySelector("#screen-reports .date-filter-bar")?.classList.add("hidden");
+          } else calculateAndRenderBusinessReports();
         }
 
         if (screenId === "ledger") {
@@ -18205,6 +18212,7 @@
       }
 
       async function saveStockUnitSetup() {
+        if (window.BILLZ_MANAGED) { switchScreen("inventory"); return; }
         if (stockUnitSetupSaving || !stockUnitSetupState) return;
         const overlay = document.getElementById("stock-unit-setup-overlay");
         const error = overlay.querySelector("#stock-unit-setup-error");
@@ -19491,6 +19499,8 @@
             if (!allowed) throw new Error("Choose a restaurant to continue.");
             window.BILLZ_TENANT_ID = allowed.restaurantId;
             window.BILLZ_ROLE = allowed.role;
+            window.BILLZ_TIMEZONE = allowed.timezone || "Asia/Karachi";
+            document.getElementById("new-order-date-input").value = getLocalDateString();
             AppState.session.userRole = allowed.role;
             await idbSet("pos_cloud_session_v1", { user: account.user, restaurantId: allowed.restaurantId });
             const responseMenu = await fetch("/api/pos/menu", { credentials: "same-origin", headers: { "x-restaurant-id": allowed.restaurantId } });
@@ -21288,7 +21298,7 @@
           .map((input) => input.dataset.key);
       }
 
-      function handleMenuFormSubmit(event) {
+      async function handleMenuFormSubmit(event) {
         event.preventDefault();
         const editId = document.getElementById("menu-edit-id").value;
         const nameInput = document.getElementById("menu-item-name");
@@ -21449,7 +21459,15 @@
           persistPendingMenuItemImage(newItem.id);
         }
 
-        saveToStorage();
+        await saveToStorage();
+        if (window.BILLZ_MANAGED) {
+          try {
+            await window.BiteTechCloudSync.importCatalog({ restaurantId: window.BILLZ_TENANT_ID });
+          } catch (error) {
+            alert(error.message || "Menu changes could not be saved to the restaurant server. Your draft is preserved; refresh before retrying a conflict.");
+            return;
+          }
+        }
         resetMenuForm();
         renderFoodGridOrderingUI();
         renderManagementMenuTable();
@@ -22832,6 +22850,7 @@
 
 
       function addIngredientStockPurchase(event, group = "kitchen") {
+        if (window.BILLZ_MANAGED) { event?.preventDefault?.(); switchScreen("purchases"); return; }
         event.preventDefault();
         const ingredient = sgEl(group, "ingredient-select").value;
         const grams = getStockPurchaseGramsFromInput(group);
@@ -23030,6 +23049,7 @@
       // 🗑️ Delete a purchase log entry and correctly reverse its effect on stock-on-hand, avg cost/gram,
       // and (where relevant) avg grams/piece
       function deleteStockPurchase(id) {
+        if (window.BILLZ_MANAGED) { switchScreen("inventory"); return; }
         const entry = stockPurchaseLog.find((p) => p.id === id);
         if (!entry) return;
 
@@ -23378,6 +23398,7 @@
       }
 
       function saveStockItemDef() {
+        if (window.BILLZ_MANAGED) { switchScreen("inventory"); return; }
         const name = document
           .getElementById("stock-item-name-input")
           .value.trim();
@@ -23489,6 +23510,7 @@
 
 
       function deleteStockItemDef(key) {
+        if (window.BILLZ_MANAGED) { switchScreen("inventory"); return; }
         const def = stockItemDefs[key];
         if (!def || def.isCore) return; // Core items can't be deleted from here
 
@@ -23996,6 +24018,7 @@
       // 📥 Log a new soft drink purchase (or save changes to one being edited) — updates stock using a weighted-average cost per unit.
       // Editing always merges into whatever Brand/Flavor/Size SKU already exists in the stock table — it never creates a duplicate row.
       function addSoftDrinkPurchase(event) {
+        if (window.BILLZ_MANAGED) { event?.preventDefault?.(); switchScreen("purchases"); return; }
         event.preventDefault();
 
         const brand = document.getElementById("softdrink-brand-select").value;
@@ -24866,6 +24889,7 @@
 
 
       function addIceCreamPurchase(event) {
+        if (window.BILLZ_MANAGED) { event?.preventDefault?.(); switchScreen("purchases"); return; }
         event.preventDefault();
 
         const name = document.getElementById("icecream-name-select").value;

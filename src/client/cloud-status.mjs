@@ -117,7 +117,15 @@ export function createCloudStatus({
       return;
     }
 
+    // The module starts before managed boot selects the authorized tenant.
+    // A successful login cookie alone does not make tenant storage available.
+    const selectedTenant = globalThis.BILLZ_TENANT_ID;
+    if (managed && !selectedTenant) {
+      apply({ tone: "amber", text: "Sign in required — cloud features are limited" });
+      return;
+    }
     const problem = await readConnectionProblem();
+    if (managed && globalThis.BILLZ_TENANT_ID !== selectedTenant) return;
     if (problem) {
       apply(problem);
       return;

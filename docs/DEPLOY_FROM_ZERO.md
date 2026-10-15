@@ -100,7 +100,7 @@ On Render use the service Shell after its release/start succeeds; on a VPS use a
 1. Open `https://pos.yourdomain.com/platform-admin/` and sign in with the bootstrap administrator.
 2. In **Plans**, create an active manual plan: code/name, interval, price/currency, trial days and concurrent device allowance. A clean database has no default catalog until you create one here. Archive retired plans instead of deleting billing history.
 3. In **Restaurants**, create the restaurant using that plan and a unique code, owner username/email and strong owner password. Creation provisions the tenant, membership, settings and trial transactionally. Deliver the owner's credentials through your secure customer handoff process.
-4. Open `/` in another browser context; sign in with the restaurant code and owner username/email. Confirm menu setup and a small staging sale, reporting, suspend/restore and credential recovery. Verify the configured device cap using independent browser contexts.
+4. Open `/` in another browser context; sign in with the globally unique owner username or email. Confirm menu setup and a small staging sale, reporting, suspend/restore and credential recovery. Verify the configured device cap using independent browser contexts.
 5. Manual plan assignment/renewal adjusts access; record and review actual payments separately. Generated recovery passwords are displayed only once. No Stripe checkout/product configuration is needed or enabled for this launch.
 
 ## 8. Smoke checks before accepting customers

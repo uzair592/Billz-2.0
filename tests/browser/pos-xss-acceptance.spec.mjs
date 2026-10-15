@@ -26,7 +26,7 @@ test("persisted customer, menu, supplier and expense text remains inert on POS s
     await expect(page.locator('img[src="x"]')).toHaveCount(0);
   }
   await page.goto("/");
-  await page.fill("#cloud-restaurant-code", "xss-restaurant"); await page.fill("#cloud-username", "owner");
+  await page.fill("#cloud-username", "owner");
   await page.fill("#cloud-password", "OwnerPassword123!"); await page.click("#cloud-signin-button");
   await expect(page.locator(".app-container")).toBeVisible(); await inert();
   await page.evaluate(() => switchScreen("edit-menu"));

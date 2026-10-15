@@ -25,7 +25,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
   const cookie = r => r.headers["set-cookie"].split(";")[0];
   const adminCookie = cookie(await send("POST", "/platform-admin/api/auth/login", { username: "auditadmin", password: "AdminPassword123!" }));
   const create = async code => {
-    const r = await send("POST", "/platform-admin/api/restaurants", { code, name: code, ownerUsername: "owner", ownerPassword: "OwnerPassword123!" }, adminCookie);
+    const r = await send("POST", "/platform-admin/api/restaurants", { code, name: code, ownerUsername: code === "readiness-cafe" ? "owner" : "other_readiness_owner", ownerPassword: "OwnerPassword123!" }, adminCookie);
     assert.equal(r.statusCode, 201, r.body); return r.json();
   };
   const restaurant = await create("readiness-cafe"), other = await create("other-readiness");
@@ -81,6 +81,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     const responses = await Promise.all([send("POST", "/api/pos/orders", saleInput(keys[0]), first, restaurant.id), send("POST", "/api/pos/orders", saleInput(keys[1]), second, restaurant.id)]);
     for (const r of responses) assert.equal(r.statusCode, 201, r.body);
     sales = responses.map(r => r.json().order);
+    assert.ok(sales.every(order => order.orderStatus === "completed"));
     assert.equal(new Set(sales.map(order => order.id)).size, 2);
     assert.deepEqual(sales.map(order => order.orderNumber).sort(), [1, 2]);
     for (const sale of sales) assert.equal(sale.costOfGoodsMinor, 6000);
@@ -88,6 +89,13 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     assert.equal(replay.statusCode, 200); assert.equal(replay.json().order.id, sales[0].id);
     assert.equal((await control.query("SELECT count(*) FROM orders WHERE restaurant_id=$1", [restaurant.id])).rows[0].count, "2");
     assert.equal(Number((await control.query("SELECT quantity_base_units FROM inventory_balances WHERE restaurant_id=$1", [restaurant.id])).rows[0].quantity_base_units), 400);
+    const tickets = (await control.query("SELECT id FROM kitchen_tickets WHERE restaurant_id=$1 ORDER BY ticket_number", [restaurant.id])).rows;
+    assert.equal(tickets.length, 2);
+    for (const status of ["preparing", "ready", "served"]) {
+      const ticket = await send("PATCH", `/api/pos/kitchen/tickets/${tickets[0].id}/status`, { status }, first, restaurant.id);
+      assert.equal(ticket.statusCode, 200, ticket.body);
+    }
+    assert.equal((await control.query("SELECT order_status FROM orders WHERE id=$1", [sales[0].id])).rows[0].order_status, "completed");
   });
   await t.test("catalog publication cannot reset sold stock and competing edits return a conflict", async () => {
     const updates = await Promise.all([send("POST", "/api/pos/import/legacy-catalog", { ...snapshot, expectedRevision: 1 }, first, restaurant.id), send("POST", "/api/pos/import/legacy-catalog", { ...snapshot, expectedRevision: 1 }, second, restaurant.id)]);
@@ -113,7 +121,7 @@ test("launch readiness: admin, two devices, catalog conflicts, expenses and exac
     assert.equal((await control.query("SELECT count(*) FROM audit_logs WHERE action='expense.created' AND resource_id=$1", [id])).rows[0].count, "1");
     const report = await send("GET", "/api/pos/expenses?startDate=2026-10-13&endDate=2026-10-13", undefined, second, restaurant.id);
     assert.equal(report.json().totalMinor, 5000); assert.equal(report.json().expenses[0].description, input.description);
-    const foreign = await signIn("owner", other.code);
+    const foreign = await signIn("other_readiness_owner", other.code);
     assert.equal((await send("GET", "/api/pos/expenses?startDate=2026-10-13&endDate=2026-10-13", undefined, foreign, other.id)).json().totalMinor, 0);
     const cashierCookie = await signIn("new_cashier");
     assert.equal((await send("POST", "/api/pos/expenses", input, cashierCookie, restaurant.id)).statusCode, 403);

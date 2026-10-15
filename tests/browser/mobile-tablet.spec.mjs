@@ -183,7 +183,8 @@ test.describe("Mobile & Tablet Usability & Acceptance", () => {
     await openPosUnlocked(page);
 
     await page.locator("#mobile-menu-toggle").click();
-    await page.locator('button.menu-btn[onclick*="inventory"]').click();
+    await page.locator(`button.menu-btn[onclick*="kitchen-stock"]`).click();
+    await page.locator(`#screen-kitchen-stock button[onclick="switchScreen('inventory')"]`).click();
 
     await expect(page.locator("#app-screen-title")).toHaveText("Inventory");
     await page.screenshot({ path: "docs/screenshots/mobile-inventory.png" });
@@ -194,7 +195,8 @@ test.describe("Mobile & Tablet Usability & Acceptance", () => {
     await openPosUnlocked(page);
 
     await page.locator("#mobile-menu-toggle").click();
-    await page.locator('button.menu-btn[onclick*="purchases"]').click();
+    await page.locator(`button.menu-btn[onclick*="kitchen-stock"]`).click();
+    await page.locator(`#screen-kitchen-stock button[onclick="switchScreen('purchases')"]`).click();
 
     await expect(page.locator("#app-screen-title")).toHaveText("Purchases");
     await page.screenshot({ path: "docs/screenshots/mobile-purchases.png" });
@@ -209,7 +211,10 @@ test.describe("Mobile & Tablet Usability & Acceptance", () => {
     for (let i = 0; i < 2; i++) {
       for (const s of screenIds) {
         await page.locator("#mobile-menu-toggle").click();
-        await page.locator(`button.menu-btn[onclick*="${s}"]`).click();
+        if (["inventory", "purchases"].includes(s)) {
+          await page.locator(`button.menu-btn[onclick*="kitchen-stock"]`).click();
+          await page.locator(`#screen-kitchen-stock button[onclick="switchScreen('${s}')"]`).click();
+        } else await page.locator(`button.menu-btn[onclick*="${s}"]`).click();
         await expect(page.locator("#app-sidebar")).not.toHaveClass(/mobile-open/);
       }
     }

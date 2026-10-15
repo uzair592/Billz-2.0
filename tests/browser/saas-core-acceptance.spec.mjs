@@ -104,7 +104,6 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       }
 
       // Visible owner sign-in and actual menu onboarding.
-      await page.fill("#cloud-restaurant-code", restCode);
       await page.fill("#cloud-username", `owner_${vp.name}`);
       await page.fill("#cloud-password", "OwnerPass123!");
       await page.click("#cloud-signin-button");
@@ -248,7 +247,7 @@ test.describe("PHASE 8 — Real Browser Acceptance Suite", () => {
       await expect(page.locator("#detail-content")).toContainText(canary);await expect(page.locator("#detail-content img")).toHaveCount(0);
       expect(await page.evaluate(()=>globalThis.adminCanaryExecuted)).toBe(false);
       const ownerSignIn=async(password)=>{
-        await ownerPage.goto("http://127.0.0.1:3000/");await ownerPage.fill("#cloud-restaurant-code",code);await ownerPage.fill("#cloud-username",username);
+        await ownerPage.goto("http://127.0.0.1:3000/");await ownerPage.fill("#cloud-username",username);
         await ownerPage.fill("#cloud-password",password);await ownerPage.click("#cloud-signin-button");await expect(ownerPage.locator(".app-container")).toBeVisible();
       };
       await ownerSignIn("OriginalBrowserPassword!42");

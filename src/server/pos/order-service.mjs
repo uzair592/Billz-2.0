@@ -348,7 +348,10 @@ export function createOrderService(
           );
           const orderNumber = Number(sequenceResult.rows[0].order_number);
           let kitchenTicket = null;
-          const initialOrderStatus = input.orderStatus ?? (kitchenService ? "new" : "completed");
+          // Posting a POS invoice completes the financial sale. Kitchen tickets
+          // have their own fulfillment status; open-order callers can explicitly
+          // request "new" without making finalized sales disappear from reports.
+          const initialOrderStatus = input.orderStatus ?? "completed";
           const orderResult = await client.query(
             `INSERT INTO orders (
                id, restaurant_id, branch_id, idempotency_key, order_number,

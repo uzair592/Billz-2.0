@@ -516,7 +516,7 @@ test("enterprise admin HTTP controls and concurrent session limits with PostgreS
       const fresh = await send(
         "POST",
         "/platform-admin/api/restaurants",
-        { ...signup, ownerEmail: "fresh@example.com" },
+        { ...signup, ownerUsername: "fresh_enterprise_owner", ownerEmail: "fresh@example.com" },
         admin,
       );
       assert.equal(fresh.statusCode, 201, fresh.body);
@@ -668,6 +668,7 @@ test("enterprise admin HTTP controls and concurrent session limits with PostgreS
               {
                 ...signup,
                 code: "rollback",
+                ownerUsername: "audit_rollback_owner",
                 ownerEmail: "rollback@example.com",
               },
               admin,
