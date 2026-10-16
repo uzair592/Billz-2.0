@@ -756,5 +756,3 @@ export async function registerPlatformAdminRoutes(
     });
   });
 }
-
-
