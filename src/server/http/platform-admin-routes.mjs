@@ -57,6 +57,20 @@ const resetPasswordSchema = z.union([
 ]);
 
 const restaurantParams = z.object({ id: z.uuid() });
+const branchParams = z.object({ id: z.uuid(), branchId: z.uuid() });
+const branchSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  code: z.string().trim().min(1).max(64),
+  phone: z.string().trim().max(40).nullable().optional(),
+  address: z.string().trim().max(500).nullable().optional(),
+  timezone: z.string().trim().min(1).max(100).default("Asia/Karachi"),
+  isDefault: z.boolean().default(false),
+  isActive: z.boolean().default(true),
+}).strict();
+const editBranchSchema = branchSchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  "At least one field is required.",
+);
 const editRestaurantSchema = z
   .object({
     name: z.string().trim().min(1).max(160).optional(),
@@ -170,6 +184,53 @@ const ownerCredentialsSchema = z
 const logoutDevicesSchema = z
   .object({ reason: z.string().trim().min(1).max(1000) })
   .strict();
+
+const deviceParams = z.object({ id: z.uuid() });
+const listDevicesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().max(200).optional().default(""),
+  status: z.string().trim().max(50).optional().default("all"),
+  restaurantId: z.preprocess((val) => (!val ? undefined : val), z.string().uuid().optional()),
+  branchId: z.preprocess((val) => (!val ? undefined : val), z.string().uuid().optional()),
+  deviceType: z.preprocess((val) => (!val ? undefined : val), z.enum(["desktop", "laptop", "tablet", "mobile"]).optional()),
+  version: z.preprocess((val) => (!val ? undefined : val), z.string().trim().max(40).optional()),
+  sort: z.string().trim().max(50).optional().default("last_seen_at"),
+  order: z.enum(["asc", "desc", "ASC", "DESC"]).optional().default("DESC"),
+});
+
+const registerDeviceSchema = z.object({
+  restaurantId: z.uuid(),
+  branchId: z.uuid().optional().nullable(),
+  deviceUid: z.string().trim().min(1).max(100),
+  name: z.string().trim().min(1).max(120),
+  deviceType: z.enum(["desktop", "laptop", "tablet", "mobile"]).default("desktop"),
+  platform: z.string().trim().max(80).default("Web"),
+  os: z.string().trim().max(80).optional().nullable(),
+  appVersion: z.string().trim().max(40).optional().nullable(),
+});
+
+const updateDeviceSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  branchId: z.uuid().optional().nullable(),
+  deviceType: z.enum(["desktop", "laptop", "tablet", "mobile"]).optional(),
+  platform: z.string().trim().max(80).optional(),
+  os: z.string().trim().max(80).optional().nullable(),
+  appVersion: z.string().trim().max(40).optional().nullable(),
+});
+
+const revokeDeviceSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+  revokeSessions: z.boolean().default(true),
+});
+
+const reactivateDeviceSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
+const revokeDeviceSessionsSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
 
 export async function registerPlatformAdminRoutes(
   app,
@@ -568,4 +629,132 @@ export async function registerPlatformAdminRoutes(
       });
     },
   );
+
+  // Phase 2B: Multi-Branch Admin Manager
+  app.get("/platform-admin/api/restaurants/:id/branches", async (request) => {
+    const { id } = restaurantParams.parse(request.params);
+    return platformAdminPortalService.listBranches({ restaurantId: id });
+  });
+
+  app.post(
+    "/platform-admin/api/restaurants/:id/branches",
+    { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const { id } = restaurantParams.parse(request.params);
+      const input = branchSchema.parse(request.body);
+      const result = await platformAdminPortalService.createBranch({
+        adminId: request.adminSession.admin.id,
+        restaurantId: id,
+        ...input,
+      });
+      return reply.code(201).send(result);
+    },
+  );
+
+  app.patch(
+    "/platform-admin/api/restaurants/:id/branches/:branchId",
+    { config: { rateLimit: { max: 20, timeWindow: "15 minutes" } } },
+    async (request) => {
+      const { id, branchId } = branchParams.parse(request.params);
+      const input = editBranchSchema.parse(request.body);
+      return platformAdminPortalService.editBranch({
+        adminId: request.adminSession.admin.id,
+        restaurantId: id,
+        branchId,
+        ...input,
+      });
+    },
+  );
+
+  // Phase 2C: Sync Queue & Device Status Monitor
+  app.get("/platform-admin/api/sync-monitoring", async () => {
+    return platformAdminPortalService.getSyncMonitoringOverview();
+  });
+
+  app.get("/platform-admin/api/restaurants/:id/sync-status", async (request) => {
+    const { id } = restaurantParams.parse(request.params);
+    return platformAdminPortalService.getRestaurantSyncStatus({ restaurantId: id });
+  });
+
+  // Phase 3: Platform Financial Analytics & Export
+  app.get("/platform-admin/api/analytics/overview", async () => {
+    return platformAdminPortalService.getFinancialAnalytics();
+  });
+
+  app.get("/platform-admin/api/analytics/export-payments.csv", async (_request, reply) => {
+    const csv = await platformAdminPortalService.getPaymentsExportCsv();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    reply.header("Content-Type", "text/csv; charset=utf-8");
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename="billz-payments-export-${dateStr}.csv"`,
+    );
+    return reply.send(csv);
+  });
+
+  // Dedicated Device Management Module Endpoints
+  app.get("/platform-admin/api/devices", async (request) => {
+    const query = listDevicesQuerySchema.parse(request.query);
+    return platformAdminPortalService.listDevices(query);
+  });
+
+  app.get("/platform-admin/api/devices/:id", async (request) => {
+    const { id } = deviceParams.parse(request.params);
+    return platformAdminPortalService.getDeviceDetails(id);
+  });
+
+  app.post("/platform-admin/api/devices", async (request, reply) => {
+    const body = registerDeviceSchema.parse(request.body);
+    const device = await platformAdminPortalService.registerDevice({
+      adminId: request.adminSession.admin?.id ?? request.adminSession.adminId,
+      ...body,
+    });
+    return reply.code(201).send({ device });
+  });
+
+  app.patch("/platform-admin/api/devices/:id", async (request) => {
+    const { id } = deviceParams.parse(request.params);
+    const body = updateDeviceSchema.parse(request.body);
+    const device = await platformAdminPortalService.updateDevice({
+      adminId: request.adminSession.admin?.id ?? request.adminSession.adminId,
+      deviceId: id,
+      ...body,
+    });
+    return { device };
+  });
+
+  app.post("/platform-admin/api/devices/:id/revoke", async (request) => {
+    const { id } = deviceParams.parse(request.params);
+    const body = revokeDeviceSchema.parse(request.body);
+    const device = await platformAdminPortalService.revokeDevice({
+      adminId: request.adminSession.admin?.id ?? request.adminSession.adminId,
+      deviceId: id,
+      reason: body.reason,
+      revokeSessions: body.revokeSessions,
+    });
+    return { device };
+  });
+
+  app.post("/platform-admin/api/devices/:id/reactivate", async (request) => {
+    const { id } = deviceParams.parse(request.params);
+    const body = reactivateDeviceSchema.parse(request.body);
+    const device = await platformAdminPortalService.reactivateDevice({
+      adminId: request.adminSession.admin?.id ?? request.adminSession.adminId,
+      deviceId: id,
+      reason: body.reason,
+    });
+    return { device };
+  });
+
+  app.post("/platform-admin/api/devices/:id/revoke-sessions", async (request) => {
+    const { id } = deviceParams.parse(request.params);
+    const body = revokeDeviceSessionsSchema.parse(request.body || {});
+    return platformAdminPortalService.revokeDeviceSessions({
+      adminId: request.adminSession.admin?.id ?? request.adminSession.adminId,
+      deviceId: id,
+      reason: body.reason,
+    });
+  });
 }
+
+

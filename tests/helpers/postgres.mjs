@@ -6,7 +6,7 @@ import { projectRoot } from "./legacy-source.mjs";
 
 export const ADMIN_DATABASE_URL =
   process.env.TEST_DATABASE_ADMIN_URL
-  ?? "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test";
+  ?? (process.env.DATABASE_URL ? "postgresql://postgres:postgres@127.0.0.1:5432/restaurant_pos_test" : "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test");
 
 export const APP_ROLE = "pos_integration_app";
 

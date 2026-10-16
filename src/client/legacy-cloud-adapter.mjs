@@ -89,6 +89,8 @@ export function buildCloudOrderPayload(order, mappings) {
   if (order.customerName) payload.customerName = order.customerName;
   if (order.customerPhone) payload.customerPhone = order.customerPhone;
   if (order.riderName) payload.riderName = order.riderName;
+  if (order.notes) payload.notes = order.notes;
+  if (order.isKot) payload.isKot = true;
   if (order.discountType === "percent" && Number(order.discountValue) > 0) {
     payload.discount = { type: "percent", value: Number(order.discountValue) };
   } else if (order.discountType === "flat" && Number(order.discountValue) > 0) {
@@ -112,57 +114,68 @@ export function createLegacyCloudAdapter({
     throw new TypeError("outbox must provide enqueue and flush functions.");
   }
 
-  return Object.freeze({
-    /**
-     * Reads this device's own browser data, builds the import snapshot, and
-     * only activates cloud ordering once the server has accepted it and
-     * returned authoritative UUID mappings.
-     */
-    async importCatalog({ restaurantId, snapshot } = {}) {
-      const targetRestaurant = restaurantId ?? (await session.activeRestaurant());
-      if (!targetRestaurant) {
-        throw new OrderSyncError("Sign in and choose a restaurant before importing.", {
-          code: "RESTAURANT_REQUIRED",
-          retriable: false,
-        });
-      }
-      const body = snapshot ?? buildLegacyCatalogSnapshot(
-        await readLegacyCollections(storage),
-      );
-      const previous = await storage.get(CLOUD_CONTEXT_KEY);
-      body.expectedRevision = previous?.restaurantId === targetRestaurant ? (previous.revision ?? 0) : 0;
-      const response = await fetchImpl("/api/pos/import/legacy-catalog", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "content-type": "application/json",
-          "x-restaurant-id": targetRestaurant,
-        },
-        body: JSON.stringify(body),
+  async function importCatalogImpl({ restaurantId, snapshot } = {}) {
+    const targetRestaurant = restaurantId ?? (await session.activeRestaurant());
+    if (!targetRestaurant) {
+      throw new OrderSyncError("Sign in and choose a restaurant before importing.", {
+        code: "RESTAURANT_REQUIRED",
+        retriable: false,
       });
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new OrderSyncError(result?.error ?? `Catalog import returned HTTP ${response.status}.`, {
-          status: Number(response.status),
-          code: result?.code ?? "CATALOG_IMPORT_FAILED",
-          retriable: Number(response.status) >= 500,
-        });
+    }
+    let expectedRevision = 0;
+    try {
+      const catRes = await fetchImpl("/api/pos/catalog", {
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "x-restaurant-id": targetRestaurant },
+      });
+      if (catRes.ok) {
+        const catData = await catRes.json();
+        expectedRevision = Number(catData?.revision ?? 0);
       }
-      const context = {
-        version: 1,
-        restaurantId: targetRestaurant,
-        importedAt: new Date().toISOString(),
-        revision: result.revision ?? 0,
-        mappings: {
-          menuItems: result.menuItems ?? {},
-          tables: result.tables ?? {},
-          financialAccounts: result.financialAccounts ?? {},
-        },
-      };
-      await storage.set(CLOUD_CONTEXT_KEY, context);
-      await storage.set("pos_catalog_baseline", catalogFingerprint(body));
-      return { result, context };
-    },
+    } catch {
+      const previous = await storage.get(CLOUD_CONTEXT_KEY);
+      expectedRevision = previous?.restaurantId === targetRestaurant ? (previous.revision ?? 0) : 0;
+    }
+    const body = snapshot ?? buildLegacyCatalogSnapshot(
+      await readLegacyCollections(storage),
+    );
+    body.expectedRevision = expectedRevision;
+    const response = await fetchImpl("/api/pos/import/legacy-catalog", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": "application/json",
+        "x-restaurant-id": targetRestaurant,
+      },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new OrderSyncError(result?.error ?? `Catalog import returned HTTP ${response.status}.`, {
+        status: Number(response.status),
+        code: result?.code ?? "CATALOG_IMPORT_FAILED",
+        retriable: Number(response.status) >= 500,
+      });
+    }
+    const context = {
+      version: 1,
+      restaurantId: targetRestaurant,
+      importedAt: new Date().toISOString(),
+      revision: result.revision ?? 0,
+      mappings: {
+        menuItems: result.menuItems ?? {},
+        tables: result.tables ?? {},
+        financialAccounts: result.financialAccounts ?? {},
+      },
+    };
+    await storage.set(CLOUD_CONTEXT_KEY, context);
+    await storage.set("pos_catalog_baseline", catalogFingerprint(body));
+    return { result, context };
+  }
+
+  return Object.freeze({
+    importCatalog: importCatalogImpl,
 
     async enqueueLegacyOrder(order) {
       const context = await storage.get(CLOUD_CONTEXT_KEY);
@@ -209,6 +222,17 @@ export function createLegacyCloudAdapter({
         if (!authorized.user || authorized.restaurantId !== current.restaurantId) throw new OrderSyncError("The signed-in restaurant changed. Sign in again before checkout.", { code: "CLOUD_TENANT_MISMATCH", status: 403 });
         context = { version: 1, restaurantId: current.restaurantId, revision: data.revision, mappings: data.mappings };
         await storage.set(CLOUD_CONTEXT_KEY, context);
+
+        // If newly restored backup items are in the order and not yet in cloud mappings,
+        // automatically publish/sync them to cloud
+        if (order.items.some(item => !context.mappings?.menuItems?.[String(item.id)])) {
+          try {
+            const imported = await importCatalogImpl({ restaurantId: current.restaurantId });
+            context = imported.context;
+          } catch (autoImportErr) {
+            console.warn("Auto-sync restored catalog during checkout:", autoImportErr);
+          }
+        }
       }
       if (order.items.some(item => (item.extras || []).length)) throw new Error("Cloud checkout does not yet support ingredient extras. Remove extras before taking payment.");
       const payload = buildCloudOrderPayload(order, context.mappings);

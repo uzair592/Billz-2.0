@@ -72,10 +72,10 @@ function text(value, label, { max = 500, allowEmpty = true } = {}) {
 function dateOrNull(value, label) {
   const clean = typeof value === "string" ? value.trim() : "";
   if (!clean) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    fail(`${label} must use YYYY-MM-DD.`, { label, value: clean });
+  if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
+    return clean.slice(0, 10);
   }
-  return clean;
+  return null;
 }
 
 /**
@@ -102,6 +102,61 @@ export async function readLegacyCollections(storage) {
   const collections = {};
   for (const key of LEGACY_SNAPSHOT_KEYS) {
     collections[key] = await storage.get(key);
+  }
+  if (Array.isArray(collections.pos_menu)) {
+    const categories = Array.isArray(collections.pos_categories) ? [...collections.pos_categories] : [];
+    const categorySet = new Set(categories);
+    const subcategories = (collections.pos_subcategories && typeof collections.pos_subcategories === "object")
+      ? { ...collections.pos_subcategories }
+      : {};
+    const stockDefs = (collections.pos_stock_item_defs && typeof collections.pos_stock_item_defs === "object")
+      ? { ...collections.pos_stock_item_defs }
+      : {};
+    const softDrinks = (collections.pos_softdrink_stock && typeof collections.pos_softdrink_stock === "object")
+      ? { ...collections.pos_softdrink_stock }
+      : {};
+    const iceCreams = (collections.pos_icecream_stock && typeof collections.pos_icecream_stock === "object")
+      ? { ...collections.pos_icecream_stock }
+      : {};
+    const ingredientStock = (collections.pos_ingredient_stock && typeof collections.pos_ingredient_stock === "object")
+      ? { ...collections.pos_ingredient_stock }
+      : {};
+
+    for (const item of collections.pos_menu) {
+      if (item?.category && !categorySet.has(item.category)) {
+        categories.push(item.category);
+        categorySet.add(item.category);
+      }
+      if (item?.category && item?.subcategory) {
+        if (!Array.isArray(subcategories[item.category])) subcategories[item.category] = [];
+        if (!subcategories[item.category].includes(item.subcategory)) {
+          subcategories[item.category].push(item.subcategory);
+        }
+      }
+      if (item?.softDrinkKey && !softDrinks[item.softDrinkKey]) {
+        softDrinks[item.softDrinkKey] = { stockUnits: 0, avgCostPerUnit: 0, sellPrice: Number(item.price) || 0 };
+      }
+      if (item?.iceCreamKey && !iceCreams[item.iceCreamKey]) {
+        iceCreams[item.iceCreamKey] = { stockGrams: 0, avgCostPerGram: 0, sellPrice: Number(item.price) || 0, minThresholdGrams: 0 };
+      }
+    }
+    for (const cat of Object.keys(subcategories)) {
+      if (!categorySet.has(cat)) {
+        categories.push(cat);
+        categorySet.add(cat);
+      }
+    }
+    for (const key of Object.keys(ingredientStock)) {
+      if (!stockDefs[key]) {
+        stockDefs[key] = { label: key, buyUnit: "kg", sellUnit: "kg" };
+      }
+    }
+    collections.pos_categories = categories;
+    collections.pos_subcategories = subcategories;
+    collections.pos_stock_item_defs = stockDefs;
+    collections.pos_softdrink_stock = softDrinks;
+    collections.pos_icecream_stock = iceCreams;
+    collections.pos_ingredient_stock = ingredientStock;
   }
   return collections;
 }

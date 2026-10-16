@@ -33,6 +33,7 @@ const EXCLUDED = new Set([
   'bootstrap-first-restaurant.test.mjs',
   'graceful-shutdown.test.mjs',
   'backup-restore.test.mjs',
+  'super-admin-device-management.test.mjs',
 ]);
 
 const testsDir = path.join(projectRoot, 'tests');

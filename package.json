@@ -15,7 +15,7 @@
     "validate": "npm run validate:compose && npm run validate:database",
     "validate:compose": "docker compose -f compose.validation.yaml config",
     "validate:database": "docker compose -f compose.validation.yaml up --abort-on-container-exit --exit-code-from migrations",
-    "start": "node src/server/main.mjs"
+    "start": "node --env-file-if-exists=.env src/server/main.mjs"
   },
   "engines": {
     "node": ">=22"

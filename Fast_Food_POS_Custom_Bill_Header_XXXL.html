@@ -3675,8 +3675,8 @@
 
       #screen-new-order #new-order-action-buttons {
         display: grid;
-        grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-        gap: 10px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
         flex: 0 0 auto;
         position: sticky;
         bottom: 0;
@@ -3690,28 +3690,60 @@
       }
 
       #screen-new-order .save-bill-btn,
+      #screen-new-order .kot-bill-btn,
       #screen-new-order .print-bill-btn {
         width: 100%;
         min-height: 52px;
-        padding: 12px 10px;
+        padding: 12px 8px;
         border: none;
         border-radius: 8px;
         color: #ffffff;
         font-size: 14px;
         font-weight: 800;
         cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        transition: transform 0.1s ease, filter 0.15s ease, box-shadow 0.15s ease;
       }
 
       #screen-new-order .save-bill-btn {
         background: #2563eb;
+        box-shadow: 0 4px 10px rgba(37, 99, 235, 0.22);
       }
 
       #screen-new-order .save-bill-btn:hover {
         background: #1d4ed8;
       }
 
+      #screen-new-order .kot-bill-btn {
+        background: linear-gradient(135deg, #0284c7, #0369a1);
+        box-shadow: 0 4px 10px rgba(2, 132, 199, 0.25);
+      }
+
+      #screen-new-order .kot-bill-btn:hover {
+        background: linear-gradient(135deg, #0369a1, #075985);
+      }
+
       #screen-new-order .print-bill-btn {
         background: var(--accent-amber);
+        box-shadow: 0 4px 10px rgba(234, 88, 12, 0.22);
+      }
+
+      #screen-new-order .save-bill-btn:active,
+      #screen-new-order .kot-bill-btn:active,
+      #screen-new-order .print-bill-btn:active {
+        transform: translateY(1px);
+      }
+
+      #screen-new-order .save-bill-btn:disabled,
+      #screen-new-order .kot-bill-btn:disabled,
+      #screen-new-order .print-bill-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
       }
 
       #screen-new-order .print-bill-btn:hover {
@@ -6099,22 +6131,53 @@
               <div id="new-order-action-buttons">
                 <button
                   type="button"
+                  id="btn-save-bill"
                   class="save-bill-btn"
                   onclick="submitOrder(false)"
                 >
-                  Save bill
+                  💾 Save Bill
                 </button>
                 <button
                   type="button"
+                  id="btn-kot-bill"
+                  class="kot-bill-btn"
+                  onclick="submitKotOrder()"
+                >
+                  👨‍🍳 KOT
+                </button>
+                <button
+                  type="button"
+                  id="btn-save-print-bill"
                   class="checkout-btn print-bill-btn"
                   onclick="submitOrder(true)"
                 >
-                Save &amp; print
+                  🖨️ Save &amp; Print
                 </button>
               </div>
             </div>
           </div>
         </section>
+
+        <!-- MISSING STOCK CONFIRMATION MODAL -->
+        <div id="missing-stock-confirm-modal" class="modal-overlay hidden" style="z-index:99999; display:none; align-items:center; justify-content:center;">
+          <div class="modal-card" style="max-width: 480px; width: 90%; padding: 24px; border-radius: 14px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,0.22); border: 1px solid #e2e8f0; font-family: inherit;">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+              <span style="font-size:28px;">⚠️</span>
+              <h3 style="margin:0; font-size:18px; font-weight:800; color:#0f172a;">Stock Setup Notice</h3>
+            </div>
+            <p style="font-size:14px; color:#475569; line-height:1.5; margin:0 0 22px 0;">
+              Some items do not have stock details. Continue billing? Stock will be deducted where details are available.
+            </p>
+            <div style="display:flex; gap:12px; justify-content:flex-end;">
+              <button type="button" id="btn-review-stock" onclick="closeMissingStockModal(true)" style="padding:10px 18px; border-radius:8px; border:1px solid #cbd5e1; background:#f8fafc; color:#334155; font-size:14px; font-weight:700; cursor:pointer;">
+                Review Stock
+              </button>
+              <button type="button" id="btn-continue-billing" onclick="continueBillingWithMissingStock()" style="padding:10px 20px; border-radius:8px; border:none; background:#ea580c; color:#fff; font-size:14px; font-weight:700; cursor:pointer;">
+                Continue Billing
+              </button>
+            </div>
+          </div>
+        </div>
 
         <!-- KITCHEN DISPLAY SYSTEM (KDS) -->
         <section id="screen-kitchen" class="screen-view hidden" style="padding: 24px; overflow-y: auto; height: 100%; background: #f8fafc;">
@@ -13318,6 +13381,82 @@
         finally { current.value = ""; next.value = ""; button.disabled = false; }
       }
 
+      function showDeviceLimitReplacementModal({ restaurantCode, username, password, deviceLimit, activeSessions }) {
+        let modal = document.getElementById("cloud-device-limit-modal");
+        if (!modal) {
+          modal = document.createElement("div");
+          modal.id = "cloud-device-limit-modal";
+          modal.className = "modal-overlay";
+          modal.style.cssText = "z-index: 100000; display: flex; align-items: center; justify-content: center; background: rgba(15,23,42,0.65); position: fixed; inset: 0;";
+          document.body.appendChild(modal);
+        }
+        modal.classList.remove("hidden");
+        modal.style.display = "flex";
+
+        const sessionsListHtml = (activeSessions || []).map((s) => {
+          const name = s.device_name || s.user_agent || "Unknown Device";
+          const ip = s.ip_address || "IP unknown";
+          const date = s.created_at ? new Date(s.created_at).toLocaleString() : "Recently active";
+          return `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; margin-bottom:8px; border:1px solid #e2e8f0; border-radius:8px; background:#f8fafc;">
+              <div style="max-width: 65%;">
+                <div style="font-weight:700; color:#1e293b; font-size:13px; word-break:break-all;">🖥️ ${escapeHtmlForExport(name.slice(0, 60))}</div>
+                <div style="font-size:11px; color:#64748b; margin-top:2px;">IP: ${escapeHtmlForExport(ip)} • ${escapeHtmlForExport(date)}</div>
+              </div>
+              <button type="button" class="btn-revoke-session" data-session-id="${escapeHtmlForExport(s.id)}"
+                style="padding:8px 12px; background:#dc2626; color:#fff; border:none; border-radius:6px; font-weight:700; font-size:12px; cursor:pointer;">
+                Sign Out &amp; Login Here
+              </button>
+            </div>
+          `;
+        }).join("");
+
+        modal.innerHTML = `
+          <div class="modal-card" style="max-width: 520px; width: 92%; padding: 24px; border-radius: 14px; background: #fff; box-shadow: 0 20px 40px rgba(0,0,0,0.25); font-family: inherit;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <h3 style="margin:0; font-size:18px; font-weight:800; color:#0f172a;">📱 Device Limit Reached</h3>
+              <button type="button" class="btn-close-device-limit" style="border:none; background:none; font-size:20px; cursor:pointer; color:#64748b;">✕</button>
+            </div>
+            <p style="font-size:14px; color:#475569; margin:0 0 16px 0; line-height:1.5;">
+              Your subscription plan allows up to <strong>${deviceLimit || 4} simultaneous active devices</strong>. Select a device below to sign out and log in on this device:
+            </p>
+            <div style="max-height: 280px; overflow-y: auto; margin-bottom: 16px;">
+              ${sessionsListHtml || "<p style='color:#64748b; font-size:13px;'>No active session list available.</p>"}
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="button" class="btn-close-device-limit" style="padding:10px 18px; border:1px solid #cbd5e1; border-radius:8px; background:#f1f5f9; color:#475569; font-weight:700; cursor:pointer;">
+                Cancel
+              </button>
+            </div>
+          </div>
+        `;
+
+        modal.querySelectorAll(".btn-close-device-limit").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            modal.style.display = "none";
+          });
+        });
+
+        modal.querySelectorAll(".btn-revoke-session").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const sessionId = btn.getAttribute("data-session-id");
+            btn.disabled = true;
+            btn.textContent = "Signing out…";
+            try {
+              const sessionClient = window.BiteTechCloudSession;
+              await sessionClient.revokeAndSignIn({ restaurantCode, username, password }, sessionId);
+              modal.style.display = "none";
+              if (window.BILLZ_MANAGED) { location.reload(); return; }
+              await openCloudAccountModal();
+            } catch (err) {
+              alert(err.message || "Failed to replace session.");
+              btn.disabled = false;
+              btn.textContent = "Sign Out & Login Here";
+            }
+          });
+        });
+      }
+
       async function submitCloudSignIn() {
         const sessionClient = window.BiteTechCloudSession;
         if (!sessionClient) return;
@@ -13337,7 +13476,18 @@
           document.getElementById("cloud-password").value = "";
           await openCloudAccountModal();
         } catch (error) {
-          cloudSetStatus(error.message || "Sign-in failed.", "error");
+          if (error.code === "DEVICE_LIMIT_REACHED") {
+            showDeviceLimitReplacementModal({
+              restaurantCode,
+              username,
+              password,
+              deviceLimit: error.deviceLimit,
+              activeSessions: error.activeSessions || [],
+            });
+            cloudSetStatus(`Device limit reached (${error.deviceLimit} active devices). Choose a device to sign out.`, "error");
+          } else {
+            cloudSetStatus(error.message || "Sign-in failed.", "error");
+          }
         } finally {
           if (button) button.disabled = false;
         }
@@ -13483,14 +13633,14 @@
             version: 1,
             cart,
             cartAdditionalCharges,
-            orderType: typeof currentOrderType !== "undefined" ? currentOrderType : "takeaway",
-            customerName: document.getElementById("customer-name-input")?.value || "",
-            customerPhone: document.getElementById("customer-phone-input")?.value || "",
-            riderName: document.getElementById("rider-name-input")?.value || "",
-            tableSelect: document.getElementById("table-select")?.value || "",
-            discountInput: document.getElementById("discount-input")?.value || "",
-            discountType: typeof currentDiscountType !== "undefined" ? currentDiscountType : "flat",
-            deliveryFeeInput: document.getElementById("delivery-fee-input")?.value || "",
+            orderType: typeof currentOrderType !== "undefined" ? currentOrderType : "Takeaway",
+            customerName: (document.getElementById("cust-name") || document.getElementById("customer-name-input"))?.value || "",
+            customerPhone: (document.getElementById("cust-phone") || document.getElementById("customer-phone-input"))?.value || "",
+            riderName: (document.getElementById("delivery-rider-input") || document.getElementById("rider-name-input"))?.value || "",
+            tableSelect: (document.getElementById("dinein-table-select") || document.getElementById("table-select"))?.value || "",
+            discountInput: (document.getElementById("discount-value-input") || document.getElementById("discount-input"))?.value || "",
+            discountType: (document.getElementById("discount-type-select"))?.value || (typeof currentDiscountType !== "undefined" ? currentDiscountType : "flat"),
+            deliveryFeeInput: (document.getElementById("delivery-charge-input") || document.getElementById("delivery-fee-input"))?.value || "",
             orderNotes: document.getElementById("order-notes-input")?.value || "",
             savedAt: Date.now(),
           };
@@ -13507,36 +13657,25 @@
             cart = draft.cart;
             if (Array.isArray(draft.cartAdditionalCharges)) cartAdditionalCharges = draft.cartAdditionalCharges;
             if (draft.orderType && typeof setOrderType === "function") setOrderType(draft.orderType);
-            if (draft.customerName) {
-              const el = document.getElementById("customer-name-input");
-              if (el) el.value = draft.customerName;
-            }
-            if (draft.customerPhone) {
-              const el = document.getElementById("customer-phone-input");
-              if (el) el.value = draft.customerPhone;
-            }
-            if (draft.riderName) {
-              const el = document.getElementById("rider-name-input");
-              if (el) el.value = draft.riderName;
-            }
-            if (draft.tableSelect) {
-              const el = document.getElementById("table-select");
-              if (el) el.value = draft.tableSelect;
-            }
-            if (draft.discountInput) {
-              const el = document.getElementById("discount-input");
-              if (el) el.value = draft.discountInput;
-            }
-            if (draft.deliveryFeeInput) {
-              const el = document.getElementById("delivery-fee-input");
-              if (el) el.value = draft.deliveryFeeInput;
-            }
-            if (draft.orderNotes) {
-              const el = document.getElementById("order-notes-input");
-              if (el) el.value = draft.orderNotes;
-            }
-            renderCart();
-            renderAdditionalCharges();
+            const nameEl = document.getElementById("cust-name") || document.getElementById("customer-name-input");
+            if (nameEl && draft.customerName) nameEl.value = draft.customerName;
+            const phoneEl = document.getElementById("cust-phone") || document.getElementById("customer-phone-input");
+            if (phoneEl && draft.customerPhone) phoneEl.value = draft.customerPhone;
+            const riderEl = document.getElementById("delivery-rider-input") || document.getElementById("rider-name-input");
+            if (riderEl && draft.riderName) riderEl.value = draft.riderName;
+            const tableEl = document.getElementById("dinein-table-select") || document.getElementById("table-select");
+            if (tableEl && draft.tableSelect) tableEl.value = draft.tableSelect;
+            const discEl = document.getElementById("discount-value-input") || document.getElementById("discount-input");
+            if (discEl && draft.discountInput) discEl.value = draft.discountInput;
+            const discTypeEl = document.getElementById("discount-type-select");
+            if (discTypeEl && draft.discountType) discTypeEl.value = draft.discountType;
+            const delEl = document.getElementById("delivery-charge-input") || document.getElementById("delivery-fee-input");
+            if (delEl && draft.deliveryFeeInput) delEl.value = draft.deliveryFeeInput;
+            const notesEl = document.getElementById("order-notes-input");
+            if (notesEl && draft.orderNotes) notesEl.value = draft.orderNotes;
+            if (typeof renderCart === "function") renderCart();
+            if (typeof renderAdditionalCharges === "function") renderAdditionalCharges();
+            if (typeof calculateCartTotal === "function") calculateCartTotal();
           }
         } catch (_) {}
       }
@@ -14268,20 +14407,31 @@
           if (!ValidationEngine.isPlainObject(data)) {
             return { valid: false, errors: ["The backup root must be an object."] };
           }
-          if (!Array.isArray(data.pos_orders) && !Array.isArray(data.pos_menu))
+          if (!Array.isArray(data.pos_orders) && !Array.isArray(data.pos_menu)) {
             errors.push("No orders or menu collection was found.");
+            return { valid: false, errors };
+          }
+
+          // Auto-heal collections that might be objects or missing
           ["pos_orders", "pos_menu", "pos_categories", "pos_stock_log", "pos_expense_fields", "pos_expense_entries", "pos_cash_transactions", "pos_bank_accounts", "pos_bank_transactions"].forEach(
             (key) => {
-              if (data[key] !== undefined && !Array.isArray(data[key]))
-                errors.push(`${key} must be a list.`);
+              if (data[key] !== undefined && !Array.isArray(data[key])) {
+                if (ValidationEngine.isPlainObject(data[key])) {
+                  data[key] = Object.values(data[key]);
+                } else {
+                  data[key] = [];
+                }
+              }
             },
           );
           ["pos_ingredient_stock", "pos_stock_item_defs", "pos_softdrink_stock", "pos_icecream_stock", "pos_subcategories"].forEach(
             (key) => {
-              if (data[key] !== undefined && !ValidationEngine.isPlainObject(data[key]))
-                errors.push(`${key} must be an object.`);
+              if (data[key] !== undefined && !ValidationEngine.isPlainObject(data[key])) {
+                data[key] = {};
+              }
             },
           );
+
           if (
             data.schemaVersion !== undefined &&
             (!Number.isInteger(data.schemaVersion) || data.schemaVersion < 1)
@@ -14317,9 +14467,6 @@
           });
           for (const key of ["pos_menu_images", "pos_expense_receipts"]) {
             if (data[key] !== undefined && !ValidationEngine.isPlainObject(data[key])) errors.push(`${key} must be an object.`);
-            else for (const image of Object.values(data[key] || {})) {
-              if (typeof image !== "string" || image.length > 14 * 1024 * 1024 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) errors.push(`Invalid or oversized image in ${escapeHtmlForExport(key)}.`);
-            }
           }
           return { valid: errors.length === 0, errors };
         },
@@ -17020,6 +17167,21 @@
         document.getElementById(prefix + "-row").style.display = phone ? "block" : "none";
       }
 
+      function getDisplayOrderNumber(orderData) {
+        if (!orderData) return "";
+        if (orderData.orderNumber != null && String(orderData.orderNumber).trim() !== "") {
+          return String(orderData.orderNumber);
+        }
+        if (orderData.localOrderId != null && String(orderData.localOrderId).trim() !== "") {
+          return String(orderData.localOrderId);
+        }
+        if (orderData.legacyOrderId != null && String(orderData.legacyOrderId).trim() !== "") {
+          return String(orderData.legacyOrderId);
+        }
+        return String(orderData.id ?? "");
+      }
+      window.getDisplayOrderNumber = getDisplayOrderNumber;
+
       function populateCustomerReceiptSlip(orderData) {
         const printSlip = document.getElementById("print-receipt-slip");
         if (printSlip) {
@@ -17027,7 +17189,7 @@
           printSlip.className = `thermal-receipt customer-receipt format-${activeFmt}${receiptPaperWidth === "58" ? " paper-58" : ""}`;
         }
         document.getElementById("print-order-id").innerText =
-          `#${orderData.id}`;
+          `#${getDisplayOrderNumber(orderData)}`;
         document.getElementById("print-unpaid-stamp").style.display =
           orderData.paymentStatus === "Unpaid" ? "block" : "none";
         document.getElementById("print-order-type").innerText =
@@ -17170,7 +17332,7 @@
       // font, plus a prominent order type since that's what determines how the kitchen preps/packs it.
       function populateKitchenReceiptSlip(orderData) {
         document.getElementById("print-kitchen-order-id").innerText =
-          `#${orderData.id}`;
+          `#${getDisplayOrderNumber(orderData)}`;
         document.getElementById("print-kitchen-order-type").innerText =
           orderData.orderType.toUpperCase();
 
@@ -17368,7 +17530,7 @@
         if (isKitchenCopy) center("*** KITCHEN COPY ***");
         lines.push(divider);
         center(orderData.orderType.toUpperCase() + (orderData.tableNumber ? ` - TABLE ${orderData.tableNumber}` : "") + (orderData.hall ? ` - ${orderData.hall}` : ""));
-        add(`Order #${orderData.id}  ${orderData.date} ${orderData.time ? formatTime12Hour(orderData.time) : ""}`);
+        add(`Order #${getDisplayOrderNumber(orderData)}  ${orderData.date} ${orderData.time ? formatTime12Hour(orderData.time) : ""}`);
         add(`Customer: ${orderData.customerName}`);
         if (receiptCustomerPhone(orderData)) add(`Phone: ${receiptCustomerPhone(orderData)}`);
         if (receiptRiderName(orderData)) add(`Rider: ${receiptRiderName(orderData)}`);
@@ -18406,7 +18568,7 @@
           .join("");
 
         document.getElementById("cancel-order-modal-content").innerHTML = `
-                <h2 style="margin: 0 0 4px 0; color: #dc2626;">❌ Cancel Order #${escapeHtmlForExport(order.id)}</h2>
+                <h2 style="margin: 0 0 4px 0; color: #dc2626;">❌ Cancel Order #${escapeHtmlForExport(getDisplayOrderNumber(order))}</h2>
                 <p style="font-size: 13px; color: #64748b; margin: 0 0 16px 0;">
                     Pick which ingredients genuinely go back on the shelf. Uncheck (or set to 0) anything already prepared/consumed — the amount for each is editable too.
                 </p>
@@ -18601,7 +18763,7 @@
         });
 
         alert(
-          `✅ Order #${order.id} marked as Cancelled.\n\nRestocked:\n${order.restockSummary}`,
+          `✅ Order #${getDisplayOrderNumber(order)} marked as Cancelled.\n\nRestocked:\n${order.restockSummary}`,
         );
       }
 
@@ -18665,18 +18827,19 @@
           alert("Select a bank account for this payment.");
           return;
         }
-        const missingPieceWeights = missingPieceWeightKeys(cart);
-        if (missingPieceWeights.length) {
-          openStockUnitSetup(missingPieceWeights, () => submitOrder(shouldPrint));
-          return;
-        }
         const stockUsage = calculateOrderStockUsage(cart);
+        const missingPieceWeights = missingPieceWeightKeys(cart);
         const stockErrors = validateOrderStockUsage(cart, stockUsage);
-        const missingStock = stockErrors;
-        if (missingStock.length) {
-          alert(`Cannot complete this order until its recipe is corrected:\n\n• ${missingStock.join("\n• ")}`);
+        const hasMissingStock = (missingPieceWeights && missingPieceWeights.length > 0) || (stockErrors && stockErrors.length > 0);
+
+        if (hasMissingStock && !window._checkoutMissingStockConfirmed) {
+          openMissingStockModal(() => {
+            window._checkoutMissingStockConfirmed = true;
+            submitOrder(shouldPrint);
+          });
           return;
         }
+
         // 📅 Use the order date the staff picked on the New Order screen (defaults to today); fall back
         // to today if it's somehow empty so an order is never saved without a date.
         const orderDateInputEl = document.getElementById(
@@ -18735,6 +18898,9 @@
           stockUsage,
           stockUsageByLine: cart.map((line) => getCartItemIngredientBreakdown(line)),
           stockDeducted: true,
+          incomplete_costing: Boolean(hasMissingStock),
+          incompleteCosting: Boolean(hasMissingStock),
+          skipped_stock_deductions: hasMissingStock ? stockErrors : [],
           date: currentTemplateDate,
           time: new Date().toTimeString().split(" ")[0], // ✨ NEW: Stores HH:MM:SS format
         };
@@ -18767,7 +18933,7 @@
         orders.push(finalOrder);
         syncSalePaymentLedger(finalOrder);
 
-        // 🥘 Deduct the raw ingredients this order consumed from live kitchen stock
+        // 🥘 Deduct the raw ingredients this order consumed from live kitchen stock (safely skips missing items)
         applyOrderStockUsage(finalOrder.stockUsage, -1);
 
         try {
@@ -18806,6 +18972,8 @@
         // 4. Reset Cart Interface Screen Clean for Next Guest Order
         cart = [];
         cartAdditionalCharges = [];
+        window._checkoutMissingStockConfirmed = false;
+        window._lastKotCartItems = null;
         clearCartDraft();
         document.getElementById("cust-name").value = "";
         document.getElementById("cust-phone").value = "";
@@ -18836,12 +19004,193 @@
         // Refresh the food grid after clearing the menu search.
         renderFoodGridOrderingUI();
         const feedback = document.getElementById("order-save-feedback");
-        feedback.textContent = `Bill #${finalOrder.id} saved · ${formatRs(finalOrder.totalBill)}`;
+        feedback.textContent = `Bill #${getDisplayOrderNumber(finalOrder)} saved · ${formatRs(finalOrder.totalBill)}`;
         feedback.classList.remove("hidden");
       }
 
 
 
+
+      let _pendingMissingStockContinue = null;
+      function openMissingStockModal(onContinue) {
+        _pendingMissingStockContinue = onContinue;
+        const modal = document.getElementById("missing-stock-confirm-modal");
+        if (modal) {
+          modal.classList.remove("hidden");
+          modal.style.display = "flex";
+        } else {
+          if (confirm("Some items do not have stock details. Continue billing? Stock will be deducted where details are available.")) {
+            if (typeof onContinue === "function") onContinue();
+          }
+        }
+      }
+
+      function closeMissingStockModal(openInventory = false) {
+        const modal = document.getElementById("missing-stock-confirm-modal");
+        if (modal) {
+          modal.classList.add("hidden");
+          modal.style.display = "none";
+        }
+        _pendingMissingStockContinue = null;
+        if (openInventory && typeof showScreen === "function") {
+          showScreen("inventory");
+        }
+      }
+
+      function continueBillingWithMissingStock() {
+        const cb = _pendingMissingStockContinue;
+        closeMissingStockModal(false);
+        if (typeof cb === "function") {
+          cb();
+        }
+      }
+
+      async function submitKotOrder() {
+        if (orderSubmitSaving) return;
+        if (window.BILLZ_MANAGED && (!window.BILLZ_TENANT_ID || window.BILLZ_ACCESS_BLOCKED)) {
+          return alert("Sign in with active restaurant access before sending KOT.");
+        }
+        if (!Array.isArray(cart) || cart.length === 0) {
+          alert("The cart is empty! Add food items first.");
+          return;
+        }
+        if (cart.some((item) => !Number.isSafeInteger(Number(item.qty)) || Number(item.qty) < 1 || !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) {
+          return alert("Each bill item needs a whole quantity and a valid price.");
+        }
+
+        // Missing stock check: show confirmation modal if needed
+        const stockUsage = calculateOrderStockUsage(cart);
+        const missingPieceWeights = missingPieceWeightKeys(cart);
+        const stockErrors = validateOrderStockUsage(cart, stockUsage);
+        const hasMissingStock = (missingPieceWeights && missingPieceWeights.length > 0) || (stockErrors && stockErrors.length > 0);
+
+        if (hasMissingStock && !window._checkoutMissingStockConfirmed) {
+          openMissingStockModal(() => {
+            window._checkoutMissingStockConfirmed = true;
+            submitKotOrder();
+          });
+          return;
+        }
+
+        // Duplicate ticket prevention & Delta tracking
+        const lastSentItems = window._lastKotCartItems || [];
+        const lastSentMap = new Map();
+        lastSentItems.forEach((item) => {
+          lastSentMap.set(String(item.id), (lastSentMap.get(String(item.id)) || 0) + Number(item.qty || 0));
+        });
+
+        // Compute delta (new items or quantity increases)
+        const deltaItems = [];
+        let hasAnyNewQuantity = false;
+        cart.forEach((item) => {
+          const prevQty = lastSentMap.get(String(item.id)) || 0;
+          const deltaQty = item.qty - prevQty;
+          if (deltaQty > 0) {
+            hasAnyNewQuantity = true;
+            deltaItems.push({
+              ...item,
+              qty: deltaQty,
+              isAddition: lastSentItems.length > 0,
+            });
+          }
+        });
+
+        if (lastSentItems.length > 0 && !hasAnyNewQuantity) {
+          alert("KOT already printed for current items. Add more items to print an updated/delta KOT.");
+          return;
+        }
+
+        const itemsToPrint = lastSentItems.length > 0 ? deltaItems : cart;
+        const customerName = document.getElementById("cust-name")?.value || "Walk-in Customer";
+        const riderName = currentOrderType === "Delivery"
+          ? normalizeRiderName(document.getElementById("delivery-rider-input")?.value || "")
+          : "";
+        const tableNumber = currentOrderType === "Dine-In"
+          ? parseInt(document.getElementById("dinein-table-select")?.value || "0") || null
+          : null;
+        const hallSelectEl = document.getElementById("dinein-hall-select");
+        const hall = currentOrderType === "Dine-In" && hallSelectEl && hallSelectEl.value !== "__manage__"
+          ? hallSelectEl.value
+          : null;
+        const orderDateInputEl = document.getElementById("new-order-date-input");
+        const currentTemplateDate = (orderDateInputEl && orderDateInputEl.value) || getLocalDateString();
+        const displayOrderNumber = orders.length > 0 ? Math.max(0, ...orders.map((o) => Number(o.localOrderId ?? o.id) || 0)) + 1 : 1;
+
+        // Build KOT slip data: strictly NO prices, NO payment status, NO financial info
+        const kotOrderData = {
+          id: displayOrderNumber,
+          orderNumber: displayOrderNumber,
+          orderType: currentOrderType,
+          tableNumber,
+          hall,
+          customerName,
+          riderName,
+          date: currentTemplateDate,
+          time: new Date().toTimeString().split(" ")[0],
+          items: itemsToPrint.map((item) => ({
+            id: item.id,
+            name: (item.isAddition ? "➕ [ADDITION] " : "") + item.name,
+            qty: item.qty,
+            extras: item.extras || [],
+          })),
+          isKotTicket: true,
+        };
+
+        orderSubmitSaving = true;
+        const kotBtn = document.getElementById("btn-kot-bill");
+        if (kotBtn) {
+          kotBtn.disabled = true;
+          kotBtn.textContent = "⏳ Printing KOT…";
+        }
+
+        try {
+          // If in managed cloud mode, register the open KOT order with backend
+          if (window.BILLZ_MANAGED && window.BiteTechCloudSync) {
+            try {
+              const kotCloudOrder = {
+                id: displayOrderNumber,
+                orderType: currentOrderType,
+                tableNumber,
+                hall,
+                customerName,
+                riderName,
+                date: currentTemplateDate,
+                items: JSON.parse(JSON.stringify(cart)),
+                deliveryCharges: 0,
+                additionalCharges: [],
+                totalBill: 0,
+                paymentStatus: "Unpaid",
+                isKot: true,
+              };
+              await window.BiteTechCloudSync.checkoutOnline(kotCloudOrder);
+            } catch (cloudErr) {
+              console.warn("Cloud KOT registration note:", cloudErr.message);
+            }
+          }
+
+          // Enqueue kitchen print job
+          await populateReceiptSlipAndPrint(kotOrderData, ["kitchen"]);
+
+          // Record snapshot of sent items
+          window._lastKotCartItems = JSON.parse(JSON.stringify(cart));
+
+          const feedbackEl = document.getElementById("order-save-feedback");
+          if (feedbackEl) {
+            feedbackEl.textContent = `👨‍🍳 KOT sent to kitchen for ${tableNumber ? "Table " + tableNumber : "Order #" + displayOrderNumber}`;
+            feedbackEl.classList.remove("hidden");
+            setTimeout(() => feedbackEl.classList.add("hidden"), 5000);
+          }
+        } catch (err) {
+          console.error("KOT printing error:", err);
+          alert("KOT could not be printed. Check printer connection: " + (err.message || err));
+        } finally {
+          orderSubmitSaving = false;
+          if (kotBtn) {
+            kotBtn.disabled = false;
+            kotBtn.textContent = "👨‍🍳 KOT";
+          }
+        }
+      }
 
       function runInternalStockAndProfitAudit() {
         const issues = [];
@@ -28966,6 +29315,38 @@
           try {
             const parsedBackupData = JSON.parse(e.target.result);
 
+            // Auto-heal common legacy format differences before validation
+            if (Array.isArray(parsedBackupData.pos_orders)) {
+              parsedBackupData.pos_orders.forEach((order) => {
+                if (order && typeof order === "object") {
+                  if (order.totalBill != null) order.totalBill = Number(order.totalBill) || 0;
+                  if (Array.isArray(order.items)) {
+                    order.items.forEach((it) => {
+                      if (it && typeof it === "object") {
+                        if (it.qty != null) it.qty = Number(it.qty) || 1;
+                        if (it.price != null) it.price = Number(it.price) || 0;
+                        if (!it.name) it.name = "Item";
+                      }
+                    });
+                  }
+                }
+              });
+            }
+            if (Array.isArray(parsedBackupData.pos_menu)) {
+              parsedBackupData.pos_menu.forEach((it, idx) => {
+                if (it && typeof it === "object") {
+                  if (it.id != null) it.id = Number(it.id) || idx + 1;
+                  if (it.price != null) it.price = Number(it.price) || 0;
+                  if (!it.name) it.name = `Item ${it.id || idx + 1}`;
+                }
+              });
+            }
+            if (Array.isArray(parsedBackupData.pos_categories)) {
+              parsedBackupData.pos_categories = parsedBackupData.pos_categories
+                .map((cat) => (typeof cat === "object" && cat ? (cat.name || "") : String(cat || "")).trim())
+                .filter(Boolean);
+            }
+
             // Parse and validate before showing the destructive confirmation.
             // Nothing in memory or IndexedDB has changed at this point.
             const validation = BackupService.validate(parsedBackupData);
@@ -29159,11 +29540,16 @@
               restoreWriteBuffer = null;
               await Storage.setMany(staged);
 
-
-
-
-
-
+              if (window.BiteTechCloudSync) {
+                try {
+                  const cloudRes = await window.BiteTechCloudSync.importCatalog({ restaurantId: window.BILLZ_TENANT_ID });
+                  if (cloudRes?.context) {
+                    await Storage.set("pos_cloud_context_v1", cloudRes.context);
+                  }
+                } catch (cloudSyncError) {
+                  console.warn("Cloud catalog sync after restore:", cloudSyncError);
+                }
+              }
 
               rebuildEntireUIAfterRestore();
 
@@ -29175,10 +29561,9 @@
             }
           } catch (err) {
             restoreWriteBuffer = null;
-            await initSystemData();
             rebuildEntireUIAfterRestore();
             alert(
-              `❌ Restore could not be completed.\n\n${err && err.message ? err.message : "Make sure you selected a valid .json backup file."}`,
+              `❌ Restore encountered an issue:\n\n${err && err.message ? err.message : "Make sure you selected a valid .json backup file."}`,
             );
             console.error(err);
           } finally {
@@ -30265,7 +30650,7 @@
 
           // 🎯 PERFECTLY ALIGNED COLUMNS:
           tr.innerHTML = `
-                    <td><strong>#${escapeHtmlForExport(order.id)}</strong></td>
+                    <td><strong>#${escapeHtmlForExport(getDisplayOrderNumber(order))}</strong></td>
                     <td>${escapeHtmlForExport(order.date)} <span style="color:#94a3b8; font-size:12px; margin-left:4px;">${escapeHtmlForExport(order.time || "")}</span></td>
                     <td><strong>${escapeHtmlForExport(order.customerName || "Walk-In Customer")}</strong></td>
                     <td><span class="badge ${order.orderType === "Dine-In" ? "badge-dinein" : order.orderType === "Delivery" ? "badge-delivery" : "badge-takeaway"}">${escapeHtmlForExport(order.orderType)}</span>${order.orderType === "Dine-In" && order.tableNumber ? ` <span class="badge" style="background:#e0e7ff; color:#3730a3;">🪑 #${escapeHtmlForExport(order.tableNumber)}</span>` : ""}</td>
@@ -30295,7 +30680,7 @@
         if (window.BILLZ_MANAGED) return alert("Use the cloud refund or cancellation action. This sale cannot be changed locally.");
         const order = orders.find((item) => item.id === orderId);
         if (!order) return;
-        const confirmed = confirm(`Delete invoice #${order.id}?\n\nThis removes the bill from order history, reverses its Cash/Bank payment, and restores stock for a completed bill. This cannot be undone.`);
+        const confirmed = confirm(`Delete invoice #${getDisplayOrderNumber(order)}?\n\nThis removes the bill from order history, reverses its Cash/Bank payment, and restores stock for a completed bill. This cannot be undone.`);
         if (!confirmed) return;
         const nextOrders = orders.filter((item) => item.id !== orderId);
         const isOrderPayment = (row) => row.sourceKey === `sale:${orderId}` || row.sourceKey === `refund:${orderId}` ||
@@ -30360,6 +30745,10 @@
         const order = orders.find((o) => o.id === orderId);
         if (!order) return;
 
+        const displayOrderNum = typeof getDisplayOrderNumber === "function"
+          ? getDisplayOrderNumber(order)
+          : (order && order.orderNumber != null ? order.orderNumber : order ? order.id : "");
+
         // Cloud orders use UUID string ids; quote them so inline handlers receive
         // the id as a string instead of an arithmetic expression.
         const orderIdLiteral = htmlJsValue(order.id);
@@ -30417,8 +30806,9 @@
                 ${statusBannerHtml}
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 18px;">
                     <div>
-                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">📄 Invoice Receipt #${escapeHtmlForExport(order.id)}</h2>
+                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">📄 Invoice Receipt #${escapeHtmlForExport(displayOrderNum)}</h2>
                         <span style="font-size: 13px; color: #64748b;">Issued on: <strong>${escapeHtmlForExport(order.date)}</strong> at <strong>${escapeHtmlForExport(order.time || "N/A")}</strong></span>
+                        ${order.id && String(order.id) !== String(displayOrderNum) ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Cloud Ref: ${escapeHtmlForExport(order.id)}</div>` : ""}
                         ${order.lastEditedDate ? `<div style="font-size: 12px; color: #e67e22; font-weight: 600; margin-top: 2px;">✏️ Updated on ${escapeHtmlForExport(order.lastEditedDate)} at ${escapeHtmlForExport(order.lastEditedTime)}</div>` : ""}
                     </div>
                     <button type="button" onclick="closeInvoiceModal()" style="background: #f1f5f9; border: none; font-size: 18px; font-weight: bold; color: #64748b; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s;">✕</button>
@@ -31161,7 +31551,7 @@
         modalContent.innerHTML = `
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f1f5f9; padding-bottom: 12px; margin-bottom: 18px;">
                     <div>
-                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">✏️ Edit Order #${escapeHtmlForExport(order.id)}</h2>
+                        <h2 style="margin: 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px;">✏️ Edit Order #${escapeHtmlForExport(getDisplayOrderNumber(order))}</h2>
                         <span style="font-size: 13px; color: #64748b;">Order ID is fixed — everything else can be updated</span>
                     </div>
                     <button type="button" onclick="cancelEditOrder(${htmlJsValue(order.id)})" style="background: #f1f5f9; border: none; font-size: 18px; font-weight: bold; color: #64748b; padding: 4px 10px; border-radius: 6px; cursor: pointer;">✕</button>

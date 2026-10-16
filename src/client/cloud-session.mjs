@@ -4,8 +4,11 @@ export const CLOUD_SESSION_KEY = "pos_cloud_session_v1";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function sessionError(message, { code, status = 0 } = {}) {
-  return new OrderSyncError(message, { code: code ?? "CLOUD_SESSION_FAILED", status });
+function sessionError(message, { code, status = 0, deviceLimit, activeSessions } = {}) {
+  const err = new OrderSyncError(message, { code: code ?? "CLOUD_SESSION_FAILED", status });
+  if (deviceLimit !== undefined) err.deviceLimit = deviceLimit;
+  if (activeSessions !== undefined) err.activeSessions = activeSessions;
+  return err;
 }
 
 /**
@@ -51,6 +54,8 @@ export function createCloudSessionClient({
       throw sessionError(payload?.error ?? `Request failed with HTTP ${response.status}.`, {
         code: payload?.code ?? "CLOUD_REQUEST_FAILED",
         status: Number(response.status),
+        deviceLimit: payload?.deviceLimit,
+        activeSessions: payload?.activeSessions,
       });
     }
     return payload;
@@ -122,6 +127,48 @@ export function createCloudSessionClient({
       const result = await writeStored({ user: account?.user ?? null, restaurantId });
       globalThis.dispatchEvent?.(new Event("billz-session-restored"));
       return result;
+    },
+
+    async revokeAndSignIn(credentials, sessionToRevokeId) {
+      const body = credentials.username
+        ? {
+            ...(credentials.restaurantCode ? { restaurantCode: String(credentials.restaurantCode).trim() } : {}),
+            username: String(credentials.username ?? "").trim(),
+            password: String(credentials.password ?? ""),
+            sessionToRevokeId,
+          }
+        : {
+            email: String(credentials.email ?? "").trim(),
+            password: String(credentials.password ?? ""),
+            sessionToRevokeId,
+          };
+
+      await call("/api/auth/revoke-and-login", {
+        method: "POST",
+        body,
+      });
+      const account = await loadAccount();
+      const restaurants = account?.restaurants ?? [];
+      const previous = await readStored();
+      const restaurantId = restaurants.length === 1 ? restaurants[0].restaurantId : null;
+      if (!globalThis.BILLZ_MANAGED && previous.restaurantId !== restaurantId) await storage.set("pos_cloud_context_v1", null);
+      const result = await writeStored({ user: account?.user ?? null, restaurantId });
+      globalThis.dispatchEvent?.(new Event("billz-session-restored"));
+      return result;
+    },
+
+    async listSessions() {
+      const stored = await readStored();
+      if (!stored.restaurantId) return { sessions: [] };
+      return call("/api/pos/sessions", {
+        method: "GET",
+      });
+    },
+
+    async revokeSession(sessionId) {
+      return call(`/api/pos/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
     },
 
     async signOut({ forgetRestaurant = false } = {}) {

@@ -93,6 +93,7 @@ export function createFinanceService(pool) {
           COALESCE(sum(CASE WHEN o.order_status = 'completed' THEN o.cost_of_goods_minor ELSE COALESCE(ref.unreturned_cost, 0) END), 0) AS cogs,
           COALESCE(sum(CASE WHEN o.order_status = 'completed' THEN ref.refunded ELSE 0 END), 0) AS refunds,
           COALESCE(sum(CASE WHEN o.order_status = 'completed' THEN ref.restocked_cost ELSE 0 END), 0) AS returned_cost, count(*) FILTER (WHERE o.order_status = 'completed') AS orders,
+          count(*) FILTER (WHERE o.order_status = 'completed' AND o.incomplete_costing = true) AS incomplete_costing_orders,
           (SELECT COALESCE(sum(amount_minor), 0) FROM expenses WHERE business_date BETWEEN $1::date AND $2::date) AS expenses
           FROM orders o LEFT JOIN LATERAL (
             SELECT sum(r.total_refunded_minor) AS refunded, sum((SELECT COALESCE(sum(ri.quantity * oi.unit_cost_minor), 0)
@@ -107,8 +108,10 @@ export function createFinanceService(pool) {
         const costOfGoodsMinor = Math.round(Number(sales.cogs) - Number(sales.returned_cost));
         const grossProfitMinor = netSalesMinor - costOfGoodsMinor;
         const operatingExpensesMinor = Number(sales.expenses);
+        const incompleteCostingOrders = Number(sales.incomplete_costing_orders || 0);
         return { startDate, endDate, completedOrders: Number(sales.orders), netSalesMinor, costOfGoodsMinor, grossProfitMinor, operatingExpensesMinor,
-          netProfitMinor: grossProfitMinor - operatingExpensesMinor, basis: "accrual", costBasis: "checkout_snapshot", historicalCostsRequireReview: true };
+          netProfitMinor: grossProfitMinor - operatingExpensesMinor, basis: "accrual", costBasis: "checkout_snapshot",
+          incompleteCostingOrders, hasIncompleteCosting: incompleteCostingOrders > 0, historicalCostsRequireReview: true };
       });
     },
   });
