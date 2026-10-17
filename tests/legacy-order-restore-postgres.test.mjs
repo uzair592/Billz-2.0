@@ -30,7 +30,9 @@ test("three historical backup orders restore into shared history exactly once un
     assert.ok(history.orders.every(order => order.restored && order.financialReconciliationRequired));
     restoredId = history.orders[0].id;
     const detail = await createOrderHistoryService(pool).get({ tenant, orderId: restoredId });
-    assert.equal(detail.items.length, 1);
+    const original = fixture.pos_orders.find(order => String(order.id) === detail.order.originalOrderNumber);
+    assert.equal(detail.items.length, original.items.length);
+    assert.deepEqual(detail.items.map(item => item.name), original.items.map(item => item.name));
     assert.ok(detail.order.originalOrderNumber);
     for (const table of ["stock_movements", "inventory_consumptions", "kitchen_tickets", "ledger_entries"]) {
       assert.equal((await admin.query(`SELECT count(*) FROM ${table}`)).rows[0].count, "0");
