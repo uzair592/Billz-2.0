@@ -81,28 +81,14 @@ Characterization tests and migration scaffold for the Bite Tech restaurant POS S
 - .continuity/decisions.json.backup
 - .continuity/decisions.jsonl
 - .continuity/metrics.json
-- Fast_Food_POS_Custom_Bill_Header_XXXL.html
-- src/client/api-client.mjs
-- src/client/legacy-catalog-snapshot.mjs
-- src/client/legacy-cloud-adapter.mjs
-- src/client/sales-report-ui.mjs
-- src/server/http/app.mjs
-- src/server/pos/sales-report-service.mjs
-
-**Untracked:**
-- src/server/pos/report-pdf-export.mjs
-- src/server/pos/report-xlsx-export.mjs
-- src/server/pos/zip-archive.mjs
-- tests/fixtures/santex-cafe-reproduction-backup.json
-- tests/restore-billing-reports-export.test.mjs
 
 
 ## Recent Commits
+- `a5a7872` fix(reports): preserve backward-compatible CSV schema for postgres regression suite (Muhammad Uzair)
+- `fe8cd69` feat(pos): fix checkout after restore, equalize billing buttons, expand reports, and add PDF/Excel export (Muhammad Uzair)
 - `79bf230` Merge pull request #19 from uzair592/feat/resilient-billing-kot-devices (Muhammad Uzair)
 - `57cfb82` fix(ci): remove trailing blank lines at EOF to satisfy git diff --check (Muhammad Uzair)
 - `39a5cf9` feat(pos): resilient billing, 3-button KOT workflow, and concurrent device limits (Muhammad Uzair)
-- `4fd17c9` Merge pull request #18 from uzair592/fix/pos-review-regressions (Muhammad Uzair)
-- `c6aa8bf` fix(client): wait for managed tenant before checking cloud status (Muhammad Uzair)
 
 
 ## Recent Decisions (most recent first)
@@ -214,4 +200,4 @@ tests/
 - [ ] Recover any missed decisions before session ends
 
 ---
-Generated: 2026-10-17T05:18:44.533Z
+Generated: 2026-10-17T05:47:26.243Z

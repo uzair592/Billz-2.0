@@ -1176,5 +1176,64 @@
       "source": "cli",
       "timestamp": "2026-10-17T05:18:43.224Z"
     }
+  },
+  {
+    "id": "804b72fa-b97f-44d9-b04a-c9e3b3400448",
+    "question": "Why was the CSV report export schema preserved in its original 8-column layout?",
+    "answer": "Commit a5a7872 preserved the 8-column layout (Order Number, Business Date, Order Type, Order Status, Payment Status, Total, Refunded, Net) in exportSalesReportCsv so tests/refund-sales-report-postgres.test.mjs cell indexing assertions pass without breaking CI validation.",
+    "timestamp": "2026-10-17T05:47:25.297Z",
+    "tags": [
+      "ci",
+      "postgres",
+      "reports",
+      "testing",
+      "why"
+    ],
+    "files": [],
+    "status": "active",
+    "priority": "medium",
+    "relationships": {
+      "supersedes": [],
+      "supersededBy": [],
+      "relatedTo": [],
+      "causes": [],
+      "causedBy": []
+    },
+    "metadata": {
+      "source": "cli",
+      "commitHash": "a5a7872",
+      "autoLink": {
+        "checkedAt": "2026-10-17T05:47:25.297Z",
+        "result": "orphan"
+      },
+      "status": "active"
+    },
+    "commitHashes": [
+      "a5a7872"
+    ],
+    "history": [
+      {
+        "timestamp": "2026-10-17T05:47:25.300Z",
+        "action": "created"
+      }
+    ],
+    "entities": {
+      "technologies": [
+        "postgres"
+      ],
+      "patterns": [],
+      "concepts": [
+        "indexing",
+        "schema"
+      ]
+    },
+    "provenance": {
+      "author": {
+        "name": "Muhammad Uzair",
+        "email": "uzairawan592@gmail.com"
+      },
+      "source": "cli",
+      "timestamp": "2026-10-17T05:47:25.097Z"
+    }
   }
 ]
