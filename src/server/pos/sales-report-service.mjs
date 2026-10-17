@@ -695,22 +695,11 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       lines.push(`Completed Sales,${(report.metrics.completedSalesMinor / 100).toFixed(2)}`);
       lines.push(`Total Refunds,${(report.metrics.refundTotalMinor / 100).toFixed(2)}`);
       lines.push(`Net Sales,${(report.metrics.netSalesMinor / 100).toFixed(2)}`);
-      const isCashier = (tenant.membership?.role || "") === "cashier";
-      if (!isCashier && report.metrics.costOfGoodsMinor !== null && report.metrics.costOfGoodsMinor !== undefined) {
-        lines.push(`Cost of Goods Sold (COGS),${(report.metrics.costOfGoodsMinor / 100).toFixed(2)}`);
-        lines.push(`Gross Profit,${(report.metrics.grossProfitMinor / 100).toFixed(2)}`);
-        lines.push(`Gross Profit Margin,${(report.metrics.grossMarginPercent || 0).toFixed(2)}%`);
-        lines.push(`Operating Expenses,${((report.metrics.operatingExpensesMinor || 0) / 100).toFixed(2)}`);
-        lines.push(`Net Operating Profit,${((report.metrics.netProfitMinor || 0) / 100).toFixed(2)}`);
-      }
       lines.push(`Cancelled Sales Total,${(report.metrics.cancelledSalesMinor / 100).toFixed(2)}`);
       lines.push(`Completed Order Count,${report.metrics.completedOrderCount}`);
       lines.push(`Cancelled Order Count,${report.metrics.cancelledOrderCount}`);
       lines.push(`Refunded Order Count,${report.metrics.refundedOrderCount}`);
       lines.push(`Average Order Value,${(report.metrics.averageOrderValueMinor / 100).toFixed(2)}`);
-      if (report.metrics.hasIncompleteCosting) {
-        lines.push(`Incomplete Costing Orders,${report.metrics.incompleteCostingOrderCount}`);
-      }
       lines.push("");
 
       lines.push("PAYMENT METHOD BREAKDOWN");
@@ -734,40 +723,27 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       // Detailed rows stream from the export-specific paginated iterator,
       // which is not bounded by the interactive 200-row limit.
       lines.push("DETAILED SALES ROWS");
-      if (!isCashier) {
-        lines.push("Order Number,Business Date,Time,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR),COGS (PKR),Gross Profit (PKR),Margin %,Costing Status");
-      } else {
-        lines.push("Order Number,Business Date,Time,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
-      }
+      lines.push("Order Number,Business Date,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
       for await (const rows of this.iterSalesReportRows({ tenant, filters: resolvedFilters })) {
         for (const row of rows) {
           const total = minor(row.total_minor);
+          // The iterator aliases the refund sum as `refunded_minor`;
+          // read that same property so the refunded and net columns
+          // reflect the actual refund total for the order.
           const ref = minor(row.refunded_minor);
           const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
-          const timeStr = row.ordered_at ? new Date(row.ordered_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
-          const cols = [
-            sanitizeCsvValue(Number(row.order_number)),
-            sanitizeCsvValue(row.business_date),
-            sanitizeCsvValue(timeStr),
-            sanitizeCsvValue(row.order_type),
-            sanitizeCsvValue(row.order_status),
-            sanitizeCsvValue(row.payment_status),
-            (total / 100).toFixed(2),
-            (ref / 100).toFixed(2),
-            (net / 100).toFixed(2),
-          ];
-          if (!isCashier) {
-            const cogs = minor(row.cogs_minor);
-            const profit = minor(row.gross_profit_minor);
-            const margin = net > 0 ? ((profit / net) * 100).toFixed(2) + "%" : "0.00%";
-            cols.push(
-              (cogs / 100).toFixed(2),
-              (profit / 100).toFixed(2),
-              margin,
-              row.incomplete_costing ? "Incomplete" : "Verified",
-            );
-          }
-          lines.push(cols.join(","));
+          lines.push(
+            [
+              sanitizeCsvValue(Number(row.order_number)),
+              sanitizeCsvValue(row.business_date),
+              sanitizeCsvValue(row.order_type),
+              sanitizeCsvValue(row.order_status),
+              sanitizeCsvValue(row.payment_status),
+              (total / 100).toFixed(2),
+              (ref / 100).toFixed(2),
+              (net / 100).toFixed(2),
+            ].join(","),
+          );
         }
       }
 
