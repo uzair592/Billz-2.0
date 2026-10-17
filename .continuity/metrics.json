@@ -1,16 +1,16 @@
 {
-  "totalDecisions": 21,
+  "totalDecisions": 23,
   "totalSearches": 6,
   "totalEdits": 0,
   "totalDeletes": 0,
   "totalExports": 6,
   "totalHandoffs": 84,
   "firstUse": "2026-10-08T06:52:56.755Z",
-  "lastUse": "2026-10-14T19:41:14.808Z",
+  "lastUse": "2026-10-17T05:47:25.345Z",
   "tags": {
     "development": 1,
     "git": 3,
-    "how": 6,
+    "how": 7,
     "sync": 2,
     "runtime": 1,
     "verification": 1,
@@ -27,7 +27,7 @@
     "recipes": 1,
     "stock": 1,
     "expenses": 1,
-    "reports": 1,
+    "reports": 3,
     "settings": 1,
     "modal": 1,
     "release": 1,
@@ -40,12 +40,19 @@
     "printing": 1,
     "finance": 1,
     "pos": 1,
-    "postgres": 1,
-    "testing": 1,
-    "ci": 1
+    "postgres": 2,
+    "testing": 2,
+    "ci": 2,
+    "restore": 1,
+    "billing": 1,
+    "kot": 1,
+    "export": 1,
+    "why": 1
   },
   "questionsAskedTwice": 0,
   "decisionsIgnored": 0,
-  "contextReexplained": 0,
-  "searchesWithNoResults": 6
+  "searchesWithNoResults": 6,
+  "getQuickContextCalls": 0,
+  "humanContextRuns": 0,
+  "droppedExposures": 0
 }

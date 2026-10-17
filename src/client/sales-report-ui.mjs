@@ -1,6 +1,7 @@
 /**
  * Sales Report UI — renders server-authoritative sales reporting dashboards,
- * date presets, trend tables, tender breakdowns, and CSV export triggers.
+ * date presets, trend tables, tender breakdowns, bill-wise profitability table,
+ * item-level cost drill-down modal, and multi-format (CSV, Excel, PDF) exports.
  *
  * Business dates are computed in the restaurant's configured timezone so a
  * late-night local sale lands on the same calendar day the server reports
@@ -24,19 +25,13 @@ function escapeHtml(text) {
 }
 
 function formatCurrency(minor) {
+  if (minor === null || minor === undefined) return "—";
   return `PKR ${(Math.round(Number(minor) || 0) / 100).toLocaleString("en-PK", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-/**
- * Formats an instant as a YYYY-MM-DD calendar day in `timeZone` using
- * the locale-aware formatter (en-CA yields ISO-like year-month-day).
- * This is the browser-side counterpart of the server's
- * businessDateInTimezone() and deliberately avoids toISOString(),
- * which would convert the instant to UTC first.
- */
 function formatDateInTimezone(instant, timeZone) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone,
@@ -46,7 +41,6 @@ function formatDateInTimezone(instant, timeZone) {
   }).format(instant);
 }
 
-/** Parses a YYYY-MM-DD string into its calendar components. */
 function parseCalendarDate(dateStr) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (!match) return null;
@@ -57,29 +51,15 @@ function parseCalendarDate(dateStr) {
   };
 }
 
-/** Formats calendar components back into a YYYY-MM-DD string. */
 function formatCalendarDate(year, month, day) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${year}-${pad(month)}-${pad(day)}`;
 }
 
-/**
- * Adds (or subtracts) whole calendar days to a YYYY-MM-DD date using
- * true calendar arithmetic via the proleptic Gregorian day-number
- * formula. This is correct across daylight-saving transitions and
- * month/year boundaries, unlike adding 24-hour instants, which can
- * skip or repeat a calendar day when the offset changes.
- *
- * The algorithm converts the date to an absolute day number (the
- * Howard Hinnant civil-from-days / days-from-civil pair), adds the
- * delta, and converts back. It never touches the clock or timezone,
- * so a DST spring-forward or fall-back cannot shift the result.
- */
 function shiftCalendarDate(dateStr, dayDelta) {
   const parsed = parseCalendarDate(dateStr);
   if (!parsed) return dateStr;
 
-  // Days from civil (Howard Hinnant's algorithm).
   const { year, month, day } = parsed;
   const y = month <= 2 ? year - 1 : year;
   const era = Math.floor(y / 400);
@@ -88,7 +68,6 @@ function shiftCalendarDate(dateStr, dayDelta) {
   const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
   const dayNumber = era * 146097 + doe - 719468;
 
-  // Civil from days.
   const shifted = dayNumber + dayDelta;
   const z = shifted + 719468;
   const era2 = Math.floor(z / 146097);
@@ -116,28 +95,16 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     limit: 50,
   };
 
-  // The restaurant's configured timezone. It starts as the
-  // constructor default and is replaced by the value the server
-  // reports in its first response, so presets always match the
-  // restaurant's own business-date calendar. Until the first
-  // response arrives, the initial request omits startDate/endDate
-  // entirely and lets the server resolve the restaurant's current
-  // business day — the UI never assumes a timezone it has not
-  // observed.
   let activeTimezone = restaurantTimezone;
   let hasObservedTimezone = false;
-
-  // Monotonic request token: a response is only rendered when it belongs
-  // to the most recent request, so a slow older request can never
-  // overwrite the results of a newer filter request.
   let requestToken = 0;
+  let lastReportData = null;
 
   function getPresetDates(preset) {
     const zone = activeTimezone;
 
     switch (preset) {
       case "yesterday": {
-        // Calendar-day arithmetic, correct across DST transitions.
         const today = formatDateInTimezone(new Date(), zone);
         const y = shiftCalendarDate(today, -1);
         return { startDate: y, endDate: y };
@@ -148,8 +115,6 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         return { startDate: start, endDate: today };
       }
       case "month": {
-        // First day of the current calendar month in the restaurant's
-        // timezone, derived from the in-zone today string.
         const todayStr = formatDateInTimezone(new Date(), zone);
         const monthStart = `${todayStr.substring(0, 8)}01`;
         return { startDate: monthStart, endDate: todayStr };
@@ -164,39 +129,43 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
 
   function renderSkeleton() {
     if (!containerEl) return;
-    // Preserve the operator's current filter selections so a
-    // reload (initial load, pagination, or filter change) does
-    // not reset the visible controls to their defaults.
     const { startDate, endDate, orderType, paymentMethod, preset } = currentFilters;
     const selectedPreset = preset || "today";
+
     containerEl.innerHTML = `
-      <div style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:20px; max-width:1200px; margin:0 auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <div style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:20px; max-width:1300px; margin:0 auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
           <div>
-            <h1 style="margin:0; font-size:24px; font-weight:700; color:#0f172a;">📊 Sales Reports</h1>
-            <div style="font-size:12px; color:#64748b; margin-top:4px;">Server-Authoritative Metrics</div>
+            <h1 style="margin:0; font-size:24px; font-weight:700; color:#0f172a;">📊 Sales &amp; Profitability Reports</h1>
+            <div style="font-size:12px; color:#64748b; margin-top:4px;">Server-Authoritative Multi-Device Workspace</div>
           </div>
-          <div>
-            <button id="sales-export-btn" class="report-btn" style="padding:8px 16px; background:#059669; color:white; border:none; border-radius:6px; font-weight:600; cursor:pointer;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="sales-export-btn" class="report-btn" style="padding:8px 14px; background:#059669; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
               📥 Export CSV
+            </button>
+            <button id="sales-export-xlsx-btn" class="report-btn" style="padding:8px 14px; background:#0284c7; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+              📊 Export Excel (.xlsx)
+            </button>
+            <button id="sales-export-pdf-btn" class="report-btn" style="padding:8px 14px; background:#dc2626; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
+              📄 Export PDF
             </button>
           </div>
         </div>
 
         <!-- Date Controls & Filter Bar -->
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="preset-btn${selectedPreset === "today" ? " active" : ""}" data-preset="today" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Today</button>
-            <button type="button" class="preset-btn${selectedPreset === "yesterday" ? " active" : ""}" data-preset="yesterday" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Yesterday</button>
-            <button type="button" class="preset-btn${selectedPreset === "last7days" ? " active" : ""}" data-preset="last7days" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Last 7 Days</button>
-            <button type="button" class="preset-btn${selectedPreset === "month" ? " active" : ""}" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:#f8fafc; border-radius:6px; font-size:13px; cursor:pointer;">Current Month</button>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="preset-btn${selectedPreset === "today" ? " active" : ""}" data-preset="today" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "today" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">Today</button>
+            <button type="button" class="preset-btn${selectedPreset === "yesterday" ? " active" : ""}" data-preset="yesterday" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "yesterday" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">Yesterday</button>
+            <button type="button" class="preset-btn${selectedPreset === "last7days" ? " active" : ""}" data-preset="last7days" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "last7days" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">This Week</button>
+            <button type="button" class="preset-btn${selectedPreset === "month" ? " active" : ""}" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "month" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">This Month</button>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
             <input type="date" id="report-start-date" value="${startDate ? startDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <span style="font-size:13px; color:#64748b;">to</span>
             <input type="date" id="report-end-date" value="${endDate ? endDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
           </div>
-          <div style="display:flex; gap:8px;">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <select id="report-ordertype-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               <option value=""${orderType === "" ? " selected" : ""}>All Order Types</option>
               <option value="dine_in"${orderType === "dine_in" ? " selected" : ""}>Dine In</option>
@@ -209,48 +178,91 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
               <option value="bank_account"${paymentMethod === "bank_account" ? " selected" : ""}>Bank Account</option>
               <option value="other"${paymentMethod === "other" ? " selected" : ""}>Other</option>
             </select>
-            <button type="button" id="report-apply-btn" style="padding:6px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;">Apply</button>
+            <button type="button" id="report-apply-btn" style="padding:6px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer;">Apply Filters</button>
           </div>
         </div>
 
         <div id="report-content-area">
           <div style="padding:40px; text-align:center; color:#64748b;">Loading server sales report...</div>
         </div>
+
+        <!-- Order Cost Breakdown Modal Container -->
+        <div id="report-breakdown-modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:9999; align-items:center; justify-content:center; padding:16px;">
+          <div id="report-breakdown-content" style="background:white; border-radius:10px; max-width:760px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); padding:24px;">
+          </div>
+        </div>
       </div>
     `;
   }
 
   function renderReportContent(data) {
+    lastReportData = data;
     const contentArea = containerEl.querySelector("#report-content-area");
     if (!contentArea) return;
 
     const m = data.metrics;
     const pagination = data.detailedRows?.pagination || { page: 1, limit: 50, totalRows: 0, totalPages: 0 };
     const rows = data.detailedRows?.rows || [];
+    const hasProfitAccess = m.costOfGoodsMinor !== null && m.costOfGoodsMinor !== undefined;
 
     contentArea.innerHTML = `
+      ${m.hasIncompleteCosting ? `
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:20px; color:#92400e; font-size:13px; display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">⚠️</span>
+          <div>
+            <strong>Incomplete Costing Notice:</strong> ${m.incompleteCostingOrderCount} completed order(s) have missing recipe or inventory costs.
+            Gross profit for these orders excludes unknown ingredient costs. Check Menu Recipe management to assign costs.
+          </div>
+        </div>
+      ` : ""}
+
       <!-- Summary Cards Grid -->
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:24px;">
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:24px;">
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
-          <div style="font-size:12px; font-weight:600; color:#64748b; text-transform:uppercase;">Gross Sales</div>
+          <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Gross Sales</div>
           <div style="font-size:22px; font-weight:700; color:#0f172a; margin-top:4px;">${formatCurrency(m.grossSalesMinor)}</div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Disc: ${formatCurrency(m.discountsMinor)}</div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Discounts: ${formatCurrency(m.discountsMinor)}</div>
         </div>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
-          <div style="font-size:12px; font-weight:600; color:#64748b; text-transform:uppercase;">Total Refunds</div>
+          <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Total Refunds</div>
           <div style="font-size:22px; font-weight:700; color:#dc2626; margin-top:4px;">-${formatCurrency(m.refundTotalMinor)}</div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${m.refundedOrderCount} orders refunded</div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${m.refundedOrderCount} order(s) refunded</div>
         </div>
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
-          <div style="font-size:12px; font-weight:600; color:#64748b; text-transform:uppercase;">Net Sales</div>
+          <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Net Sales</div>
           <div style="font-size:22px; font-weight:700; color:#059669; margin-top:4px;">${formatCurrency(m.netSalesMinor)}</div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Server authoritative</div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">${m.completedOrderCount} completed orders</div>
         </div>
+
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
-          <div style="font-size:12px; font-weight:600; color:#64748b; text-transform:uppercase;">Completed Orders</div>
+          <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Completed Orders</div>
           <div style="font-size:22px; font-weight:700; color:#0f172a; margin-top:4px;">${m.completedOrderCount}</div>
-          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Avg Order: ${formatCurrency(m.averageOrderValueMinor)}</div>
+          <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Cancelled: ${m.cancelledOrderCount || 0}</div>
         </div>
+
+        ${hasProfitAccess ? `
+          <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
+            <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">COGS</div>
+            <div style="font-size:22px; font-weight:700; color:#d97706; margin-top:4px;">${formatCurrency(m.costOfGoodsMinor)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Cost of goods sold</div>
+          </div>
+          <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
+            <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Gross Profit</div>
+            <div style="font-size:22px; font-weight:700; color:#059669; margin-top:4px;">${formatCurrency(m.grossProfitMinor)}</div>
+            <div style="font-size:11px; color:#059669; font-weight:600; margin-top:4px;">Margin: ${(m.grossMarginPercent || 0).toFixed(1)}%</div>
+          </div>
+          <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
+            <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Net Profit</div>
+            <div style="font-size:22px; font-weight:700; color:${(m.netProfitMinor || 0) >= 0 ? "#059669" : "#dc2626"}; margin-top:4px;">${formatCurrency(m.netProfitMinor)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">OPEX: ${formatCurrency(m.operatingExpensesMinor || 0)}</div>
+          </div>
+        ` : `
+          <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
+            <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Average Order Value</div>
+            <div style="font-size:22px; font-weight:700; color:#0f172a; margin-top:4px;">${formatCurrency(m.averageOrderValueMinor)}</div>
+            <div style="font-size:11px; color:#94a3b8; margin-top:4px;">Per completed sale</div>
+          </div>
+        `}
       </div>
 
       <!-- Tender and Order Type Breakdowns -->
@@ -271,7 +283,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
                 .map(
                   (p) => `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:8px 6px; font-weight:600; text-transform:capitalize;">${escapeHtml(p.paymentMethod.replace("_", " "))}</td>
+                  <td style="padding:8px 6px; font-weight:600; text-transform:capitalize;">${escapeHtml(p.paymentMethod.replace(/_/g, " "))}</td>
                   <td style="padding:8px 6px; text-align:right;">${formatCurrency(p.capturedMinor)}</td>
                   <td style="padding:8px 6px; text-align:right; color:#dc2626;">${p.refundedMinor > 0 ? "-" : ""}${formatCurrency(p.refundedMinor)}</td>
                   <td style="padding:8px 6px; text-align:right; font-weight:600; color:#059669;">${formatCurrency(p.netMinor)}</td>
@@ -298,7 +310,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
                 .map(
                   (t) => `
                 <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:8px 6px; font-weight:600; text-transform:capitalize;">${escapeHtml(t.orderType.replace("_", " "))}</td>
+                  <td style="padding:8px 6px; font-weight:600; text-transform:capitalize;">${escapeHtml(t.orderType.replace(/_/g, " "))}</td>
                   <td style="padding:8px 6px; text-align:center;">${t.count}</td>
                   <td style="padding:8px 6px; text-align:right; font-weight:600;">${formatCurrency(t.totalMinor)}</td>
                 </tr>
@@ -345,53 +357,100 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         </div>
       </div>
 
-      <!-- Detailed Sales Rows -->
-      <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
-        <h3 style="margin:0 0 12px; font-size:15px; font-weight:600; color:#1e293b;">📋 Detailed Sales Rows</h3>
+      <!-- Bill-Wise Profitability Table -->
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+          <h3 style="margin:0; font-size:15px; font-weight:600; color:#1e293b;">📋 Detailed Sales Rows &amp; Bill-Wise Profitability</h3>
+          <div style="font-size:12px; color:#64748b;">Click Drilldown on any order to inspect item-level recorded costs</div>
+        </div>
+
         ${rows.length === 0 ? `
           <div style="padding:32px; text-align:center; color:#64748b; background:#f8fafc; border-radius:8px;">
             No orders match the selected filters.
           </div>
         ` : `
         <div style="overflow-x:auto;">
-          <table style="width:100%; border-collapse:collapse; font-size:13px;">
-            <thead style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">
+          <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
+            <thead style="background:#f8fafc; border-bottom:2px solid #cbd5e1;">
               <tr>
-                <th style="padding:8px; text-align:left;">Order #</th>
-                <th style="padding:8px; text-align:left;">Date</th>
-                <th style="padding:8px; text-align:left;">Type</th>
-                <th style="padding:8px; text-align:left;">Status</th>
-                <th style="padding:8px; text-align:left;">Payment Status</th>
-                <th style="padding:8px; text-align:right;">Total</th>
-                <th style="padding:8px; text-align:right;">Refunded</th>
-                <th style="padding:8px; text-align:right;">Net</th>
+                <th style="padding:10px 8px; text-align:left;">Order #</th>
+                <th style="padding:10px 8px; text-align:left;">Date &amp; Time</th>
+                <th style="padding:10px 8px; text-align:left;">Type</th>
+                <th style="padding:10px 8px; text-align:left;">Status</th>
+                <th style="padding:10px 8px; text-align:right;">Total Sales</th>
+                <th style="padding:10px 8px; text-align:right;">Refunded</th>
+                <th style="padding:10px 8px; text-align:right;">Net Sales</th>
+                ${hasProfitAccess ? `
+                  <th style="padding:10px 8px; text-align:right;">COGS</th>
+                  <th style="padding:10px 8px; text-align:right;">Gross Profit</th>
+                  <th style="padding:10px 8px; text-align:right;">Margin %</th>
+                  <th style="padding:10px 8px; text-align:center;">Cost Status</th>
+                ` : ""}
+                <th style="padding:10px 8px; text-align:center;">Action</th>
               </tr>
             </thead>
             <tbody>
               ${rows
-                .map(
-                  (row) => `
-                <tr style="border-bottom:1px solid #f1f5f9;">
-                  <td style="padding:8px; font-weight:600;">#${escapeHtml(row.orderNumber)}</td>
-                  <td style="padding:8px; color:#64748b;">${escapeHtml(row.businessDate)}</td>
-                  <td style="padding:8px; text-transform:capitalize;">${escapeHtml(row.orderType)}</td>
-                  <td style="padding:8px;"><span style="padding:2px 6px; border-radius:4px; font-size:11px; font-weight:600; ${row.orderStatus === "cancelled" ? "background:#fef2f2; color:#991b1b;" : "background:#f0fdf4; color:#166534;"}">${escapeHtml(row.orderStatus)}</span></td>
-                  <td style="padding:8px;"><span style="padding:2px 6px; border-radius:4px; font-size:11px; font-weight:600; ${row.paymentStatus === "refunded" ? "background:#fef2f2; color:#991b1b;" : row.paymentStatus === "partially_refunded" ? "background:#fffbeb; color:#92400e;" : "background:#f0fdf4; color:#166534;"}">${escapeHtml(row.paymentStatus)}</span></td>
-                  <td style="padding:8px; text-align:right;">${formatCurrency(row.totalMinor)}</td>
-                  <td style="padding:8px; text-align:right; color:#dc2626;">${row.refundedMinor > 0 ? "-" : ""}${formatCurrency(row.refundedMinor)}</td>
-                  <td style="padding:8px; text-align:right; font-weight:600;">${formatCurrency(row.netMinor)}</td>
+                .map((row) => {
+                  const timeStr = row.orderedAt ? new Date(row.orderedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+                  return `
+                <tr style="border-bottom:1px solid #f1f5f9; hover-bg:#f8fafc;" class="report-order-row" data-order-id="${escapeHtml(row.id)}">
+                  <td style="padding:9px 8px; font-weight:700;">#${escapeHtml(row.orderNumber)}</td>
+                  <td style="padding:9px 8px; color:#64748b;">${escapeHtml(row.businessDate)} <small style="color:#94a3b8;">${escapeHtml(timeStr)}</small></td>
+                  <td style="padding:9px 8px; text-transform:capitalize;">${escapeHtml(row.orderType.replace(/_/g, " "))}</td>
+                  <td style="padding:9px 8px;">
+                    <span style="padding:2px 6px; border-radius:4px; font-size:10.5px; font-weight:600; ${row.orderStatus === "cancelled" ? "background:#fef2f2; color:#991b1b;" : "background:#f0fdf4; color:#166534;"}">
+                      ${escapeHtml(row.orderStatus)}
+                    </span>
+                  </td>
+                  <td style="padding:9px 8px; text-align:right;">${formatCurrency(row.totalMinor)}</td>
+                  <td style="padding:9px 8px; text-align:right; color:#dc2626;">${row.refundedMinor > 0 ? "-" : ""}${formatCurrency(row.refundedMinor)}</td>
+                  <td style="padding:9px 8px; text-align:right; font-weight:700;">${formatCurrency(row.netMinor)}</td>
+                  ${hasProfitAccess ? `
+                    <td style="padding:9px 8px; text-align:right; color:#d97706;">${formatCurrency(row.cogsMinor)}</td>
+                    <td style="padding:9px 8px; text-align:right; font-weight:700; color:${(row.grossProfitMinor || 0) >= 0 ? "#059669" : "#dc2626"};">${formatCurrency(row.grossProfitMinor)}</td>
+                    <td style="padding:9px 8px; text-align:right; font-weight:600;">${(row.grossMarginPercent || 0).toFixed(1)}%</td>
+                    <td style="padding:9px 8px; text-align:center;">
+                      ${row.incompleteCosting ? `
+                        <span style="background:#fffbeb; color:#b45309; padding:2px 6px; border-radius:4px; font-size:10.5px; font-weight:700;">⚠️ Incomplete</span>
+                      ` : `
+                        <span style="background:#f0fdf4; color:#15803d; padding:2px 6px; border-radius:4px; font-size:10.5px; font-weight:600;">✓ Verified</span>
+                      `}
+                    </td>
+                  ` : ""}
+                  <td style="padding:9px 8px; text-align:center;">
+                    <button type="button" class="view-breakdown-btn" data-order-id="${escapeHtml(row.id)}" style="padding:4px 8px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer;">
+                      🔍 Drilldown
+                    </button>
+                  </td>
                 </tr>
-              `,
-                )
+              `;
+                })
                 .join("")}
             </tbody>
+            <tfoot style="background:#f8fafc; border-top:2px solid #cbd5e1; font-weight:700;">
+              <tr>
+                <td style="padding:10px 8px;" colspan="4">TOTALS (Filtered Dataset)</td>
+                <td style="padding:10px 8px; text-align:right;">${formatCurrency(m.completedSalesMinor)}</td>
+                <td style="padding:10px 8px; text-align:right; color:#dc2626;">-${formatCurrency(m.refundTotalMinor)}</td>
+                <td style="padding:10px 8px; text-align:right; color:#059669;">${formatCurrency(m.netSalesMinor)}</td>
+                ${hasProfitAccess ? `
+                  <td style="padding:10px 8px; text-align:right; color:#d97706;">${formatCurrency(m.costOfGoodsMinor)}</td>
+                  <td style="padding:10px 8px; text-align:right; color:#059669;">${formatCurrency(m.grossProfitMinor)}</td>
+                  <td style="padding:10px 8px; text-align:right;">${(m.grossMarginPercent || 0).toFixed(1)}%</td>
+                  <td style="padding:10px 8px;" colspan="2"></td>
+                ` : `
+                  <td style="padding:10px 8px;"></td>
+                `}
+              </tr>
+            </tfoot>
           </table>
         </div>
         `}
 
         <!-- Pagination Controls -->
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; padding-top:12px; border-top:1px solid #e2e8f0; flex-wrap:wrap; gap:8px;">
-          <div style="font-size:13px; color:#64748b;" id="report-pagination-info">
+          <div style="font-size:13px; color:#64748b;" id="report-pagination-info" data-total-pages="${pagination.totalPages || 1}">
             Page ${pagination.page} of ${pagination.totalPages || 1} · ${pagination.totalRows} rows
           </div>
           <div style="display:flex; gap:8px;">
@@ -414,17 +473,125 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     `;
   }
 
+  async function showOrderDrilldown(orderId) {
+    const modal = containerEl.querySelector("#report-breakdown-modal");
+    const modalContent = containerEl.querySelector("#report-breakdown-content");
+    if (!modal || !modalContent) return;
+
+    modalContent.innerHTML = `<div style="text-align:center; padding:30px; color:#64748b;">Loading order #${orderId} cost breakdown...</div>`;
+    modal.style.display = "flex";
+
+    try {
+      const data = await salesReportApi.getOrderCostBreakdown(orderId);
+      const { order, items, isCashier } = data;
+
+      modalContent.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; border-bottom:1px solid #e2e8f0; padding-bottom:12px;">
+          <div>
+            <h2 style="margin:0; font-size:20px; color:#0f172a;">Order #${order.orderNumber} Drill-Down</h2>
+            <div style="font-size:12px; color:#64748b; margin-top:4px;">
+              Date: ${escapeHtml(order.businessDate)} | Type: ${escapeHtml(order.orderType)} | Status: ${escapeHtml(order.orderStatus)}
+            </div>
+          </div>
+          <button type="button" id="close-breakdown-modal-btn" style="background:none; border:none; font-size:20px; cursor:pointer; color:#64748b; padding:4px;">✕</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:10px; margin-bottom:16px;">
+          <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+            <div style="font-size:10px; color:#64748b; font-weight:700;">TOTAL SALES</div>
+            <div style="font-size:15px; font-weight:700; color:#0f172a;">${formatCurrency(order.totalMinor)}</div>
+          </div>
+          <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+            <div style="font-size:10px; color:#64748b; font-weight:700;">REFUNDED</div>
+            <div style="font-size:15px; font-weight:700; color:#dc2626;">-${formatCurrency(order.refundedMinor)}</div>
+          </div>
+          <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+            <div style="font-size:10px; color:#64748b; font-weight:700;">NET SALES</div>
+            <div style="font-size:15px; font-weight:700; color:#059669;">${formatCurrency(order.netMinor)}</div>
+          </div>
+          ${!isCashier ? `
+            <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+              <div style="font-size:10px; color:#64748b; font-weight:700;">COGS</div>
+              <div style="font-size:15px; font-weight:700; color:#d97706;">${formatCurrency(order.cogsMinor)}</div>
+            </div>
+            <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+              <div style="font-size:10px; color:#64748b; font-weight:700;">GROSS PROFIT</div>
+              <div style="font-size:15px; font-weight:700; color:#059669;">${formatCurrency(order.grossProfitMinor)}</div>
+            </div>
+            <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #e2e8f0;">
+              <div style="font-size:10px; color:#64748b; font-weight:700;">MARGIN %</div>
+              <div style="font-size:15px; font-weight:700; color:#059669;">${(order.grossMarginPercent || 0).toFixed(1)}%</div>
+            </div>
+          ` : ""}
+        </div>
+
+        <h4 style="margin:16px 0 8px; font-size:14px; color:#1e293b;">Order Line Items &amp; Recorded Unit Costs</h4>
+        <div style="overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; font-size:12px;">
+            <thead style="background:#f8fafc; border-bottom:1px solid #e2e8f0;">
+              <tr>
+                <th style="padding:8px; text-align:left;">Item Name</th>
+                <th style="padding:8px; text-align:center;">Qty</th>
+                <th style="padding:8px; text-align:right;">Price</th>
+                <th style="padding:8px; text-align:right;">Line Total</th>
+                ${!isCashier ? `
+                  <th style="padding:8px; text-align:right;">Recorded Unit Cost</th>
+                  <th style="padding:8px; text-align:right;">Line Cost</th>
+                  <th style="padding:8px; text-align:right;">Line Profit</th>
+                  <th style="padding:8px; text-align:right;">Margin %</th>
+                ` : ""}
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map((it) => `
+                <tr style="border-bottom:1px solid #f1f5f9;">
+                  <td style="padding:8px; font-weight:600;">
+                    ${escapeHtml(it.itemName)}
+                    ${!it.hasCost && !isCashier ? `<span style="margin-left:6px; color:#b45309; font-size:10px; background:#fffbeb; padding:1px 4px; border-radius:3px;">No Cost</span>` : ""}
+                  </td>
+                  <td style="padding:8px; text-align:center;">${it.quantity}</td>
+                  <td style="padding:8px; text-align:right;">${formatCurrency(it.unitPriceMinor)}</td>
+                  <td style="padding:8px; text-align:right; font-weight:600;">${formatCurrency(it.lineTotalMinor)}</td>
+                  ${!isCashier ? `
+                    <td style="padding:8px; text-align:right; color:#d97706;">${it.hasCost ? formatCurrency(it.unitCostMinor) : "—"}</td>
+                    <td style="padding:8px; text-align:right; color:#d97706;">${it.hasCost ? formatCurrency(it.lineCostMinor) : "—"}</td>
+                    <td style="padding:8px; text-align:right; font-weight:600; color:${(it.lineGrossProfitMinor || 0) >= 0 ? "#059669" : "#dc2626"};">
+                      ${formatCurrency(it.lineGrossProfitMinor)}
+                    </td>
+                    <td style="padding:8px; text-align:right;">${(it.lineGrossMarginPercent || 0).toFixed(1)}%</td>
+                  ` : ""}
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+
+      const closeBtn = modalContent.querySelector("#close-breakdown-modal-btn");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", () => {
+          modal.style.display = "none";
+        });
+      }
+    } catch (err) {
+      modalContent.innerHTML = `
+        <div style="padding:20px; text-align:center; color:#dc2626;">
+          <p>Failed to load order cost breakdown: ${escapeHtml(err.message || err)}</p>
+          <button type="button" id="close-breakdown-modal-btn" style="padding:6px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; cursor:pointer;">Close</button>
+        </div>
+      `;
+      const closeBtn = modalContent.querySelector("#close-breakdown-modal-btn");
+      if (closeBtn) {
+        closeBtn.addEventListener("click", () => {
+          modal.style.display = "none";
+        });
+      }
+    }
+  }
+
   async function loadReport() {
     renderSkeleton();
 
-    // On the very first load — before the restaurant's timezone
-    // has been observed from any server response — omit the dates
-    // entirely and let the server resolve the restaurant's current
-    // business day in its own timezone. The UI must not assume
-    // Asia/Karachi (or any other zone) for a restaurant that may
-    // be configured differently. Once the first response arrives,
-    // hasObservedTimezone flips and subsequent loads compute dates
-    // in the observed zone.
     const isInitialLoad = !hasObservedTimezone;
 
     let dates;
@@ -444,13 +611,10 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     if (startDateInput) startDateInput.value = dates.startDate;
     if (endDateInput) endDateInput.value = dates.endDate;
 
-    // Capture this request's token; only the newest token may render.
     const myToken = ++requestToken;
 
     try {
       const report = await salesReportApi.getSalesReport({
-        // Omit startDate/endDate on the initial load so the server
-        // applies its own business-day default.
         startDate: currentFilters.startDate || undefined,
         endDate: currentFilters.endDate || undefined,
         orderType: currentFilters.orderType || undefined,
@@ -460,22 +624,12 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         limit: currentFilters.limit,
       });
 
-      // Stale-response suppression: a slower older request must not
-      // overwrite the results of a newer filter request.
       if (myToken !== requestToken) return;
 
-      // Adopt the restaurant's configured timezone from the
-      // response so subsequent preset calculations use the
-      // server's business calendar.
       if (report.restaurant?.timezone) {
         activeTimezone = report.restaurant.timezone;
         hasObservedTimezone = true;
       }
-      // Only adopt the server-resolved filter dates when the
-      // request omitted them (the initial load). When the
-      // operator chose an explicit range or preset, the
-      // response's dates merely echo the request and must not
-      // overwrite the operator's selection.
       if (isInitialLoad) {
         if (report.filters?.startDate) {
           currentFilters.startDate = report.filters.startDate;
@@ -483,7 +637,6 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         if (report.filters?.endDate) {
           currentFilters.endDate = report.filters.endDate;
         }
-        // Reflect the server-resolved dates in the visible inputs.
         const startInput = containerEl.querySelector("#report-start-date");
         const endInput = containerEl.querySelector("#report-end-date");
         if (startInput) startInput.value = currentFilters.startDate;
@@ -500,9 +653,10 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
   }
 
   function attachEventListeners() {
-    const exportBtn = containerEl.querySelector("#sales-export-btn");
-    if (exportBtn) {
-      exportBtn.addEventListener("click", () => {
+    // Export buttons
+    const exportCsvBtn = containerEl.querySelector("#sales-export-btn") || containerEl.querySelector("#sales-export-csv-btn");
+    if (exportCsvBtn) {
+      exportCsvBtn.addEventListener("click", () => {
         salesReportApi.downloadSalesReportCsv({
           startDate: currentFilters.startDate,
           endDate: currentFilters.endDate,
@@ -512,16 +666,41 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       });
     }
 
+    const exportXlsxBtn = containerEl.querySelector("#sales-export-xlsx-btn");
+    if (exportXlsxBtn) {
+      exportXlsxBtn.addEventListener("click", () => {
+        salesReportApi.downloadSalesReportXlsx({
+          startDate: currentFilters.startDate,
+          endDate: currentFilters.endDate,
+          orderType: currentFilters.orderType || undefined,
+          paymentMethod: currentFilters.paymentMethod || undefined,
+        });
+      });
+    }
+
+    const exportPdfBtn = containerEl.querySelector("#sales-export-pdf-btn");
+    if (exportPdfBtn) {
+      exportPdfBtn.addEventListener("click", () => {
+        salesReportApi.downloadSalesReportPdf({
+          startDate: currentFilters.startDate,
+          endDate: currentFilters.endDate,
+          orderType: currentFilters.orderType || undefined,
+          paymentMethod: currentFilters.paymentMethod || undefined,
+        });
+      });
+    }
+
+    // Presets
     containerEl.querySelectorAll(".preset-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
         const preset = btn.getAttribute("data-preset");
         currentFilters.preset = preset;
-        // Any filter change resets to the first page.
         currentFilters.page = 1;
         loadReport();
       });
     });
 
+    // Apply Filter Button
     const applyBtn = containerEl.querySelector("#report-apply-btn");
     if (applyBtn) {
       applyBtn.addEventListener("click", () => {
@@ -535,12 +714,12 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         currentFilters.endDate = endInput?.value || currentFilters.endDate;
         currentFilters.orderType = typeSelect?.value || "";
         currentFilters.paymentMethod = methodSelect?.value || "";
-        // Date / order-type / payment-method changes reset to page 1.
         currentFilters.page = 1;
         loadReport();
       });
     }
 
+    // Pagination
     const prevBtn = containerEl.querySelector("#report-prev-page");
     if (prevBtn) {
       prevBtn.addEventListener("click", () => {
@@ -554,9 +733,25 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     const nextBtn = containerEl.querySelector("#report-next-page");
     if (nextBtn) {
       nextBtn.addEventListener("click", () => {
-        const totalPages = containerEl.querySelector("#report-pagination-info")?.dataset?.totalPages;
         currentFilters.page += 1;
         loadReport();
+      });
+    }
+
+    // Breakdown buttons
+    containerEl.querySelectorAll(".view-breakdown-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const orderId = btn.getAttribute("data-order-id");
+        if (orderId) showOrderDrilldown(orderId);
+      });
+    });
+
+    // Close modal on backdrop click
+    const modal = containerEl.querySelector("#report-breakdown-modal");
+    if (modal) {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) modal.style.display = "none";
       });
     }
   }
@@ -567,7 +762,6 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     },
     setFilters(newFilters) {
       currentFilters = { ...currentFilters, ...newFilters };
-      // Filter changes reset to the first page.
       if (newFilters.preset !== undefined || newFilters.startDate !== undefined
           || newFilters.endDate !== undefined || newFilters.orderType !== undefined
           || newFilters.paymentMethod !== undefined || newFilters.groupBy !== undefined) {
