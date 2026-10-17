@@ -69,7 +69,7 @@
 /* Stock navigation and live action buttons occupy one title row, not two. */
 :is(#screen-inventory, #screen-purchases):not(.hidden) { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; align-content: start; }
 :is(#screen-inventory, #screen-purchases) > .workspace-header,
-:is(#inventory-screen-container, #purchases-screen-container) { display: contents; }
+:is(#inventory-screen-container, #purchases-screen-container) { display: contents !important; }
 :is(#screen-inventory, #screen-purchases) > .workspace-header > div:first-child { grid-column: 1; grid-row: 1; align-self: center; }
 :is(#screen-inventory, #screen-purchases) > .workspace-header > .workspace-actions { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; padding: 4px; }
 :is(#inventory-screen-container, #purchases-screen-container) > * { grid-column: 1 / -1; min-width: 0; }
@@ -130,7 +130,7 @@
 @media (max-width: 600px) {
   .report-header .report-exports { display: grid !important; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px !important; }
   .report-exports button { white-space: normal; justify-content: center; }
-  .report-filters .report-date-range { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
+  .report-filters .report-date-range { display: grid !important; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
   .report-date-range input { width: 100%; padding: 6px !important; font-size: 12px !important; }
   .report-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 8px; }
   .report-tabs button { flex: 0 0 auto; white-space: nowrap; }

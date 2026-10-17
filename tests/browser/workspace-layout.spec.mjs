@@ -94,6 +94,11 @@ for (const width of [1366, 768, 390]) {
       await expect(title).toHaveCount(1);
       expect(parseFloat(await title.evaluate(node => getComputedStyle(node).fontSize))).toBeLessThanOrEqual(21);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+      if (screen === "inventory") {
+        const actions = await section.locator(".inventory-header").boundingBox();
+        const filters = await section.locator(".inventory-toolbar").boundingBox();
+        expect(actions.y + actions.height).toBeLessThanOrEqual(filters.y + 1);
+      }
       if (screen === "ledger") {
         await expect(section.getByText("How this report is calculated", { exact: true })).toBeVisible();
         const panel = await section.locator(".filter-controls-row").boundingBox();
@@ -115,6 +120,11 @@ for (const width of [1366, 768, 390]) {
     await page.getByLabel("Report order type").selectOption("delivery");
     await page.getByRole("button", { name: "Apply Filters", exact: true }).click();
     await expect(page.getByLabel("Report order type")).toHaveValue("delivery");
+    if (width === 390) {
+      const from = await page.getByLabel("Report start date").boundingBox();
+      const to = await page.getByLabel("Report end date").boundingBox();
+      expect(Math.abs(from.y - to.y)).toBeLessThan(2);
+    }
     await expect(page.getByRole("button", { name: "📄 Export PDF", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
     await page.evaluate(() => {
