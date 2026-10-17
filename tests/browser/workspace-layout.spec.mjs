@@ -94,6 +94,14 @@ for (const width of [1366, 768, 390]) {
       await expect(title).toHaveCount(1);
       expect(parseFloat(await title.evaluate(node => getComputedStyle(node).fontSize))).toBeLessThanOrEqual(21);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+      if (screen === "ledger") {
+        await expect(section.getByText("How this report is calculated", { exact: true })).toBeVisible();
+        const panel = await section.locator(".filter-controls-row").boundingBox();
+        for (const input of await section.locator(".date-picker-group input").all()) {
+          const box = await input.boundingBox();
+          expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
+        }
+      }
       if (screen === "edit-menu" && width === 1366) {
         const actions = section.locator(".workspace-actions button");
         const boxes = await Promise.all((await actions.all()).map(node => node.boundingBox()));

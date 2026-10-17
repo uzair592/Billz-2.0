@@ -67,7 +67,7 @@
 #screen-view-orders .filter-controls-row :is(input,button) { min-height: 40px; box-sizing: border-box; }
 
 /* Stock navigation and live action buttons occupy one title row, not two. */
-:is(#screen-inventory, #screen-purchases):not(.hidden) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; align-content: start; }
+:is(#screen-inventory, #screen-purchases):not(.hidden) { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; align-content: start; }
 :is(#screen-inventory, #screen-purchases) > .workspace-header,
 :is(#inventory-screen-container, #purchases-screen-container) { display: contents; }
 :is(#screen-inventory, #screen-purchases) > .workspace-header > div:first-child { grid-column: 1; grid-row: 1; align-self: center; }
@@ -119,4 +119,26 @@
   .report-filters input { min-width: 0; max-width: 100%; }
   :is(#screen-inventory, #screen-purchases):not(.hidden) { grid-template-columns: minmax(0,1fr); }
   :is(#inventory-screen-container, #purchases-screen-container) > .inventory-header { grid-column: 1; grid-row: 3; justify-content: flex-start; }
+}
+
+.workspace-help { margin-bottom: 12px; font-size: 12px; color: #64748b; }
+.workspace-help summary { cursor: pointer; padding: 8px 0; min-height: 32px; box-sizing: border-box; }
+.workspace-help p { padding: 8px 0; max-width: 90ch; }
+#screen-ledger .date-picker-group, #screen-ledger .quick-buttons-group { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+#screen-ledger .filter-controls-row { flex-wrap: wrap; gap: 8px; }
+#screen-ledger .filter-controls-row :is(input,button) { min-height: 40px; box-sizing: border-box; }
+@media (max-width: 600px) {
+  .report-header .report-exports { display: grid !important; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px !important; }
+  .report-exports button { white-space: normal; justify-content: center; }
+  .report-filters .report-date-range { display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); }
+  .report-date-range input { width: 100%; padding: 6px !important; font-size: 12px !important; }
+  .report-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 8px; }
+  .report-tabs button { flex: 0 0 auto; white-space: nowrap; }
+  .finance-date-controls { display: grid !important; grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .finance-date-controls label { display: grid !important; gap: 4px !important; }
+  .finance-date-controls input { width: 100%; min-width: 0; padding: 5px !important; font-size: 12px !important; }
+  .finance-date-controls button { grid-column: 1 / -1; }
+  #screen-ledger .date-picker-group { width: 100%; }
+  #screen-ledger .date-picker-group input { width: 100%; min-width: 0; flex: 1 1 100%; }
+  #screen-ledger .quick-buttons-group button { flex: 1 1 90px; }
 }

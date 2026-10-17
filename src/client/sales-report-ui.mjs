@@ -161,7 +161,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
             <button type="button" class="preset-btn${selectedPreset === "last7days" ? " active" : ""}" data-preset="last7days" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "last7days" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">This Week</button>
             <button type="button" class="preset-btn${selectedPreset === "month" ? " active" : ""}" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "month" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">This Month</button>
           </div>
-          <div style="display:flex; align-items:center; gap:8px;">
+          <div class="report-date-range" style="display:flex; align-items:center; gap:8px;">
             <input type="date" aria-label="Report start date" id="report-start-date" value="${startDate ? startDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <span style="font-size:13px; color:#64748b;">to</span>
             <input type="date" aria-label="Report end date" id="report-end-date" value="${endDate ? endDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">

@@ -18,7 +18,17 @@ export function initializeWorkspaceLayout() {
       wrapper.append(heading);
       wrapper.classList.add("workspace-header");
       const note = wrapper.nextElementSibling;
-      if (note?.tagName === "P") note.classList.add("workspace-intro");
+      if (note?.tagName === "P") {
+        note.classList.add("workspace-intro");
+        if (screen.id === "screen-ledger") {
+          const help = document.createElement("details");
+          help.className = "workspace-help";
+          const summary = document.createElement("summary");
+          summary.textContent = "How this report is calculated";
+          note.before(help);
+          help.append(summary, note);
+        }
+      }
     } else {
       header?.classList.add("workspace-header");
       const actionGroup = header?.lastElementChild;
