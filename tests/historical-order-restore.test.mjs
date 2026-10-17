@@ -63,7 +63,7 @@ test("client restores in bounded batches and stops when the selected restaurant 
 
 test("bill resize keeps room for both the menu and the bill", () => {
   assert.equal(clampBillWidth(900, 1000), 680);
-  assert.equal(clampBillWidth(100, 1000), 340);
+  assert.equal(clampBillWidth(100, 1000), 320);
   assert.equal(clampBillWidth(420, 1000), 420);
   assert.ok(clampBillWidth(900, 750) <= 470);
 });

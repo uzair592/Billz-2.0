@@ -104,7 +104,7 @@ test.describe("Production server readiness journeys", () => {
         expect(retried.status()).toBe(200);
         expect((await retried.json()).skipped).toBe(3);
         await expect(page.locator("#retry-backup-sync")).toBeHidden();
-        expect(Number((await control.query("SELECT count(*) FROM orders WHERE restaurant_id = (SELECT id FROM restaurants WHERE slug=$1)", [code])).rows[0].count)).toBe(5);
+        expect(Number((await control.query("SELECT count(*) FROM orders WHERE restaurant_id = (SELECT restaurant_id FROM orders WHERE id=$1)", [orders[0].id])).rows[0].count)).toBe(5);
       }
       expect(errors).toEqual([]);
     } finally { await device.close(); }

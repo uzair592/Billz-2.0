@@ -1,6 +1,6 @@
 // Device-local layout preference only; no restaurant data is kept here.
 export function billWidthBounds(workspaceWidth) {
-  return { min: 340, max: Math.max(340, Math.min(workspaceWidth * 0.68, workspaceWidth - 280)) };
+  return { min: 320, max: Math.max(320, Math.min(workspaceWidth * 0.68, workspaceWidth - 280)) };
 }
 export function clampBillWidth(width, workspaceWidth) {
   const { min, max } = billWidthBounds(workspaceWidth);
@@ -45,7 +45,7 @@ export function initializeWorkspaceLayout() {
     const value = clampBillWidth(width, available);
     preferred = value;
     layout.style.setProperty("--bill-width", `${value}px`);
-    divider.setAttribute("aria-valuemin", "340");
+    divider.setAttribute("aria-valuemin", "320");
     divider.setAttribute("aria-valuemax", String(Math.round(billWidthBounds(available).max)));
     divider.setAttribute("aria-valuenow", String(value));
     if (persist) { try { localStorage.setItem(key, String(value)); } catch {} }

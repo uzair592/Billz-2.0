@@ -18,7 +18,8 @@
 .restored-bill-note { font-size: 10px; color: #64748b; }
 #bill-width-divider { display: none; }
 @media (min-width: 1100px) {
-  #screen-new-order .pos-layout { grid-template-columns: minmax(260px, 1.6fr) 8px minmax(340px, var(--bill-width, 1fr)) !important; column-gap: 6px !important; }
+  #screen-new-order .pos-layout { grid-template-columns: minmax(260px, 1.6fr) 8px minmax(320px, var(--bill-width, 330px)) !important; column-gap: 6px !important; }
+  #screen-new-order .cart-box { width: 100% !important; max-width: none !important; justify-self: stretch; }
   #bill-width-divider { display: block; align-self: stretch; cursor: col-resize; touch-action: none; border-radius: 6px; background: #e2e8f0; min-height: 80px; }
   #bill-width-divider:hover, #bill-width-divider:focus-visible { background: #93c5fd; outline: 2px solid #2563eb; }
 }
