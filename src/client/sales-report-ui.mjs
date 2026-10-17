@@ -99,6 +99,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
   let hasObservedTimezone = false;
   let requestToken = 0;
   let lastReportData = null;
+  let activeTab = "overview";
 
   function getPresetDates(preset) {
     const zone = activeTimezone;
@@ -133,11 +134,11 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     const selectedPreset = preset || "today";
 
     containerEl.innerHTML = `
-      <div style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:20px; max-width:1300px; margin:0 auto;">
+      <div class="report-workspace" style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:8px 0; max-width:1300px; margin:0 auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
           <div>
             <h1 style="margin:0; font-size:24px; font-weight:700; color:#0f172a;">📊 Sales &amp; Profitability Reports</h1>
-            <div style="font-size:12px; color:#64748b; margin-top:4px;">Server-Authoritative Multi-Device Workspace</div>
+            <div class="report-heading-note" style="font-size:12px; color:#64748b; margin-top:4px;">Shared restaurant reports</div>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button id="sales-export-btn" class="report-btn" style="padding:8px 14px; background:#059669; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
@@ -182,7 +183,10 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
           </div>
         </div>
 
-        <div id="report-content-area">
+        <div class="report-tabs" role="tablist" aria-label="Report sections">
+          ${[["overview", "Overview"], ["bills", "Bill Profit & Loss"], ["gross", "Gross Profit"], ["net", "Net Profit"], ["payments", "Payments & Order Types"], ["trends", "Sales Trends"]].map(([id, label]) => `<button type="button" id="report-tab-${id}" role="tab" data-report-tab="${id}" aria-controls="report-content-area" aria-selected="${activeTab === id}">${label}</button>`).join("")}
+        </div>
+        <div id="report-content-area" role="tabpanel" aria-labelledby="report-tab-${activeTab}">
           <div style="padding:40px; text-align:center; color:#64748b;">Loading server sales report...</div>
         </div>
 
@@ -205,7 +209,17 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
     const rows = data.detailedRows?.rows || [];
     const hasProfitAccess = m.costOfGoodsMinor !== null && m.costOfGoodsMinor !== undefined;
 
+    const provisional = m.hasIncompleteCosting ? " (known costs only)" : "";
+    const statement = hasProfitAccess ? `<div class="profit-statement" data-report-section="statement"><h3 style="margin:0 0 14px">${activeTab === "net" ? "Net" : "Gross"} Profit${provisional}</h3>
+        <dl><dt>Net sales after discounts and refunds</dt><dd>${formatCurrency(m.netSalesMinor)}</dd>
+        <dt>Less: cost of goods sold</dt><dd>${formatCurrency(m.costOfGoodsMinor)}</dd>
+        <dt>Gross profit${provisional}</dt><dd>${formatCurrency(m.grossProfitMinor)}</dd>
+        ${activeTab === "net" ? `<dt>Less: period operating expenses</dt><dd>${formatCurrency(m.operatingExpensesMinor)}</dd>
+        <dt>Net profit${provisional}</dt><dd>${formatCurrency(m.netProfitMinor)}</dd>` : ""}</dl>
+        <p style="font-size:12px;color:#64748b;margin-bottom:0">Bill profit is net sales less recorded COGS. Operating expenses are deducted once for the reporting period, not from every bill.
+        ${currentFilters.orderType || currentFilters.paymentMethod ? "This view uses filtered sales and all restaurant operating expenses in the selected period." : ""}</p></div>` : "";
     contentArea.innerHTML = `
+      ${statement}
       ${m.hasIncompleteCosting ? `
         <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:20px; color:#92400e; font-size:13px; display:flex; align-items:center; gap:8px;">
           <span style="font-size:18px;">⚠️</span>
@@ -217,7 +231,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       ` : ""}
 
       <!-- Summary Cards Grid -->
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:24px;">
+      <div data-report-section="overview" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:24px;">
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
           <div style="font-size:11px; font-weight:700; color:#64748b; text-transform:uppercase;">Gross Sales</div>
           <div style="font-size:22px; font-weight:700; color:#0f172a; margin-top:4px;">${formatCurrency(m.grossSalesMinor)}</div>
@@ -266,7 +280,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       </div>
 
       <!-- Tender and Order Type Breakdowns -->
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; margin-bottom:24px;">
+      <div data-report-section="payments" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px; margin-bottom:24px;">
         <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px;">
           <h3 style="margin:0 0 12px; font-size:15px; font-weight:600; color:#1e293b;">💳 Payment Method Breakdown</h3>
           <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -323,7 +337,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       </div>
 
       <!-- Trend Table -->
-      <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px;">
+      <div data-report-section="trends" style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px;">
         <h3 style="margin:0 0 12px; font-size:15px; font-weight:600; color:#1e293b;">📈 Sales & Refund Trend</h3>
         <div style="overflow-x:auto;">
           <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -358,7 +372,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       </div>
 
       <!-- Bill-Wise Profitability Table -->
-      <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px;">
+      <div data-report-section="bills" style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:24px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
           <h3 style="margin:0; font-size:15px; font-weight:600; color:#1e293b;">📋 Detailed Sales Rows &amp; Bill-Wise Profitability</h3>
           <div style="font-size:12px; color:#64748b;">Click Drilldown on any order to inspect item-level recorded costs</div>
@@ -392,7 +406,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
             <tbody>
               ${rows
                 .map((row) => {
-                  const timeStr = row.orderedAt ? new Date(row.orderedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+                  const timeStr = row.orderedAt ? new Date(row.orderedAt).toLocaleTimeString("en-GB", { timeZone: activeTimezone, hour: "2-digit", minute: "2-digit" }) : "";
                   return `
                 <tr style="border-bottom:1px solid #f1f5f9; hover-bg:#f8fafc;" class="report-order-row" data-order-id="${escapeHtml(row.id)}">
                   <td style="padding:9px 8px; font-weight:700;">#${escapeHtml(row.orderNumber)}</td>
@@ -460,6 +474,21 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         </div>
       </div>
     `;
+    applyReportTab(hasProfitAccess);
+  }
+
+  function applyReportTab(hasProfitAccess) {
+    if (!hasProfitAccess && ["bills", "gross", "net"].includes(activeTab)) activeTab = "overview";
+    for (const button of containerEl.querySelectorAll("[data-report-tab]")) {
+      button.hidden = !hasProfitAccess && ["bills", "gross", "net"].includes(button.dataset.reportTab);
+      button.setAttribute("aria-selected", String(button.dataset.reportTab === activeTab));
+      button.tabIndex = button.dataset.reportTab === activeTab ? 0 : -1;
+    }
+    containerEl.querySelector("#report-content-area")?.setAttribute("aria-labelledby", `report-tab-${activeTab}`);
+    const visible = activeTab === "overview" ? ["overview", "payments", "trends", "bills"]
+      : activeTab === "gross" ? ["statement", "bills"]
+        : activeTab === "net" ? ["statement"] : [activeTab];
+    for (const panel of containerEl.querySelectorAll("[data-report-section]")) panel.hidden = !visible.includes(panel.dataset.reportSection);
   }
 
   function renderErrorState(message) {
@@ -653,6 +682,20 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
   }
 
   function attachEventListeners() {
+    for (const button of containerEl.querySelectorAll("[data-report-tab]")) {
+      button.addEventListener("click", () => {
+        activeTab = button.dataset.reportTab;
+        if (lastReportData) { renderReportContent(lastReportData); attachContentEventListeners(); }
+      });
+      button.addEventListener("keydown", event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const tabs = [...containerEl.querySelectorAll("[data-report-tab]")].filter(tab => !tab.hidden);
+        const index = tabs.indexOf(button);
+        const next = event.key === "Home" ? tabs[0] : event.key === "End" ? tabs.at(-1) : tabs[(index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length];
+        next.click(); next.focus();
+      });
+    }
     // Export buttons
     const exportCsvBtn = containerEl.querySelector("#sales-export-btn") || containerEl.querySelector("#sales-export-csv-btn");
     if (exportCsvBtn) {
@@ -719,6 +762,18 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       });
     }
 
+    attachContentEventListeners();
+
+    // Close modal on backdrop click
+    const modal = containerEl.querySelector("#report-breakdown-modal");
+    if (modal) {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) modal.style.display = "none";
+      });
+    }
+  }
+
+  function attachContentEventListeners() {
     // Pagination
     const prevBtn = containerEl.querySelector("#report-prev-page");
     if (prevBtn) {
@@ -747,13 +802,6 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
       });
     });
 
-    // Close modal on backdrop click
-    const modal = containerEl.querySelector("#report-breakdown-modal");
-    if (modal) {
-      modal.addEventListener("click", (e) => {
-        if (e.target === modal) modal.style.display = "none";
-      });
-    }
   }
 
   return Object.freeze({

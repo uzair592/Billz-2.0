@@ -1,3 +1,4 @@
+import { legacyOrderRestoreSchema } from "../pos/legacy-order-restore-service.mjs";
 function publicUser(user) {
   if (!user) return null;
   return { id: user.id, email: user.email, username: user.username,
@@ -432,6 +433,7 @@ export async function buildHttpApp({
   purchaseService = null,
   financeService = null,
   catalogImportService = null,
+  legacyOrderRestoreService = null,
   subscriptionService = null,
   billingWebhookService = null,
   trustedOrigin,
@@ -845,7 +847,7 @@ export async function buildHttpApp({
         || orderHistoryService || orderCancellationService || orderRefundService
         || salesReportService || supplierService || inventoryService
         || recipeService || purchaseService || financeService || catalogImportService
-        || subscriptionService)) {
+        || subscriptionService || legacyOrderRestoreService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
     if (financeService) await registerFinanceRoutes(app, { guards, financeService });
 
@@ -1662,6 +1664,16 @@ export async function buildHttpApp({
           return reply.code(result.replayed ? 200 : 201).send(result);
         },
       );
+    }
+
+    if (legacyOrderRestoreService) {
+      app.post("/api/pos/import/legacy-orders", {
+        bodyLimit: 5 * 1024 * 1024,
+        preHandler: [guards.authenticate, guards.tenant(PERMISSION.MENU_MANAGE)],
+      }, async request => {
+        const { orders } = legacyOrderRestoreSchema.parse(request.body);
+        return legacyOrderRestoreService.restore({ tenant: request.tenant, userId: request.auth.user.id, orders });
+      });
     }
 
     if (catalogImportService) {

@@ -1,0 +1,46 @@
+/* Compact operational headers keep working controls above the fold. */
+.screen-view > .workspace-header { margin-bottom: 12px !important; gap: 10px !important; align-items: center !important; }
+.workspace-header h1 { font-size: 21px !important; line-height: 1.2 !important; margin: 0 !important; }
+.workspace-header > div > p { display: none; }
+.workspace-header .section-kicker { display: none; }
+#screen-dashboard .workspace-header > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; }
+#screen-dashboard .workspace-header #dashboard-today-date { display: block; margin: 0; font-size: 12px; color: #64748b; }
+#screen-dashboard .dashboard-action-center { padding: 12px 16px; margin-bottom: 14px; }
+#screen-dashboard .dashboard-welcome-copy h2 { font-size: 18px; margin: 2px 0; }
+#screen-dashboard .dashboard-welcome-copy p { margin: 0; font-size: 12px; }
+#history-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+#history-toolbar #history-search { flex: 0 1 290px; width: 290px !important; min-width: 180px; max-width: 100%; min-height: 40px; padding: 8px 10px !important; font-size: 13px !important; }
+#history-toolbar > span { display: flex; flex-wrap: wrap; gap: 6px; }
+#history-toolbar button { min-height: 40px; white-space: nowrap; padding: 7px 10px !important; }
+#screen-view-orders .workspace-header > div:last-child { min-width: 170px !important; padding: 8px 12px !important; }
+#screen-view-orders #filtered-sales-amount { font-size: 20px !important; margin: 0 !important; }
+#screen-view-orders .filter-controls-row { gap: 8px !important; margin-bottom: 12px !important; }
+.restored-bill-note { font-size: 10px; color: #64748b; }
+#bill-width-divider { display: none; }
+@media (min-width: 1100px) {
+  #screen-new-order .pos-layout { grid-template-columns: minmax(260px, 1.6fr) 8px minmax(340px, var(--bill-width, 1fr)) !important; column-gap: 6px !important; }
+  #bill-width-divider { display: block; align-self: stretch; cursor: col-resize; touch-action: none; border-radius: 6px; background: #e2e8f0; min-height: 80px; }
+  #bill-width-divider:hover, #bill-width-divider:focus-visible { background: #93c5fd; outline: 2px solid #2563eb; }
+}
+#kds-board { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)) !important; gap: 10px !important; overflow-x: auto; max-width: 100%; padding-bottom: 8px; }
+#kds-board > div { min-width: 0; padding: 12px !important; min-height: 320px !important; }
+#kds-board h3 { font-size: 12px !important; gap: 4px !important; }
+#kds-board [id^="kds-column-"] { max-height: calc(100dvh - 230px); overflow-y: auto; }
+@media (max-width: 600px) {
+  .workspace-header h1 { font-size: 18px !important; }
+  #history-toolbar #history-search { flex: 1 1 100%; width: 100% !important; }
+  #history-toolbar > span { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+  #history-toolbar button { white-space: normal; font-size: 11px !important; padding: 6px !important; }
+}
+/* Report sections share filters and exports; tables scroll inside their panels. */
+.report-workspace { padding: 8px 0 !important; }
+.report-workspace h1 { font-size: 20px !important; }
+.report-workspace .report-heading-note { display: none; }
+.report-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.report-tabs button { border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px 12px; min-height: 40px; background: white; color: #334155; font-weight: 600; cursor: pointer; }
+.report-tabs button[aria-selected="true"] { background: #1d4ed8; border-color: #1d4ed8; color: white; }
+.report-workspace [hidden] { display: none !important; }
+.profit-statement { padding: 16px; border: 1px solid #e2e8f0; background: white; border-radius: 8px; margin-bottom: 16px; }
+.profit-statement dl { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; margin: 0; }
+.profit-statement dt, .profit-statement dd { margin: 0; }
+.profit-statement dd { text-align: right; font-weight: 700; }

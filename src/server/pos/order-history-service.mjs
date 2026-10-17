@@ -43,6 +43,7 @@ function mapOrderRow(row) {
     orderedAt: row.ordered_at,
     cancelledAt: row.cancelled_at ?? null,
     cancellationReason: row.cancellation_reason ?? null,
+    ...(row.restore_key ? { restored: true, originalOrderNumber: row.restore_metadata?.originalNumber ?? null, financialReconciliationRequired: true } : {}),
   };
 }
 
@@ -144,7 +145,7 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
                     o.additional_charges_minor, o.total_minor,
                     to_char(o.business_date, 'YYYY-MM-DD') AS business_date,
                     o.ordered_at,
-                    o.cancelled_at, o.cancellation_reason
+                    o.restore_key, o.restore_metadata, o.cancelled_at, o.cancellation_reason
                FROM orders o
                LEFT JOIN restaurant_tables t
                  ON t.restaurant_id = o.restaurant_id
@@ -231,7 +232,7 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
                     o.cost_of_goods_minor,
                     to_char(o.business_date, 'YYYY-MM-DD') AS business_date,
                     o.ordered_at, o.completed_at,
-                    o.cancelled_at, o.cancellation_reason, o.legacy_order_id
+                    o.restore_key, o.restore_metadata, o.cancelled_at, o.cancellation_reason, o.legacy_order_id
                FROM orders o
                LEFT JOIN restaurant_tables t
                  ON t.restaurant_id = o.restaurant_id

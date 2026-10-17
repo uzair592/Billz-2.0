@@ -89,6 +89,23 @@ test.describe("Production server readiness journeys", () => {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
       // Explicitly visit the production history, stock and purchasing screens; mocked suites exercise their detailed controls.
       for (const screen of ["view-orders", "inventory", "purchases"]) { await goTo(page, screen); }
+      if (size.name === "laptop") {
+        const restoreResponse = page.waitForResponse(response => response.url().endsWith("/api/pos/import/legacy-orders") && response.request().method() === "POST");
+        await page.locator("#restore-backup-uploader").setInputFiles("tests/fixtures/santex-cafe-reproduction-backup.json");
+        const restored = await restoreResponse;
+        expect(restored.status()).toBe(200);
+        expect((await restored.json()).imported).toBe(3);
+        await expect(page.locator("#retry-backup-sync")).toBeHidden();
+        await goTo(second, "view-orders");
+        await expect(second.locator("#history-orders-rows .restored-bill-note")).toHaveCount(3);
+        const retryResponse = page.waitForResponse(response => response.url().endsWith("/api/pos/import/legacy-orders") && response.request().method() === "POST");
+        await page.locator("#restore-backup-uploader").setInputFiles("tests/fixtures/santex-cafe-reproduction-backup.json");
+        const retried = await retryResponse;
+        expect(retried.status()).toBe(200);
+        expect((await retried.json()).skipped).toBe(3);
+        await expect(page.locator("#retry-backup-sync")).toBeHidden();
+        expect(Number((await control.query("SELECT count(*) FROM orders WHERE restaurant_id = (SELECT id FROM restaurants WHERE slug=$1)", [code])).rows[0].count)).toBe(5);
+      }
       expect(errors).toEqual([]);
     } finally { await device.close(); }
   });

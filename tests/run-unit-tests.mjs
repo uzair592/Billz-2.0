@@ -17,6 +17,7 @@ import { projectRoot } from './helpers/legacy-source.mjs';
  */
 const EXCLUDED = new Set([
   'production-verification-postgres.test.mjs',
+  'legacy-order-restore-postgres.test.mjs',
   'admin-mfa-postgres.test.mjs',
   'deployment-postgres.test.mjs',
   'admin-control-postgres.test.mjs',

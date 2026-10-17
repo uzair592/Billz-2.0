@@ -1,3 +1,4 @@
+import { initializeWorkspaceLayout } from "./workspace-layout.mjs";
 import { createFinanceUI } from "./finance-ui.mjs";
 import { createCloudSessionClient } from "./cloud-session.mjs";
 import {
@@ -14,6 +15,8 @@ import { createBillingUI } from "./billing-ui.mjs";
 import { createInventoryUI } from "./inventory-ui.mjs";
 import { createPurchasesUI } from "./purchases-ui.mjs";
 import { createCloudStatus } from "./cloud-status.mjs";
+
+initializeWorkspaceLayout();
 
 const storage = createBrowserIndexedDbStorage();
 const session = createCloudSessionClient({ storage });

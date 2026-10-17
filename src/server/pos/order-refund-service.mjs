@@ -163,7 +163,7 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
           const orderResult = await client.query(
             `SELECT id, branch_id, order_number, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
-                    additional_charges_minor, total_minor
+                    additional_charges_minor, total_minor, restore_key
                FROM orders
               WHERE id = $1
               FOR UPDATE`,
@@ -171,6 +171,7 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
           );
           const order = orderResult.rows[0];
           if (!order) throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
+          if (order.restore_key) throw apiError("This historical bill is read-only; reconcile its original payments before making adjustments.", "HISTORICAL_ORDER_READ_ONLY", 409);
 
           // Server-side eligibility: a refund is only valid for a completed
           // order whose payment state is paid, partially_refunded, or

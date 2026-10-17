@@ -125,6 +125,7 @@ export function mapCloudOrderSummary(summary) {
   return {
     id: summary.id,
     orderNumber: Number(summary.orderNumber) || 0,
+    ...(summary.restored ? { restored: true, originalOrderNumber: summary.originalOrderNumber } : {}),
     date: summary.businessDate,
     time: timeFromIso(summary.orderedAt),
     customerName: summary.customerName ?? "",
@@ -208,6 +209,7 @@ export function mapCloudOrderDetail(detail) {
   return {
     id: order.id,
     orderNumber: Number(order.orderNumber) || 0,
+    ...(order.restored ? { restored: true, originalOrderNumber: order.originalOrderNumber } : {}),
     date: order.businessDate,
     time: timeFromIso(order.orderedAt),
     customerName: order.customerName ?? "",

@@ -144,6 +144,7 @@ function makeElement() {
     getAttribute() {
       return null;
     },
+    setAttribute(name, value) { this[name] = value; },
     appendChild(child) {
       return child;
     },

@@ -110,7 +110,7 @@ export function createOrderDetailUI({ storage } = {}) {
 
     const status = String(mapped.orderStatus ?? "").toLowerCase();
     const payment = String(mapped.paymentStatus ?? "").toLowerCase();
-    const eligible = status === "completed" && payment === "paid";
+    const eligible = !mapped.restored && status === "completed" && payment === "paid";
     if (!eligible) return;
 
     modalContent
