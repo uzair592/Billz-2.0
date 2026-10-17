@@ -239,7 +239,9 @@ export function buildLegacyCatalogSnapshot(collections = {}) {
       fail(`Stock balance references an unknown stock definition: ${key}`, { stockKey: key });
     }
     ingredientStock[key] = withOptional({
-      stockGrams: number(balance.stockGrams ?? 0, `Stock in grams for ${key}`),
+      stockGrams: number(balance.stockGrams ?? 0, `Stock in grams for ${key}`, {
+        min: -1_000_000_000,
+      }),
       avgCostPerGram: number(balance.avgCostPerGram ?? 0, `Average cost for ${key}`, {
         max: 10_000_000,
       }),
@@ -253,7 +255,9 @@ export function buildLegacyCatalogSnapshot(collections = {}) {
     "soft-drink stock",
   )) {
     softDrinkStock[key] = {
-      stockUnits: number(balance.stockUnits ?? 0, `Soft-drink units for ${key}`),
+      stockUnits: number(balance.stockUnits ?? 0, `Soft-drink units for ${key}`, {
+        min: -1_000_000_000,
+      }),
       avgCostPerUnit: number(balance.avgCostPerUnit ?? 0, `Soft-drink average cost for ${key}`, {
         max: 10_000_000,
       }),
@@ -269,7 +273,9 @@ export function buildLegacyCatalogSnapshot(collections = {}) {
     "ice-cream stock",
   )) {
     iceCreamStock[key] = withOptional({
-      stockGrams: number(balance.stockGrams ?? 0, `Ice-cream grams for ${key}`),
+      stockGrams: number(balance.stockGrams ?? 0, `Ice-cream grams for ${key}`, {
+        min: -1_000_000_000,
+      }),
       avgCostPerGram: number(balance.avgCostPerGram ?? 0, `Ice-cream average cost for ${key}`, {
         max: 10_000_000,
       }),

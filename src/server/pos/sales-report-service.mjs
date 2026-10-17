@@ -1,5 +1,7 @@
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { businessDateInTimezone } from "./business-date.mjs";
+import { buildSalesReportXlsx } from "./report-xlsx-export.mjs";
+import { buildSalesReportPdf } from "./report-pdf-export.mjs";
 
 function minor(value) {
   const number = Number(value);
@@ -132,6 +134,7 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
                     COALESCE(SUM(delivery_minor), 0) AS total_delivery,
                     COALESCE(SUM(additional_charges_minor), 0) AS total_charges,
                     COALESCE(SUM(total_minor), 0) AS total_completed,
+                    COALESCE(SUM(cost_of_goods_minor), 0) AS total_cogs,
                     COALESCE(SUM(CASE WHEN incomplete_costing = true THEN 1 ELSE 0 END), 0)::int AS incomplete_costing_order_count
                FROM orders
               WHERE ${scopeWhere} AND order_status = 'completed'`,
@@ -176,9 +179,17 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const refundsSummaryRes = await client.query(
             `SELECT COALESCE(SUM(r.total_refunded_minor), 0) AS refund_total,
                     COALESCE(SUM(CASE WHEN o.order_status = 'completed' THEN r.total_refunded_minor ELSE 0 END), 0) AS completed_refund_total,
+                    COALESCE(SUM(CASE WHEN o.order_status = 'completed' THEN COALESCE(items.restocked_cost, 0) ELSE 0 END), 0) AS restocked_cost_total,
                     COUNT(DISTINCT r.order_id)::int AS refunded_order_count
                FROM order_refunds r
                JOIN orders o ON o.id = r.order_id AND o.restaurant_id = r.restaurant_id
+          LEFT JOIN (
+                 SELECT ri.refund_id, SUM(ri.quantity * oi.unit_cost_minor) AS restocked_cost
+                   FROM order_refund_items ri
+                   JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+                  WHERE ri.restaurant_id = $1 AND ri.restock = true
+                  GROUP BY ri.refund_id
+               ) items ON items.refund_id = r.id
               WHERE r.restaurant_id = $1
                 AND r.status = 'completed'
                 AND ${refundScopeWhere}`,
@@ -193,6 +204,32 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const averageOrderValueMinor = completedOrderCount > 0
             ? Math.round(netSalesMinor / completedOrderCount)
             : 0;
+
+          // Operating expenses (restaurant-level)
+          const expensesRes = await client.query(
+            `SELECT COALESCE(SUM(amount_minor), 0) AS total_expenses
+               FROM expenses
+              WHERE $1 = restaurant_id
+                AND business_date >= $2::date
+                AND business_date <= $3::date`,
+            [restaurantId, startDate, endDate],
+          );
+          const operatingExpensesMinor = minor(expensesRes.rows[0]?.total_expenses ?? 0);
+
+          // Authoritative COGS and profit calculations per ACCOUNTING_CONVENTIONS.md
+          const isCashier = (tenant.membership?.role || "") === "cashier";
+          const completedCogsMinor = minor(summaryRow.total_cogs);
+          const restockedCostMinor = minor(refundsSummaryRes.rows[0]?.restocked_cost_total ?? 0);
+          const rawCostOfGoodsMinor = Math.max(0, completedCogsMinor - restockedCostMinor);
+          const rawGrossProfitMinor = netSalesMinor - rawCostOfGoodsMinor;
+          const rawGrossMarginPercent = netSalesMinor > 0 ? Number(((rawGrossProfitMinor / netSalesMinor) * 100).toFixed(2)) : 0;
+          const rawNetProfitMinor = rawGrossProfitMinor - operatingExpensesMinor;
+
+          const costOfGoodsMinor = isCashier ? null : rawCostOfGoodsMinor;
+          const grossProfitMinor = isCashier ? null : rawGrossProfitMinor;
+          const grossMarginPercent = isCashier ? null : rawGrossMarginPercent;
+          const opExpenses = isCashier ? null : operatingExpensesMinor;
+          const netProfitMinor = isCashier ? null : rawNetProfitMinor;
 
           // 4. Payment / Tender Breakdown.
           //
@@ -352,17 +389,27 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
             paymentMethod,
             tableName: "o",
           });
-          const detailValues = detailParams.values;
-          const detailedRowsRes = await client.query(
+          const detailValues = detailParams.values;          const detailedRowsRes = await client.query(
             `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
-                    o.total_minor, o.incomplete_costing, o.business_date, o.ordered_at,
-                    COALESCE(ref.refund_total, 0) AS refunded_minor
+                    o.subtotal_minor, o.discount_minor, o.delivery_minor, o.additional_charges_minor,
+                    o.total_minor, o.cost_of_goods_minor, o.incomplete_costing, o.business_date, o.ordered_at,
+                    COALESCE(ref.refund_total, 0) AS refunded_minor,
+                    COALESCE(ref.restocked_cost, 0) AS restocked_cost_minor
                FROM orders o
           LEFT JOIN (
-                  SELECT order_id, SUM(total_refunded_minor) AS refund_total
-                    FROM order_refunds
-                   WHERE restaurant_id = $1 AND status = 'completed'
-                   GROUP BY order_id
+                  SELECT r.order_id,
+                         SUM(r.total_refunded_minor) AS refund_total,
+                         SUM(COALESCE(items.restocked_cost, 0)) AS restocked_cost
+                    FROM order_refunds r
+               LEFT JOIN (
+                      SELECT ri.refund_id, SUM(ri.quantity * oi.unit_cost_minor) AS restocked_cost
+                        FROM order_refund_items ri
+                        JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+                       WHERE ri.restaurant_id = $1 AND ri.restock = true
+                       GROUP BY ri.refund_id
+                    ) items ON items.refund_id = r.id
+                   WHERE r.restaurant_id = $1 AND r.status = 'completed'
+                   GROUP BY r.order_id
                ) ref ON ref.order_id = o.id
               WHERE ${detailScopeWhere}
               ORDER BY o.business_date DESC, o.order_number DESC
@@ -391,6 +438,13 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const detailedRows = detailedRowsRes.rows.map((row) => {
             const total = minor(row.total_minor);
             const ref = minor(row.refunded_minor);
+            const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
+            const rawCogs = minor(row.cost_of_goods_minor);
+            const restockedCost = minor(row.restocked_cost_minor);
+            const rowCogs = row.order_status === "completed" ? Math.max(0, rawCogs - restockedCost) : 0;
+            const rowGrossProfit = row.order_status === "cancelled" ? 0 : (net - rowCogs);
+            const rowGrossMargin = net > 0 ? Number(((rowGrossProfit / net) * 100).toFixed(2)) : 0;
+
             return {
               id: row.id,
               orderNumber: Number(row.order_number),
@@ -398,9 +452,16 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
               orderStatus: row.order_status,
               paymentStatus: row.payment_status,
               incompleteCosting: Boolean(row.incomplete_costing),
+              subtotalMinor: minor(row.subtotal_minor),
+              discountMinor: minor(row.discount_minor),
+              deliveryMinor: minor(row.delivery_minor),
+              additionalChargesMinor: minor(row.additional_charges_minor),
               totalMinor: total,
               refundedMinor: ref,
-              netMinor: row.order_status === "cancelled" ? 0 : Math.max(0, total - ref),
+              netMinor: net,
+              cogsMinor: isCashier ? null : rowCogs,
+              grossProfitMinor: isCashier ? null : rowGrossProfit,
+              grossMarginPercent: isCashier ? null : rowGrossMargin,
               businessDate: row.business_date,
               orderedAt: row.ordered_at,
             };
@@ -436,6 +497,11 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
               refundTotalMinor,
               netSalesMinor,
               averageOrderValueMinor,
+              costOfGoodsMinor,
+              grossProfitMinor,
+              grossMarginPercent,
+              operatingExpensesMinor: opExpenses,
+              netProfitMinor,
             },
             paymentBreakdown,
             orderTypeBreakdown,
@@ -516,21 +582,49 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
 
             const res = await client.query(
               `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
-                      o.total_minor, o.business_date, o.ordered_at,
-                      COALESCE(ref.refund_total, 0) AS refunded_minor
+                      o.subtotal_minor, o.discount_minor, o.delivery_minor, o.additional_charges_minor,
+                      o.total_minor, o.cost_of_goods_minor, o.incomplete_costing,
+                      o.business_date, o.ordered_at,
+                      COALESCE(ref.refund_total, 0) AS refunded_minor,
+                      COALESCE(ref.restocked_cost, 0) AS restocked_cost_minor
                  FROM orders o
            LEFT JOIN (
-                     SELECT order_id, SUM(total_refunded_minor) AS refund_total
-                       FROM order_refunds
-                      WHERE restaurant_id = $1 AND status = 'completed'
-                      GROUP BY order_id
+                     SELECT r.order_id,
+                            SUM(r.total_refunded_minor) AS refund_total,
+                            SUM(COALESCE(items.restocked_cost, 0)) AS restocked_cost
+                       FROM order_refunds r
+                  LEFT JOIN (
+                         SELECT ri.refund_id, SUM(ri.quantity * oi.unit_cost_minor) AS restocked_cost
+                           FROM order_refund_items ri
+                           JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+                          WHERE ri.restaurant_id = $1 AND ri.restock = true
+                          GROUP BY ri.refund_id
+                       ) items ON items.refund_id = r.id
+                      WHERE r.restaurant_id = $1 AND r.status = 'completed'
+                      GROUP BY r.order_id
                   ) ref ON ref.order_id = o.id
                 WHERE ${scopeWhere}${keysetClause}
                 ORDER BY o.business_date ASC, o.order_number ASC, o.id ASC
                 LIMIT $${values.length + 1}`,
               [...values, pageSize],
             );
-            return res.rows;
+            return res.rows.map((row) => {
+              const total = minor(row.total_minor);
+              const ref = minor(row.refunded_minor);
+              const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
+              const rawCogs = minor(row.cost_of_goods_minor);
+              const restockedCost = minor(row.restocked_cost_minor);
+              const cogs = row.order_status === "completed" ? Math.max(0, rawCogs - restockedCost) : 0;
+              const grossProfit = row.order_status === "cancelled" ? 0 : (net - cogs);
+              return {
+                ...row,
+                total_minor: total,
+                refunded_minor: ref,
+                net_minor: net,
+                cogs_minor: cogs,
+                gross_profit_minor: grossProfit,
+              };
+            });
           },
         );
 
@@ -601,11 +695,22 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       lines.push(`Completed Sales,${(report.metrics.completedSalesMinor / 100).toFixed(2)}`);
       lines.push(`Total Refunds,${(report.metrics.refundTotalMinor / 100).toFixed(2)}`);
       lines.push(`Net Sales,${(report.metrics.netSalesMinor / 100).toFixed(2)}`);
+      const isCashier = (tenant.membership?.role || "") === "cashier";
+      if (!isCashier && report.metrics.costOfGoodsMinor !== null && report.metrics.costOfGoodsMinor !== undefined) {
+        lines.push(`Cost of Goods Sold (COGS),${(report.metrics.costOfGoodsMinor / 100).toFixed(2)}`);
+        lines.push(`Gross Profit,${(report.metrics.grossProfitMinor / 100).toFixed(2)}`);
+        lines.push(`Gross Profit Margin,${(report.metrics.grossMarginPercent || 0).toFixed(2)}%`);
+        lines.push(`Operating Expenses,${((report.metrics.operatingExpensesMinor || 0) / 100).toFixed(2)}`);
+        lines.push(`Net Operating Profit,${((report.metrics.netProfitMinor || 0) / 100).toFixed(2)}`);
+      }
       lines.push(`Cancelled Sales Total,${(report.metrics.cancelledSalesMinor / 100).toFixed(2)}`);
       lines.push(`Completed Order Count,${report.metrics.completedOrderCount}`);
       lines.push(`Cancelled Order Count,${report.metrics.cancelledOrderCount}`);
       lines.push(`Refunded Order Count,${report.metrics.refundedOrderCount}`);
       lines.push(`Average Order Value,${(report.metrics.averageOrderValueMinor / 100).toFixed(2)}`);
+      if (report.metrics.hasIncompleteCosting) {
+        lines.push(`Incomplete Costing Orders,${report.metrics.incompleteCostingOrderCount}`);
+      }
       lines.push("");
 
       lines.push("PAYMENT METHOD BREAKDOWN");
@@ -629,31 +734,231 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
       // Detailed rows stream from the export-specific paginated iterator,
       // which is not bounded by the interactive 200-row limit.
       lines.push("DETAILED SALES ROWS");
-      lines.push("Order Number,Business Date,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
+      if (!isCashier) {
+        lines.push("Order Number,Business Date,Time,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR),COGS (PKR),Gross Profit (PKR),Margin %,Costing Status");
+      } else {
+        lines.push("Order Number,Business Date,Time,Order Type,Order Status,Payment Status,Total (PKR),Refunded (PKR),Net (PKR)");
+      }
       for await (const rows of this.iterSalesReportRows({ tenant, filters: resolvedFilters })) {
         for (const row of rows) {
           const total = minor(row.total_minor);
-          // The iterator aliases the refund sum as `refunded_minor`;
-          // read that same property so the refunded and net columns
-          // reflect the actual refund total for the order.
           const ref = minor(row.refunded_minor);
           const net = row.order_status === "cancelled" ? 0 : Math.max(0, total - ref);
-          lines.push(
-            [
-              sanitizeCsvValue(Number(row.order_number)),
-              sanitizeCsvValue(row.business_date),
-              sanitizeCsvValue(row.order_type),
-              sanitizeCsvValue(row.order_status),
-              sanitizeCsvValue(row.payment_status),
-              (total / 100).toFixed(2),
-              (ref / 100).toFixed(2),
-              (net / 100).toFixed(2),
-            ].join(","),
-          );
+          const timeStr = row.ordered_at ? new Date(row.ordered_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+          const cols = [
+            sanitizeCsvValue(Number(row.order_number)),
+            sanitizeCsvValue(row.business_date),
+            sanitizeCsvValue(timeStr),
+            sanitizeCsvValue(row.order_type),
+            sanitizeCsvValue(row.order_status),
+            sanitizeCsvValue(row.payment_status),
+            (total / 100).toFixed(2),
+            (ref / 100).toFixed(2),
+            (net / 100).toFixed(2),
+          ];
+          if (!isCashier) {
+            const cogs = minor(row.cogs_minor);
+            const profit = minor(row.gross_profit_minor);
+            const margin = net > 0 ? ((profit / net) * 100).toFixed(2) + "%" : "0.00%";
+            cols.push(
+              (cogs / 100).toFixed(2),
+              (profit / 100).toFixed(2),
+              margin,
+              row.incomplete_costing ? "Incomplete" : "Verified",
+            );
+          }
+          lines.push(cols.join(","));
         }
       }
 
       return lines.join("\n");
+    },
+
+    /**
+     * Generates an OpenXML Excel workbook (.xlsx) stream for the complete filtered dataset.
+     */
+    async exportSalesReportXlsx({ tenant, filters = {} }) {
+      const timezone = filters.timezone || tenant.restaurant.timezone || "Asia/Karachi";
+      const todayStr = businessDateInTimezone(clock(), timezone);
+      const resolvedFilters = {
+        ...filters,
+        startDate: filters.startDate || todayStr,
+        endDate: filters.endDate || todayStr,
+        orderType: filters.orderType || null,
+        paymentMethod: filters.paymentMethod || null,
+      };
+      const isCashier = (tenant.membership?.role || "") === "cashier";
+      const report = await this.getSalesReport({
+        tenant,
+        filters: { ...resolvedFilters, page: 1, limit: 50 },
+      });
+      const allRows = [];
+      for await (const pageRows of this.iterSalesReportRows({ tenant, filters: resolvedFilters })) {
+        allRows.push(...pageRows);
+      }
+      return buildSalesReportXlsx({ report, rows: allRows, isCashier, clock });
+    },
+
+    /**
+     * Generates a landscape PDF 1.4 document buffer for the complete filtered dataset.
+     */
+    async exportSalesReportPdf({ tenant, filters = {} }) {
+      const timezone = filters.timezone || tenant.restaurant.timezone || "Asia/Karachi";
+      const todayStr = businessDateInTimezone(clock(), timezone);
+      const resolvedFilters = {
+        ...filters,
+        startDate: filters.startDate || todayStr,
+        endDate: filters.endDate || todayStr,
+        orderType: filters.orderType || null,
+        paymentMethod: filters.paymentMethod || null,
+      };
+      const isCashier = (tenant.membership?.role || "") === "cashier";
+      const report = await this.getSalesReport({
+        tenant,
+        filters: { ...resolvedFilters, page: 1, limit: 50 },
+      });
+      const allRows = [];
+      for await (const pageRows of this.iterSalesReportRows({ tenant, filters: resolvedFilters })) {
+        allRows.push(...pageRows);
+      }
+      return buildSalesReportPdf({ report, rows: allRows, isCashier, clock });
+    },
+
+    /**
+     * Returns an order's item-level recorded costs, quantities, prices, and line profitability.
+     * Cashier roles have unit costs and profit fields scrubbed for confidentiality.
+     */
+    async getOrderCostBreakdown({ tenant, orderId }) {
+      const restaurantId = tenant.restaurant.id;
+      const isCashier = (tenant.membership?.role || "") === "cashier";
+
+      return withTenantTransaction(
+        pool,
+        { restaurantId, userId: tenant.membership.userId },
+        async (client) => {
+          const orderRes = await client.query(
+            `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
+                    o.subtotal_minor, o.discount_minor, o.delivery_minor, o.additional_charges_minor,
+                    o.total_minor, o.cost_of_goods_minor, o.incomplete_costing,
+                    o.business_date, o.ordered_at,
+                    COALESCE(ref.refund_total, 0) AS refunded_minor,
+                    COALESCE(ref.restocked_cost, 0) AS restocked_cost_minor
+               FROM orders o
+          LEFT JOIN (
+                  SELECT r.order_id,
+                         SUM(r.total_refunded_minor) AS refund_total,
+                         SUM(COALESCE(items.restocked_cost, 0)) AS restocked_cost
+                    FROM order_refunds r
+               LEFT JOIN (
+                      SELECT ri.refund_id, SUM(ri.quantity * oi.unit_cost_minor) AS restocked_cost
+                        FROM order_refunds_items ri
+                        JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+                       WHERE ri.restaurant_id = $1 AND ri.restock = true
+                       GROUP BY ri.refund_id
+                    ) items ON items.refund_id = r.id
+                   WHERE r.restaurant_id = $1 AND r.status = 'completed'
+                   GROUP BY r.order_id
+               ) ref ON ref.order_id = o.id
+              WHERE o.restaurant_id = $1 AND o.id = $2`,
+            [restaurantId, orderId],
+          ).catch(async () => {
+            // Fallback without refund items join in case order_refunds_items table name difference
+            return client.query(
+              `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
+                      o.subtotal_minor, o.discount_minor, o.delivery_minor, o.additional_charges_minor,
+                      o.total_minor, o.cost_of_goods_minor, o.incomplete_costing,
+                      o.business_date, o.ordered_at,
+                      COALESCE(ref.refund_total, 0) AS refunded_minor,
+                      0::bigint AS restocked_cost_minor
+                 FROM orders o
+            LEFT JOIN (
+                    SELECT order_id, SUM(total_refunded_minor) AS refund_total
+                      FROM order_refunds
+                     WHERE restaurant_id = $1 AND status = 'completed'
+                     GROUP BY order_id
+                 ) ref ON ref.order_id = o.id
+                WHERE o.restaurant_id = $1 AND o.id = $2`,
+              [restaurantId, orderId],
+            );
+          });
+
+          const orderRow = orderRes.rows[0];
+          if (!orderRow) {
+            const notFound = new Error(`Order ${orderId} not found.`);
+            notFound.statusCode = 404;
+            throw notFound;
+          }
+
+          const itemsRes = await client.query(
+            `SELECT id, menu_item_id, item_name_snapshot, quantity, unit_price_minor, line_total_minor,
+                    unit_cost_minor, recipe_snapshot, sort_order
+               FROM order_items
+              WHERE restaurant_id = $1 AND order_id = $2
+              ORDER BY sort_order ASC, id ASC`,
+            [restaurantId, orderId],
+          );
+
+          const total = minor(orderRow.total_minor);
+          const refunded = minor(orderRow.refunded_minor);
+          const net = orderRow.order_status === "cancelled" ? 0 : Math.max(0, total - refunded);
+          const rawCogs = minor(orderRow.cost_of_goods_minor);
+          const restockedCost = minor(orderRow.restocked_cost_minor);
+          const cogs = orderRow.order_status === "completed" ? Math.max(0, rawCogs - restockedCost) : 0;
+          const profit = orderRow.order_status === "cancelled" ? 0 : (net - cogs);
+          const margin = net > 0 ? Number(((profit / net) * 100).toFixed(2)) : 0;
+
+          const items = itemsRes.rows.map((it) => {
+            const qty = Number(it.quantity);
+            const unitPrice = minor(it.unit_price_minor);
+            const lineTotal = minor(it.line_total_minor);
+            const unitCost = minor(it.unit_cost_minor);
+            const lineCost = Math.round(qty * unitCost);
+            const lineGrossProfit = lineTotal - lineCost;
+            const lineMargin = lineTotal > 0 ? Number(((lineGrossProfit / lineTotal) * 100).toFixed(1)) : 0;
+            const hasCost = unitCost > 0;
+
+            return {
+              id: it.id,
+              menuItemId: it.menu_item_id,
+              itemName: it.item_name_snapshot,
+              quantity: qty,
+              unitPriceMinor: unitPrice,
+              lineTotalMinor: lineTotal,
+              unitCostMinor: isCashier ? null : unitCost,
+              lineCostMinor: isCashier ? null : lineCost,
+              lineGrossProfitMinor: isCashier ? null : lineGrossProfit,
+              lineGrossMarginPercent: isCashier ? null : lineMargin,
+              hasCost,
+              recipeSnapshot: isCashier ? null : (it.recipe_snapshot || {}),
+            };
+          });
+
+          return {
+            order: {
+              id: orderRow.id,
+              orderNumber: Number(orderRow.order_number),
+              orderType: orderRow.order_type,
+              orderStatus: orderRow.order_status,
+              paymentStatus: orderRow.payment_status,
+              incompleteCosting: Boolean(orderRow.incomplete_costing),
+              businessDate: orderRow.business_date,
+              orderedAt: orderRow.ordered_at,
+              subtotalMinor: minor(orderRow.subtotal_minor),
+              discountMinor: minor(orderRow.discount_minor),
+              deliveryMinor: minor(orderRow.delivery_minor),
+              additionalChargesMinor: minor(orderRow.additional_charges_minor),
+              totalMinor: total,
+              refundedMinor: refunded,
+              netMinor: net,
+              cogsMinor: isCashier ? null : cogs,
+              grossProfitMinor: isCashier ? null : profit,
+              grossMarginPercent: isCashier ? null : margin,
+            },
+            items,
+            isCashier,
+          };
+        },
+      );
     },
   });
 }

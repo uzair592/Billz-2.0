@@ -1239,6 +1239,73 @@ export async function buildHttpApp({
           return reply.send(csvData);
         },
       );
+
+      app.get(
+        "/api/pos/reports/sales/export/xlsx",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REPORT_EXPORT),
+          ],
+        },
+        async (request, reply) => {
+          const filters = salesReportQuerySchema.parse(request.query ?? {});
+          const xlsxBuffer = await salesReportService.exportSalesReportXlsx({
+            tenant: request.tenant,
+            filters,
+          });
+          const startDate = filters.startDate || "start";
+          const endDate = filters.endDate || "end";
+          const slug = request.tenant.restaurant.slug || "export";
+          const filename = `sales-report-${slug}-${startDate}-to-${endDate}.xlsx`;
+
+          reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+          reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+          return reply.send(xlsxBuffer);
+        },
+      );
+
+      app.get(
+        "/api/pos/reports/sales/export/pdf",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REPORT_EXPORT),
+          ],
+        },
+        async (request, reply) => {
+          const filters = salesReportQuerySchema.parse(request.query ?? {});
+          const pdfBuffer = await salesReportService.exportSalesReportPdf({
+            tenant: request.tenant,
+            filters,
+          });
+          const startDate = filters.startDate || "start";
+          const endDate = filters.endDate || "end";
+          const slug = request.tenant.restaurant.slug || "export";
+          const filename = `sales-report-${slug}-${startDate}-to-${endDate}.pdf`;
+
+          reply.header("Content-Type", "application/pdf");
+          reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+          return reply.send(pdfBuffer);
+        },
+      );
+
+      app.get(
+        "/api/pos/reports/orders/:orderId/cost-breakdown",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(PERMISSION.REPORT_VIEW),
+          ],
+        },
+        async (request) => {
+          const { orderId } = request.params;
+          return salesReportService.getOrderCostBreakdown({
+            tenant: request.tenant,
+            orderId,
+          });
+        },
+      );
     }
 
     if (supplierService) {

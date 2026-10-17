@@ -114,7 +114,7 @@ export function createLegacyCloudAdapter({
     throw new TypeError("outbox must provide enqueue and flush functions.");
   }
 
-  async function importCatalogImpl({ restaurantId, snapshot } = {}) {
+  async function importCatalogImpl({ restaurantId, snapshot, forceOverwrite = false } = {}) {
     const targetRestaurant = restaurantId ?? (await session.activeRestaurant());
     if (!targetRestaurant) {
       throw new OrderSyncError("Sign in and choose a restaurant before importing.", {
@@ -152,9 +152,47 @@ export function createLegacyCloudAdapter({
     });
     const result = await response.json().catch(() => null);
     if (!response.ok) {
+      if (response.status === 409 && forceOverwrite) {
+        // Re-read latest revision and retry once if forced
+        const refreshRes = await fetchImpl("/api/pos/catalog", {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "x-restaurant-id": targetRestaurant },
+        });
+        if (refreshRes.ok) {
+          const freshData = await refreshRes.json();
+          body.expectedRevision = Number(freshData?.revision ?? 0);
+          const retryRes = await fetchImpl("/api/pos/import/legacy-catalog", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "content-type": "application/json",
+              "x-restaurant-id": targetRestaurant,
+            },
+            body: JSON.stringify(body),
+          });
+          const retryResult = await retryRes.json().catch(() => null);
+          if (retryRes.ok) {
+            const context = {
+              version: 1,
+              restaurantId: targetRestaurant,
+              importedAt: new Date().toISOString(),
+              revision: retryResult.revision ?? 0,
+              mappings: {
+                menuItems: retryResult.menuItems ?? {},
+                tables: retryResult.tables ?? {},
+                financialAccounts: retryResult.financialAccounts ?? {},
+              },
+            };
+            await storage.set(CLOUD_CONTEXT_KEY, context);
+            await storage.set("pos_catalog_baseline", catalogFingerprint(body));
+            return { result: retryResult, context };
+          }
+        }
+      }
       throw new OrderSyncError(result?.error ?? `Catalog import returned HTTP ${response.status}.`, {
         status: Number(response.status),
-        code: result?.code ?? "CATALOG_IMPORT_FAILED",
+        code: result?.code ?? (response.status === 409 ? "CATALOG_CONFLICT" : "CATALOG_IMPORT_FAILED"),
         retriable: Number(response.status) >= 500,
       });
     }

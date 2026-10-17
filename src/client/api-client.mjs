@@ -418,6 +418,36 @@ export const salesReportApi = {
     const url = `${API_BASE}/pos/reports/sales/export${queryString ? `?${queryString}` : ""}`;
     window.location.href = url;
   },
+
+  async downloadSalesReportXlsx(params = {}) {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set("startDate", params.startDate);
+    if (params.endDate) query.set("endDate", params.endDate);
+    if (params.timezone) query.set("timezone", params.timezone);
+    if (params.orderType) query.set("orderType", params.orderType);
+    if (params.paymentMethod) query.set("paymentMethod", params.paymentMethod);
+
+    const queryString = query.toString();
+    const url = `${API_BASE}/pos/reports/sales/export/xlsx${queryString ? `?${queryString}` : ""}`;
+    window.location.href = url;
+  },
+
+  async downloadSalesReportPdf(params = {}) {
+    const query = new URLSearchParams();
+    if (params.startDate) query.set("startDate", params.startDate);
+    if (params.endDate) query.set("endDate", params.endDate);
+    if (params.timezone) query.set("timezone", params.timezone);
+    if (params.orderType) query.set("orderType", params.orderType);
+    if (params.paymentMethod) query.set("paymentMethod", params.paymentMethod);
+
+    const queryString = query.toString();
+    const url = `${API_BASE}/pos/reports/sales/export/pdf${queryString ? `?${queryString}` : ""}`;
+    window.location.href = url;
+  },
+
+  async getOrderCostBreakdown(orderId) {
+    return apiRequest(`/pos/reports/orders/${orderId}/cost-breakdown`);
+  },
 };
 
 function buildQuery(params, keys) {
