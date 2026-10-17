@@ -10,7 +10,7 @@ async function openPos(page) {
         netSalesMinor: 10000, completedOrderCount: 1, costOfGoodsMinor: 3000, grossProfitMinor: 7000, grossMarginPercent: 70, operatingExpensesMinor: 500, netProfitMinor: 6500 },
       paymentBreakdown: [], orderTypeBreakdown: [], trends: [], detailedRows: { rows: [], pagination: { page: 1, totalPages: 1, totalRows: 0 } },
     } });
-    return route.fulfill({ json: { plans: [], subscription: null, tickets: [] } });
+    return route.fulfill({ json: { plans: [], subscription: null, tickets: [], accounts: [], expenses: [], totalCount: 0, totalMinor: 0 } });
   });
   await page.goto("/");
   await page.waitForFunction(() => window.BiteTechSalesReport && typeof bootFinished !== "undefined" && bootFinished);
@@ -81,3 +81,51 @@ test("report tabs expose gross, net and bill profitability using shared filtered
   await page.getByRole("tab", { name: "Sales Trends", exact: true }).click();
   await expect(page.locator('[data-report-section="trends"]')).toBeVisible();
 });
+
+for (const width of [1366, 768, 390]) {
+  test(`operational headings and controls stay compact at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await openPos(page);
+    for (const screen of ["edit-menu", "settings", "billing", "ledger", "cash-bank", "inventory", "purchases"]) {
+      await page.evaluate(screen => switchScreen(screen), screen);
+      const section = page.locator(`#screen-${screen}`);
+      await expect(section).toBeVisible();
+      const title = section.locator("h1:visible");
+      await expect(title).toHaveCount(1);
+      expect(parseFloat(await title.evaluate(node => getComputedStyle(node).fontSize))).toBeLessThanOrEqual(21);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+      if (screen === "edit-menu" && width === 1366) {
+        const actions = section.locator(".workspace-actions button");
+        const boxes = await Promise.all((await actions.all()).map(node => node.boundingBox()));
+        expect(new Set(boxes.map(box => Math.round(box.y))).size).toBe(1);
+        expect(boxes[0].height).toBeLessThanOrEqual(44);
+      }
+    }
+    await page.evaluate(() => { switchScreen("reports"); showCloudSalesReport(); });
+    await expect(page.locator("#screen-reports h1:visible")).toHaveCount(1);
+    await expect(page.getByRole("heading", { name: "📊 Reports", exact: true })).toBeVisible();
+    await page.getByLabel("Report order type").selectOption("delivery");
+    await page.getByRole("button", { name: "Apply Filters", exact: true }).click();
+    await expect(page.getByLabel("Report order type")).toHaveValue("delivery");
+    await expect(page.getByRole("button", { name: "📄 Export PDF", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+    await page.evaluate(() => {
+      switchScreen("expenses");
+      document.getElementById("local-expenses-container").classList.add("hidden");
+      document.getElementById("cloud-expenses-container").classList.remove("hidden");
+      BillzCloudExpenses.mount();
+    });
+    await expect(page.locator(".finance-header h2")).toHaveText("💵 Expenses");
+    await expect(page.getByLabel("Category", { exact: true })).toBeVisible();
+    expect((await page.getByRole("button", { name: "💾 Save Expense", exact: true }).boundingBox()).height).toBeGreaterThanOrEqual(40);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2)).toBe(true);
+    await page.evaluate(() => switchScreen("view-orders"));
+    await expect(page.getByLabel("Payment method", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Order status", { exact: true })).toBeVisible();
+    if (width === 1366) {
+      const toolbar = await page.locator("#history-toolbar").boundingBox();
+      const actions = await page.locator("#history-toolbar > span").boundingBox();
+      expect(Math.abs(actions.x + actions.width - toolbar.x - toolbar.width)).toBeLessThan(3);
+    }
+  });
+}

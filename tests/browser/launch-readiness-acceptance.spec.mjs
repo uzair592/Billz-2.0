@@ -83,7 +83,7 @@ test.describe("Production server readiness journeys", () => {
       await goTo(page, "expenses"); const expense = page.locator("#cloud-expenses-container"); await expect(expense.locator("[name=financialAccountId] option")).toHaveCount(1);
       await expense.locator("[name=categoryName]").fill("Electricity"); await expense.locator("[name=amount]").fill("10"); await expense.locator("[name=description]").fill('<img src=x onerror="globalThis.xssExecuted=true">'); await expense.locator("button[type=submit]").click();
       await expect(expense.locator("[data-message]")).toHaveText("Expense saved in the cloud."); await expect(expense.locator("[data-results]")).toContainText("Electricity"); await expect(expense.locator("img")).toHaveCount(0);
-      await goTo(page, "reports"); await expect(page.locator("#cloud-profit-loss-container [data-results]")).toContainText("150.00");
+      await goTo(page, "reports"); await page.locator("#restaurant-statement > summary").click(); await expect(page.locator("#cloud-profit-loss-container [data-results]")).toContainText("150.00");
       await expect(page.locator("#cloud-sales-report-container")).toContainText("200.00");
       await page.screenshot({ path: `tests/browser/screenshots/readiness-profit-${size.name}.png` });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);

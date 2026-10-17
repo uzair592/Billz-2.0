@@ -135,12 +135,12 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
 
     containerEl.innerHTML = `
       <div class="report-workspace" style="font-family:system-ui,-apple-system,sans-serif; color:#1e293b; padding:8px 0; max-width:1300px; margin:0 auto;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+        <div class="workspace-header report-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
           <div>
-            <h1 style="margin:0; font-size:24px; font-weight:700; color:#0f172a;">📊 Sales &amp; Profitability Reports</h1>
+            <h1 style="margin:0; font-size:24px; font-weight:700; color:#0f172a;">📊 Reports</h1>
             <div class="report-heading-note" style="font-size:12px; color:#64748b; margin-top:4px;">Shared restaurant reports</div>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <div class="workspace-actions report-exports" style="display:flex; gap:8px; flex-wrap:wrap;">
             <button id="sales-export-btn" class="report-btn" style="padding:8px 14px; background:#059669; color:white; border:none; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">
               📥 Export CSV
             </button>
@@ -154,7 +154,7 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
         </div>
 
         <!-- Date Controls & Filter Bar -->
-        <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+        <div class="report-filters" style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:16px; margin-bottom:20px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
           <div style="display:flex; gap:6px; flex-wrap:wrap;">
             <button type="button" class="preset-btn${selectedPreset === "today" ? " active" : ""}" data-preset="today" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "today" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">Today</button>
             <button type="button" class="preset-btn${selectedPreset === "yesterday" ? " active" : ""}" data-preset="yesterday" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "yesterday" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">Yesterday</button>
@@ -162,18 +162,18 @@ export function createSalesReportUI({ containerEl, restaurantTimezone = "Asia/Ka
             <button type="button" class="preset-btn${selectedPreset === "month" ? " active" : ""}" data-preset="month" style="padding:6px 12px; border:1px solid #cbd5e1; background:${selectedPreset === "month" ? "#2563eb; color:white;" : "#f8fafc;"} border-radius:6px; font-size:13px; cursor:pointer;">This Month</button>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <input type="date" id="report-start-date" value="${startDate ? startDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <input type="date" aria-label="Report start date" id="report-start-date" value="${startDate ? startDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
             <span style="font-size:13px; color:#64748b;">to</span>
-            <input type="date" id="report-end-date" value="${endDate ? endDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <input type="date" aria-label="Report end date" id="report-end-date" value="${endDate ? endDate.replace(/"/g, "&quot;") : ""}" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <select id="report-ordertype-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <select aria-label="Report order type" id="report-ordertype-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               <option value=""${orderType === "" ? " selected" : ""}>All Order Types</option>
               <option value="dine_in"${orderType === "dine_in" ? " selected" : ""}>Dine In</option>
               <option value="takeaway"${orderType === "takeaway" ? " selected" : ""}>Takeaway</option>
               <option value="delivery"${orderType === "delivery" ? " selected" : ""}>Delivery</option>
             </select>
-            <select id="report-paymentmethod-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+            <select aria-label="Report payment method" id="report-paymentmethod-filter" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               <option value=""${paymentMethod === "" ? " selected" : ""}>All Payment Methods</option>
               <option value="cash"${paymentMethod === "cash" ? " selected" : ""}>Cash</option>
               <option value="bank_account"${paymentMethod === "bank_account" ? " selected" : ""}>Bank Account</option>

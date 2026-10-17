@@ -45,3 +45,78 @@
 .profit-statement dl { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; margin: 0; }
 .profit-statement dt, .profit-statement dd { margin: 0; }
 .profit-statement dd { text-align: right; font-weight: 700; }
+
+/* A single compact title and a predictable action area on every workspace. */
+.workspace-header { min-width: 0; }
+.workspace-header h2 { font-size: 20px !important; line-height: 1.25; margin: 0 !important; }
+.workspace-header > div:first-child { min-width: 0; }
+.workspace-header .workspace-actions { display: flex !important; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px !important; width: auto !important; max-width: 100%; }
+.workspace-actions > button { width: auto !important; flex: 0 1 auto !important; min-height: 40px; margin: 0 !important; padding: 8px 12px !important; font-size: 12px !important; }
+.workspace-intro { margin: 0 0 12px !important; font-size: 12px !important; line-height: 1.4; color: #64748b; }
+#screen-edit-menu > .workspace-header, #screen-settings > .workspace-header { padding: 0 !important; }
+.screen-view :is(button, input, select, summary):focus-visible { outline: 2px solid #2563eb !important; outline-offset: 2px; }
+
+/* Search, status filters and actions share the available width. */
+#history-toolbar { gap: 8px; }
+#history-toolbar #history-search { flex-basis: 240px; width: 240px !important; }
+.history-status-filters { display: flex; flex: 1 1 250px; flex-wrap: wrap; gap: 8px; min-width: 0; }
+#history-toolbar select { flex: 1 1 120px; width: auto !important; min-width: 0; min-height: 40px; font-size: 12px; }
+#history-toolbar > span { margin-left: auto; }
+#history-results-count { margin-bottom: 8px !important; }
+#screen-view-orders .date-picker-group { flex-wrap: wrap; }
+#screen-view-orders .filter-controls-row :is(input,button) { min-height: 40px; box-sizing: border-box; }
+
+/* Stock navigation and live action buttons occupy one title row, not two. */
+:is(#screen-inventory, #screen-purchases):not(.hidden) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 12px; align-content: start; }
+:is(#screen-inventory, #screen-purchases) > .workspace-header,
+:is(#inventory-screen-container, #purchases-screen-container) { display: contents; }
+:is(#screen-inventory, #screen-purchases) > .workspace-header > div:first-child { grid-column: 1; grid-row: 1; align-self: center; }
+:is(#screen-inventory, #screen-purchases) > .workspace-header > .workspace-actions { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; padding: 4px; }
+:is(#inventory-screen-container, #purchases-screen-container) > * { grid-column: 1 / -1; min-width: 0; }
+:is(#inventory-screen-container, #purchases-screen-container) > .inventory-header { grid-column: 2; grid-row: 1; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 0; }
+:is(#inventory-screen-container, #purchases-screen-container) > .inventory-header h1 { display: none; }
+:is(#screen-inventory, #screen-purchases) .inventory-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+:is(#screen-inventory, #screen-purchases) .inventory-toolbar > :is(input,select) { width: auto; flex: 0 1 260px; min-width: 0; }
+:is(#screen-inventory, #screen-purchases) :is(.inventory-btn,.mode-switch-btn,.inventory-input) { min-height: 40px; box-sizing: border-box; }
+:is(#screen-inventory, #screen-purchases) .mode-switch-btn { border: 0; border-radius: 6px; background: transparent; color: #475569; padding: 8px 12px; cursor: pointer; font-weight: 600; }
+:is(#screen-inventory, #screen-purchases) .mode-switch-btn.active-switch { background: white; color: #1d4ed8; box-shadow: 0 1px 3px #0f172a14; }
+
+/* Mounted finance views and reports use the same density as other screens. */
+.finance-workspace { padding: 16px !important; margin-bottom: 12px !important; }
+.finance-header { align-items: center !important; margin-bottom: 12px !important; padding-bottom: 10px !important; }
+.finance-date-controls { padding: 4px 8px !important; max-width: 100%; box-sizing: border-box; }
+.finance-workspace :is(input,select,button) { min-height: 40px; box-sizing: border-box; }
+.finance-workspace [data-expense] { grid-template-columns: repeat(3,minmax(0,1fr)) !important; }
+.finance-workspace [data-message] { font-size: 12px !important; margin-bottom: 10px !important; }
+#screen-reports.shared-reports > .workspace-header { display: none !important; }
+.report-header { margin-bottom: 12px !important; gap: 10px !important; }
+.report-filters { padding: 10px !important; margin-bottom: 12px !important; gap: 8px !important; }
+.report-filters > div { flex-wrap: wrap; min-width: 0; }
+.report-filters :is(input,select,button), .report-exports button { min-height: 40px; box-sizing: border-box; }
+.report-workspace { max-width: none !important; min-width: 0; }
+#restaurant-statement { background: white; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 12px; }
+#restaurant-statement > summary { padding: 12px 16px; min-height: 44px; box-sizing: border-box; font-size: 13px; font-weight: 700; cursor: pointer; color: #334155; }
+#restaurant-statement #cloud-profit-loss-container { margin-bottom: 0 !important; }
+@media (max-width: 900px) {
+  .workspace-header .workspace-actions { justify-content: flex-start; }
+  .finance-workspace [data-expense] { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+}
+@media (max-width: 600px) {
+  .screen-view > .workspace-header { flex-wrap: wrap; }
+  .workspace-header h2 { font-size: 18px !important; }
+  .workspace-header .workspace-actions { width: 100% !important; }
+  .workspace-actions > button { flex: 1 1 auto !important; }
+  #history-toolbar .history-status-filters { flex-basis: 100%; }
+  #history-toolbar > span { margin-left: 0; }
+  .finance-workspace { padding: 12px !important; }
+  .finance-workspace [data-expense] { grid-template-columns: minmax(0,1fr) !important; }
+  .finance-date-controls { width: 100%; }
+  .finance-date-controls label { flex-wrap: wrap; min-width: 0; }
+  .report-exports { width: 100%; }
+  .report-exports button { flex: 1 1 auto !important; font-size: 11px !important; padding: 8px !important; }
+  .report-filters > div { width: 100%; }
+  .report-filters select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
+  .report-filters input { min-width: 0; max-width: 100%; }
+  :is(#screen-inventory, #screen-purchases):not(.hidden) { grid-template-columns: minmax(0,1fr); }
+  :is(#inventory-screen-container, #purchases-screen-container) > .inventory-header { grid-column: 1; grid-row: 3; justify-content: flex-start; }
+}

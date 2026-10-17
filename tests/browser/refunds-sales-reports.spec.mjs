@@ -1188,6 +1188,8 @@ test("managed Reports opens shared figures directly and cannot fall back to loca
   await page.evaluate(() => { window.BILLZ_MANAGED = true; switchScreen("reports"); });
   await expect(page.locator("#local-reports-view")).toBeHidden();
   await expect(page.locator("#cloud-sales-report-view")).toBeVisible();
+  await expect(page.locator("#cloud-profit-loss-container")).toBeHidden();
+  await page.locator("#restaurant-statement > summary").click();
   await expect(page.locator("#cloud-profit-loss-container")).toBeVisible();
   await expect(page.locator("#cloud-profit-loss-container")).toContainText("70.00");
   await expect(page.locator("#cloud-sales-report-container")).toContainText("Net Sales");

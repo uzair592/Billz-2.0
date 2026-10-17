@@ -79,13 +79,13 @@ export function createFinanceUI({ container, request = apiRequest, timezone = "A
       const today = businessToday();
       container.dataset.mounted = "true";
       container.innerHTML = `
-        <div style="background: white; border-radius: 12px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 24px;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; border-bottom:1px solid #e2e8f0; padding-bottom:14px; margin-bottom:18px;">
+        <div class="finance-workspace" style="background: white; border-radius: 12px; padding: 22px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); margin-bottom: 24px;">
+          <div class="workspace-header finance-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; border-bottom:1px solid #e2e8f0; padding-bottom:14px; margin-bottom:18px;">
             <div>
-              <h2 style="margin:0 0 4px; font-size:22px; color:#0f172a; font-weight:700;">${reportOnly ? "📊 Profit & Loss Statement" : "💵 Expenses Management"}</h2>
+              <h2 style="margin:0 0 4px; font-size:22px; color:#0f172a; font-weight:700;">${reportOnly ? "📊 Profit & Loss Statement" : "💵 Expenses"}</h2>
               <p style="margin:0; font-size:14px; color:#64748b;">${reportOnly ? "Financial performance summary and cost analysis." : "Log and monitor operational expenses across all till terminals."}</p>
             </div>
-            <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 12px; flex-wrap:wrap;">
+            <div class="finance-date-controls" style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:6px 12px; flex-wrap:wrap;">
               <label style="font-size:12px; font-weight:600; color:#475569; display:flex; align-items:center; gap:4px;">From: <input name="startDate" type="date" value="${today}" required style="padding:5px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;"></label>
               <label style="font-size:12px; font-weight:600; color:#475569; display:flex; align-items:center; gap:4px;">To: <input name="endDate" type="date" value="${today}" required style="padding:5px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:12px;"></label>
               <button type="button" data-refresh style="padding:6px 12px; background:#0f172a; color:white; border:none; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;">🔄 Refresh</button>
@@ -97,24 +97,24 @@ export function createFinanceUI({ container, request = apiRequest, timezone = "A
             <h3 style="margin:0 0 12px; font-size:14px; font-weight:700; color:#1e293b;">➕ Record New Expense</h3>
             <form data-expense style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; align-items:end;">
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Category</label>
-                <input name="categoryName" required maxlength="120" placeholder="e.g. Rent, Gas, Supplies" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                <label for="expense-categoryName" style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Category</label>
+                <input id="expense-categoryName" name="categoryName" required maxlength="120" placeholder="e.g. Rent, Gas, Supplies" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               </div>
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Amount (PKR)</label>
-                <input name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                <label for="expense-amount" style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Amount (PKR)</label>
+                <input id="expense-amount" name="amount" type="number" min="0.01" step="0.01" placeholder="0.00" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               </div>
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Business Date</label>
-                <input name="businessDate" type="date" value="${today}" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                <label for="expense-businessDate" style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Business Date</label>
+                <input id="expense-businessDate" name="businessDate" type="date" value="${today}" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               </div>
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Paid From Account</label>
-                <select name="financialAccountId" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:white;"></select>
+                <label for="expense-financialAccountId" style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Paid From Account</label>
+                <select id="expense-financialAccountId" name="financialAccountId" required style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:white;"></select>
               </div>
               <div>
-                <label style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Description / Note</label>
-                <input name="description" maxlength="1000" placeholder="Optional notes" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
+                <label for="expense-description" style="display:block; font-size:12px; font-weight:700; color:#475569; margin-bottom:4px;">Description / Note</label>
+                <input id="expense-description" name="description" maxlength="1000" placeholder="Optional notes" style="width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px;">
               </div>
               <div>
                 <button type="submit" style="width:100%; padding:9px 16px; background:#2563eb; color:white; border:none; border-radius:6px; font-size:13px; font-weight:700; cursor:pointer;">💾 Save Expense</button>

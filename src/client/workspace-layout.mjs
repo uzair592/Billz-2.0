@@ -11,7 +11,21 @@ export function initializeWorkspaceLayout() {
     const heading = screen.querySelector("h1");
     if (!heading) continue;
     const header = [...screen.children].find(node => node.contains(heading));
-    header?.classList.add("workspace-header");
+    if (header === heading) {
+      // Standalone titles (Billing and Item Ledger) need the same treatment.
+      const wrapper = document.createElement("header");
+      heading.before(wrapper);
+      wrapper.append(heading);
+      wrapper.classList.add("workspace-header");
+      const note = wrapper.nextElementSibling;
+      if (note?.tagName === "P") note.classList.add("workspace-intro");
+    } else {
+      header?.classList.add("workspace-header");
+      const actionGroup = header?.lastElementChild;
+      if (actionGroup?.querySelector("button") && !actionGroup.contains(heading) && !actionGroup.querySelector("h2, h3")) {
+        actionGroup.classList.add("workspace-actions");
+      }
+    }
   }
   const search = document.getElementById("history-search");
   const actions = document.querySelector("#history-results-count > span:last-child");
@@ -20,7 +34,16 @@ export function initializeWorkspaceLayout() {
     const toolbar = document.createElement("div");
     toolbar.id = "history-toolbar";
     wrapper.before(toolbar);
-    toolbar.append(search, actions);
+    const filters = document.createElement("div");
+    filters.className = "history-status-filters";
+    for (const id of ["history-payment-filter", "history-status-filter"]) {
+      const filter = document.getElementById(id);
+      if (filter) {
+        filter.setAttribute("aria-label", id === "history-payment-filter" ? "Payment method" : "Order status");
+        filters.append(filter);
+      }
+    }
+    toolbar.append(search, filters, actions);
     wrapper.remove();
     search.placeholder = "Search customer or phone…";
     search.setAttribute("aria-label", "Search orders by customer or phone");

@@ -68,10 +68,7 @@ window.renderOrdersHistory = orderHistory.renderOrdersHistory;
 const billingUI = createBillingUI();
 globalThis.BiteTechBilling = billingUI;
 
-// Server-authoritative sales reporting. The dashboard mounts
-// into the reports screen's cloud container and is shown only
-// when the operator switches to the "Cloud Sales Report" tab —
-// local IndexedDB totals are never presented as cloud figures.
+// The ordinary Reports workspace always uses server-authoritative figures.
 const salesReportContainer = document.getElementById(
   "cloud-sales-report-container",
 );
@@ -81,6 +78,8 @@ const salesReportUI = createSalesReportUI({
 globalThis.BiteTechSalesReport = salesReportUI;
 
 function showCloudSalesReport() {
+  const screen = document.getElementById("screen-reports");
+  screen?.classList.add("shared-reports");
   const localView = document.getElementById("local-reports-view");
   const cloudView = document.getElementById("cloud-sales-report-view");
   const localTab = document.getElementById("reports-tab-local");
@@ -91,14 +90,30 @@ function showCloudSalesReport() {
   if (cloudTab) cloudTab.classList.add("active-switch");
   document.getElementById("toggle-view-table")?.parentElement.classList.add("hidden");
   if (globalThis.BILLZ_MANAGED) {
-    document.getElementById("cloud-profit-loss-container")?.classList.remove("hidden");
-    globalThis.BillzCloudProfit?.mount();
+    const profit = document.getElementById("cloud-profit-loss-container");
+    if (profit && !document.getElementById("restaurant-statement")) {
+      const details = document.createElement("details");
+      details.id = "restaurant-statement";
+      const summary = document.createElement("summary");
+      summary.textContent = "Full restaurant profit & loss statement";
+      details.append(summary, profit);
+      cloudView?.after(details);
+      details.addEventListener("toggle", () => {
+        if (details.open) globalThis.BillzCloudProfit?.mount();
+      });
+    }
+    profit?.classList.remove("hidden");
+    const statement = document.getElementById("restaurant-statement");
+    statement?.classList.remove("hidden");
+    if (statement?.open) globalThis.BillzCloudProfit?.mount();
   }
   salesReportUI.mount();
 }
 
 function showLocalReports() {
   if (globalThis.BILLZ_MANAGED) return showCloudSalesReport();
+  document.getElementById("screen-reports")?.classList.remove("shared-reports");
+  document.getElementById("restaurant-statement")?.classList.add("hidden");
   const localView = document.getElementById("local-reports-view");
   const cloudView = document.getElementById("cloud-sales-report-view");
   const localTab = document.getElementById("reports-tab-local");
