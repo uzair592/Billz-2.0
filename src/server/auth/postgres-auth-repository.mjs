@@ -291,6 +291,10 @@ export function createPostgresAuthRepository(pool) {
             "UPDATE sessions SET revoked_at=$3 WHERE user_id=$1 AND token_hash=$2 AND restaurant_id=$4 AND revoked_at IS NULL",
             [userId, previousTokenHash, now, restaurantId],
           );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended('device_limit:' || $1::text, 0))",
+          [restaurantId],
+        );
         const limit = Number(plan?.max_devices ?? 20);
         const count = (
           await client.query(
@@ -300,12 +304,36 @@ export function createPostgresAuthRepository(pool) {
             [restaurantId, now],
           )
         ).rows[0];
-        if (Number(count.total) >= limit)
-          throw controlError(
+        if (Number(count.total) >= limit) {
+          const activeSessions = (
+            await client.query(
+              `SELECT s.id, s.ip_address, s.user_agent, s.last_seen_at, s.created_at,
+                      u.username, u.display_name
+                 FROM sessions s
+                 JOIN users u ON u.id = s.user_id
+                WHERE s.restaurant_id = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
+                ORDER BY s.last_seen_at DESC, s.created_at DESC`,
+              [restaurantId, now],
+            )
+          ).rows;
+          const err = controlError(
             `The restaurant's ${limit}-device limit is reached. Sign out another device or contact support.`,
             "DEVICE_LIMIT_REACHED",
             409,
           );
+          err.limit = limit;
+          err.deviceLimit = limit;
+          err.activeSessions = activeSessions.map((s) => ({
+            id: s.id,
+            ipAddress: s.ip_address,
+            userAgent: s.user_agent,
+            lastSeenAt: s.last_seen_at || s.created_at,
+            createdAt: s.created_at,
+            username: s.username,
+            displayName: s.display_name,
+          }));
+          throw err;
+        }
         await client.query(
           `INSERT INTO sessions(user_id,token_hash,ip_address,user_agent,expires_at,restaurant_id)
           VALUES($1,$2,$3,$4,$5,$6)`,
@@ -318,6 +346,151 @@ export function createPostgresAuthRepository(pool) {
       } finally {
         client.release();
       }
+    },
+
+    async revokeAndCreateSession({
+      userId,
+      expectedPasswordHash,
+      expectedUsername,
+      expectedEmail,
+      sessionToRevokeId,
+      now,
+      expectedRestaurantId = null,
+      expectedRestaurantCode = null,
+      tokenHash,
+      ipAddress,
+      userAgent,
+      expiresAt,
+    }) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        let restaurantId = expectedRestaurantId;
+        if (!restaurantId && expectedRestaurantCode) {
+          const res = (await client.query("SELECT id FROM restaurants WHERE code=$1", [String(expectedRestaurantCode).trim().toLowerCase()])).rows[0];
+          restaurantId = res?.id ?? null;
+        }
+        if (!restaurantId) {
+          const res = (await client.query("SELECT restaurant_id FROM restaurant_memberships WHERE user_id=$1 AND status='active' ORDER BY created_at LIMIT 1", [userId])).rows[0];
+          restaurantId = res?.restaurant_id ?? null;
+        }
+        if (!restaurantId) {
+          const res = (await client.query("SELECT restaurant_id FROM users WHERE id=$1", [userId])).rows[0];
+          restaurantId = res?.restaurant_id ?? null;
+        }
+        if (!restaurantId) throw controlError("Restaurant not found.", "RESTAURANT_NOT_FOUND", 404);
+
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended('device_limit:' || $1::text, 0))",
+          [restaurantId],
+        );
+
+        const row = (
+          await client.query(
+            "SELECT password_hash,status,username,email FROM users WHERE id=$1 FOR SHARE",
+            [userId],
+          )
+        ).rows[0];
+        if (
+          !row ||
+          row.status !== "active" ||
+          row.password_hash !== expectedPasswordHash ||
+          (expectedUsername && row.username !== expectedUsername) ||
+          (expectedEmail !== undefined && row.email !== expectedEmail)
+        )
+          throw controlError(
+            "Credentials changed. Please sign in again.",
+            "INVALID_CREDENTIALS",
+            401,
+          );
+
+        if (sessionToRevokeId) {
+          await client.query(
+            "UPDATE sessions SET revoked_at=$2 WHERE id=$1 AND restaurant_id=$3 AND revoked_at IS NULL",
+            [sessionToRevokeId, now, restaurantId],
+          );
+        }
+
+        const plan = (
+          await client.query(
+            `SELECT s.plan_id,p.max_devices FROM subscriptions s JOIN plans p ON p.id=s.plan_id
+             WHERE s.restaurant_id=$1 ORDER BY s.created_at DESC,s.id DESC LIMIT 1`,
+            [restaurantId],
+          )
+        ).rows[0];
+        const limit = Number(plan?.max_devices ?? 20);
+
+        const count = (
+          await client.query(
+            `SELECT count(*) AS total FROM sessions s JOIN users u ON u.id=s.user_id AND u.status='active'
+             JOIN restaurant_memberships m ON m.user_id=s.user_id AND m.restaurant_id=s.restaurant_id AND m.status='active'
+             WHERE s.restaurant_id=$1 AND s.revoked_at IS NULL AND s.expires_at>$2`,
+            [restaurantId, now],
+          )
+        ).rows[0];
+        if (Number(count.total) >= limit) {
+          const err = controlError(
+            `The restaurant's ${limit}-device limit is reached. Sign out another device or contact support.`,
+            "DEVICE_LIMIT_REACHED",
+            409,
+          );
+          err.limit = limit;
+          err.deviceLimit = limit;
+          throw err;
+        }
+
+        await client.query(
+          `INSERT INTO sessions(user_id,token_hash,ip_address,user_agent,expires_at,restaurant_id)
+           VALUES($1,$2,$3,$4,$5,$6)`,
+          [userId, tokenHash, ipAddress, userAgent, expiresAt, restaurantId],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback(client, error);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async listRestaurantSessions(restaurantIdOrOpts, now = new Date()) {
+      const restaurantId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.restaurantId : restaurantIdOrOpts;
+      const effectiveNow = (typeof restaurantIdOrOpts === "object" && restaurantIdOrOpts?.now) ? restaurantIdOrOpts.now : (now || new Date());
+      const result = await pool.query(
+        `SELECT s.id, s.ip_address, s.user_agent, s.last_seen_at, s.created_at, s.expires_at,
+                u.id AS user_id, u.username, u.display_name, m.role
+           FROM sessions s
+           JOIN users u ON u.id = s.user_id AND u.status = 'active'
+           JOIN restaurant_memberships m ON m.user_id = s.user_id AND m.restaurant_id = s.restaurant_id AND m.status = 'active'
+          WHERE s.restaurant_id = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
+          ORDER BY s.last_seen_at DESC, s.created_at DESC`,
+        [restaurantId, effectiveNow],
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        userId: row.user_id,
+        username: row.username,
+        displayName: row.display_name,
+        role: row.role,
+        ipAddress: row.ip_address,
+        userAgent: row.user_agent,
+        lastSeenAt: row.last_seen_at || row.created_at,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+      }));
+    },
+
+    async revokeRestaurantSession(restaurantIdOrOpts, sessionId, now = new Date()) {
+      const restaurantId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.restaurantId : restaurantIdOrOpts;
+      const effectiveSessionId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.sessionId : sessionId;
+      const effectiveNow = (typeof restaurantIdOrOpts === "object" && restaurantIdOrOpts?.now) ? restaurantIdOrOpts.now : (now || new Date());
+      const result = await pool.query(
+        `UPDATE sessions SET revoked_at = $3
+          WHERE id = $1 AND restaurant_id = $2 AND revoked_at IS NULL
+          RETURNING id`,
+        [effectiveSessionId, restaurantId, effectiveNow],
+      );
+      return result.rowCount > 0;
     },
 
     async changePassword({

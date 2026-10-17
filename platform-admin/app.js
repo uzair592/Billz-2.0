@@ -85,6 +85,7 @@ let restaurantPage = 1,
   auditPage = 1,
   paymentPage = 1,
   editingUser = null,
+  editingBranch = null,
   plans = [],
   currentRestaurant = null,
   resetUser = null;
@@ -98,7 +99,11 @@ function showView(view) {
     "payments-page",
     "plans-page",
     "security-page",
+    "sync-page",
+    "analytics-page",
+    "devices-page",
     "detail-view",
+    "device-detail-view",
   ])
     $(id).classList.add("hidden");
   $(`${view}-page`).classList.remove("hidden");
@@ -109,6 +114,9 @@ function showView(view) {
     payments: "Payments",
     plans: "Subscription plans",
     security: "Administrator security",
+    sync: "Offline sync & telemetry",
+    analytics: "Platform financial analytics",
+    devices: "Device registry",
   }[view];
   document
     .querySelectorAll("[data-view]")
@@ -251,6 +259,9 @@ document.querySelectorAll("[data-view]").forEach(
         payments: loadPayments,
         plans: loadPlanCatalog,
         security: loadSecurity,
+        sync: loadSyncMonitoring,
+        analytics: loadAnalytics,
+        devices: loadDevices,
       })
         [view]()
         .catch(handleError);
@@ -367,6 +378,52 @@ function paymentsMarkup(payments) {
         .join("")
     : '<tr><td colspan="5" class="empty">No manual payments recorded.</td></tr>';
 }
+function branchesMarkup(branches) {
+  return branches && branches.length
+    ? branches
+        .map(
+          (b) => `<tr>
+            <td><strong>${escapeHtml(b.code)}</strong></td>
+            <td>${escapeHtml(b.name)}</td>
+            <td>${escapeHtml(b.phone || "—")}<br><small class="muted">${escapeHtml(b.address || "No address")}</small></td>
+            <td>${escapeHtml(b.timezone || "—")}</td>
+            <td>${b.isActive ? '<span class="badge good">Active</span>' : '<span class="badge bad">Inactive</span>'}</td>
+            <td>${b.isDefault ? '<span class="badge warning">Default</span>' : "—"}</td>
+            <td><button class="btn secondary branch-edit" data-bid="${escapeHtml(b.id)}">Edit</button></td>
+          </tr>`,
+        )
+        .join("")
+    : '<tr><td colspan="7" class="empty">No branches configured. Click "+ Add branch" to create one.</td></tr>';
+}
+function restaurantSyncMarkup(syncList) {
+  return syncList && syncList.length
+    ? syncList
+        .map((d) => {
+          const isOnline = d.status === "online";
+          const pendingBadge =
+            d.pendingOrdersCount > 0
+              ? `<span class="badge warning">${d.pendingOrdersCount} queued</span>`
+              : '<span class="badge good">0</span>';
+          const failedBadge =
+            d.failedSyncCount > 0
+              ? `<span class="badge bad">${d.failedSyncCount} failed</span>`
+              : '<span class="badge good">0</span>';
+          const syncErr = d.lastSyncError
+            ? `<br><small class="muted" style="color:var(--danger)">${escapeHtml(d.lastSyncError)}</small>`
+            : "";
+          return `<tr>
+            <td><strong>${escapeHtml(d.deviceName)}</strong><br><small class="muted">${escapeHtml(d.deviceId)}</small></td>
+            <td>${escapeHtml(d.branchCode || "—")}</td>
+            <td>${escapeHtml(d.platform || "Web")}<br><small class="muted">v${escapeHtml(d.appVersion || "1.0")}</small></td>
+            <td>${pendingBadge}</td>
+            <td>${failedBadge}</td>
+            <td>${d.lastSyncAt ? new Date(d.lastSyncAt).toLocaleString() : "Never"}${syncErr}</td>
+            <td><span class="badge ${isOnline ? "good" : "bad"}">${isOnline ? "Online" : "Offline"}</span></td>
+          </tr>`;
+        })
+        .join("")
+    : '<tr><td colspan="7" class="empty">No sync telemetry recorded for this restaurant yet.</td></tr>';
+}
 let detailReqId = 0;
 async function viewRestaurant(id) {
   const requestId = ++detailReqId;
@@ -403,6 +460,8 @@ async function viewRestaurant(id) {
     <article class="card"><h3>Subscription</h3>${badge(s.status)}<p><strong>${escapeHtml(s.planName)}</strong> · ${escapeHtml(s.planCode || "—")}</p><p class="muted">${date(s.currentPeriodStart)} – ${date(s.currentPeriodEnd)}</p><p>${Number(s.maxDevices)} concurrent devices</p><button id="subscription-edit-btn" class="btn secondary">Assign / renew plan</button></article>
     <article class="card"><h3>File storage</h3><strong>${bytes(storage.usedStorageBytes)} / ${bytes(storage.maxStorageBytes)}</strong><progress max="100" value="${percentage}" aria-label="Storage used"></progress>
       <form id="storage-form"><label for="storage-limit">Allowance (GB)</label><input id="storage-limit" type="number" min="0" step="any" value="${Number(storage.maxStorageBytes) / 1073741824}" required /><button class="btn secondary" type="submit">Update allowance</button></form></article></div>
+    <article class="card"><div class="section-heading"><div><h3>Branches</h3><p class="muted">Manage multiple branch outlets and locations for this restaurant.</p></div><button id="add-branch-btn" class="btn secondary">+ Add branch</button></div><div class="table-wrap"><table><thead><tr><th>Code</th><th>Name</th><th>Phone / Address</th><th>Timezone</th><th>Status</th><th>Default</th><th>Actions</th></tr></thead><tbody id="branches-tbody">${branchesMarkup(data.branches)}</tbody></table></div></article>
+    <article class="card"><div class="section-heading"><div><h3>Device sync telemetry</h3><p class="muted">Live status of POS terminals, offline order queues and sync failures.</p></div><button id="refresh-restaurant-sync-btn" class="btn secondary">Refresh telemetry</button></div><div class="table-wrap"><table><thead><tr><th>Device</th><th>Branch</th><th>Platform / App</th><th>Queued orders</th><th>Failures</th><th>Last sync</th><th>Status</th></tr></thead><tbody id="restaurant-sync-tbody">${restaurantSyncMarkup(data.syncStatus)}</tbody></table></div></article>
     <article class="card"><div class="section-heading"><h3>Restaurant users</h3><button id="create-user-btn" class="btn secondary">+ Create user</button></div><div class="action-row"><button id="owner-credentials-btn" class="btn secondary">Manage owner credentials</button></div><p class="muted">Password resets and disabling users sign out their active devices.</p><div class="table-wrap"><table><thead><tr><th>Username</th><th>Display name</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users-tbody">${usersMarkup(data.users)}</tbody></table></div></article>
     <article class="card"><div class="section-heading"><h3>Active devices / sessions</h3><button id="force-logout-btn" class="btn danger">Force logout all devices</button></div><p class="muted">One slot per active session; multiple tabs sharing a session use one slot.</p><div id="session-results">Loading sessions…</div></article>
     <article class="card"><h3>Record manual payment</h3><form id="record-pay-form" class="form-grid">
@@ -412,6 +471,17 @@ async function viewRestaurant(id) {
       <label for="pay-from">Covered from<input id="pay-from" type="date" required /></label><label for="pay-until">Covered until<input id="pay-until" type="date" required /></label>
       <label for="pay-ref" class="span-two">Transaction reference<input id="pay-ref" required maxlength="200" /></label><div class="span-two"><button type="submit" class="btn">Record payment</button></div></form></article>
     <article class="card"><h3>Payment history</h3><div class="table-wrap"><table><thead><tr><th>Reference / plan</th><th>Amount</th><th>Status</th><th>Coverage</th><th>Actions</th></tr></thead><tbody>${paymentsMarkup(data.payments)}</tbody></table></div></article>`;
+  $("add-branch-btn").onclick = () => openBranchModal();
+  $("refresh-restaurant-sync-btn").onclick = async () => {
+    try {
+      const res = await apiCall(`/platform-admin/api/restaurants/${encodeURIComponent(id)}/sync-status`);
+      currentRestaurant.syncStatus = res.devices || [];
+      $("restaurant-sync-tbody").innerHTML = restaurantSyncMarkup(currentRestaurant.syncStatus);
+      toast("Sync telemetry refreshed.");
+    } catch (e) {
+      handleError(e);
+    }
+  };
   $("create-user-btn").onclick = () => openUserModal();
   $("owner-credentials-btn").onclick = () => openOwnerCredentials(data);
   $("subscription-edit-btn").onclick = () =>
@@ -530,6 +600,14 @@ $("detail-content").addEventListener("click", (event) => {
         : "This payment will not grant subscription access.",
       `/platform-admin/api/payments/${payment.dataset.pid}/${approve ? "approve" : "reject"}`,
     ).catch(handleError);
+    return;
+  }
+  const branchEdit = event.target.closest(".branch-edit");
+  if (branchEdit) {
+    const branch = currentRestaurant.branches?.find(
+      (b) => b.id === branchEdit.dataset.bid,
+    );
+    if (branch) openBranchModal(branch);
     return;
   }
   const edit = event.target.closest(".user-edit");
@@ -1176,3 +1254,754 @@ for (const [id, action] of [['mfa-start-form','start'],['mfa-verify-form','verif
   };
 }
 window.addEventListener('pagehide',clearEnrollment);
+
+function openBranchModal(branch = null) {
+  editingBranch = branch;
+  $("branch-modal-title").textContent = branch ? "Edit branch" : "Create branch";
+  $("branch-name").value = branch?.name || "";
+  $("branch-code").value = branch?.code || "";
+  $("branch-code").disabled = Boolean(branch);
+  $("branch-phone").value = branch?.phone || "";
+  $("branch-address").value = branch?.address || "";
+  $("branch-timezone").value = branch?.timezone || "Asia/Karachi";
+  $("branch-active").checked = branch ? Boolean(branch.isActive) : true;
+  $("branch-default").checked = branch ? Boolean(branch.isDefault) : false;
+  $("branch-modal").showModal();
+}
+$("branch-modal").addEventListener("close", () => {
+  editingBranch = null;
+  $("branch-code").disabled = false;
+});
+$("branch-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  try {
+    const restaurantId = currentRestaurant.restaurant.id;
+    const payload = {
+      name: $("branch-name").value.trim(),
+      phone: $("branch-phone").value.trim() || null,
+      address: $("branch-address").value.trim() || null,
+      timezone: $("branch-timezone").value.trim() || "Asia/Karachi",
+      isActive: $("branch-active").checked,
+      isDefault: $("branch-default").checked,
+    };
+    if (editingBranch) {
+      await apiCall(
+        `/platform-admin/api/restaurants/${encodeURIComponent(restaurantId)}/branches/${encodeURIComponent(editingBranch.id)}`,
+        { method: "PATCH", body: JSON.stringify(payload) },
+      );
+      toast("Branch updated.");
+    } else {
+      payload.code = $("branch-code").value.trim().toLowerCase();
+      await apiCall(
+        `/platform-admin/api/restaurants/${encodeURIComponent(restaurantId)}/branches`,
+        { method: "POST", body: JSON.stringify(payload) },
+      );
+      toast("Branch created.");
+    }
+    $("branch-modal").close();
+    await viewRestaurant(restaurantId);
+  } catch (error) {
+    handleError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+async function loadSyncMonitoring() {
+  $("sync-tbody").innerHTML =
+    '<tr><td colspan="8" class="empty">Loading sync telemetry…</td></tr>';
+  try {
+    const data = await apiCall("/platform-admin/api/sync-monitoring");
+    const s = data.summary || {};
+    $("sync-stat-total").textContent = s.totalDevices ?? 0;
+    $("sync-stat-online").textContent = s.onlineNow ?? 0;
+    $("sync-stat-pending").textContent = s.totalPendingOrders ?? 0;
+    $("sync-stat-failed").textContent = s.totalFailedJobs ?? 0;
+    $("sync-stat-errors").textContent = s.errorDevices ?? 0;
+
+    const list = data.devices || [];
+    $("sync-tbody").innerHTML = list.length
+      ? list
+          .map((d) => {
+            const isOnline = d.status === "online";
+            const pendingBadge =
+              d.pendingOrdersCount > 0
+                ? `<span class="badge warning">${d.pendingOrdersCount} queued</span>`
+                : '<span class="badge good">0</span>';
+            const failedBadge =
+              d.failedSyncCount > 0
+                ? `<span class="badge bad">${d.failedSyncCount} failed</span>`
+                : '<span class="badge good">0</span>';
+            const syncErr = d.lastSyncError
+              ? `<br><small class="muted" style="color:var(--danger)">${escapeHtml(d.lastSyncError)}</small>`
+              : "";
+            return `<tr>
+              <td><strong>${escapeHtml(d.restaurantName || "—")}</strong><br><small class="muted">${escapeHtml(d.restaurantCode || "")}</small></td>
+              <td><strong>${escapeHtml(d.deviceName)}</strong><br><small class="muted">${escapeHtml(d.deviceId)}</small></td>
+              <td>${escapeHtml(d.branchCode || "—")}</td>
+              <td>${escapeHtml(d.platform || "Web")}<br><small class="muted">v${escapeHtml(d.appVersion || "1.0")}</small></td>
+              <td>${pendingBadge}</td>
+              <td>${failedBadge}</td>
+              <td>${d.lastSyncAt ? new Date(d.lastSyncAt).toLocaleString() : "Never"}${syncErr}</td>
+              <td><span class="badge ${isOnline ? "good" : "bad"}">${isOnline ? "Online" : "Offline"}</span></td>
+            </tr>`;
+          })
+          .join("")
+      : '<tr><td colspan="8" class="empty">No sync telemetry records found.</td></tr>';
+  } catch (error) {
+    $("sync-tbody").innerHTML =
+      '<tr><td colspan="8" class="empty">Failed to load sync telemetry.</td></tr>';
+    throw error;
+  }
+}
+$("refresh-sync-btn").onclick = () => loadSyncMonitoring().catch(handleError);
+
+async function loadAnalytics() {
+  try {
+    const data = await apiCall("/platform-admin/api/analytics/overview");
+    const o = data.overview || {};
+    const formatCurrency = (minor) =>
+      `PKR ${(Number(minor || 0) / 100).toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`;
+
+    $("analytics-mrr").textContent = formatCurrency(o.mrrMinor);
+    $("analytics-arr").textContent = formatCurrency(o.arrMinor);
+    $("analytics-30d-rev").textContent = formatCurrency(o.revenueLast30DaysMinor);
+    $("analytics-total-rev").textContent = formatCurrency(o.totalVerifiedRevenueMinor);
+    $("analytics-active-subs").textContent = o.activeSubscriptions ?? 0;
+    $("analytics-trial-subs").textContent = o.trialSubscriptions ?? 0;
+    $("analytics-churned-subs").textContent = o.churnedSubscriptions ?? 0;
+    $("analytics-churn-rate").textContent = `${o.churnRatePercentage ?? 0}%`;
+
+    const plansTable = $("analytics-plans-tbody");
+    plansTable.innerHTML = (data.plansBreakdown || []).length
+      ? data.plansBreakdown
+          .map(
+            (p) => `<tr>
+              <td><strong>${escapeHtml(p.name)}</strong></td>
+              <td><code>${escapeHtml(p.code)}</code></td>
+              <td>${p.activeSubscribers}</td>
+              <td>${p.totalSubscribers}</td>
+              <td><strong>${formatCurrency(p.mrrContributionMinor)}</strong></td>
+            </tr>`,
+          )
+          .join("")
+      : '<tr><td colspan="5" class="empty">No active plans.</td></tr>';
+
+    const paymentsTable = $("analytics-payments-tbody");
+    paymentsTable.innerHTML = (data.recentPayments || []).length
+      ? data.recentPayments
+          .map(
+            (p) => `<tr>
+              <td>${date(p.paymentDate)}</td>
+              <td><strong>${escapeHtml(p.restaurantName || "—")}</strong> <small class="muted">(${escapeHtml(p.restaurantCode || "")})</small></td>
+              <td>${escapeHtml(p.planName || "—")}</td>
+              <td><strong>${escapeHtml(p.currencyCode)} ${(Number(p.amountMinor) / 100).toFixed(2)}</strong></td>
+              <td><code>${escapeHtml(p.externalReference || "—")}</code></td>
+            </tr>`,
+          )
+          .join("")
+      : '<tr><td colspan="5" class="empty">No verified payments found.</td></tr>';
+  } catch (error) {
+    handleError(error);
+  }
+}
+$("export-payments-csv-btn").onclick = async () => {
+  try {
+    const res = await fetch(
+      "/platform-admin/api/analytics/export-payments.csv",
+      { credentials: "same-origin" },
+    );
+    if (!res.ok) throw new Error(`Export failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `platform_payments_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Payments CSV exported.");
+  } catch (error) {
+    handleError(error);
+  }
+};
+
+// --- DEDICATED DEVICE MANAGEMENT MODULE ---
+let devicePage = 1;
+let deviceTotalCount = 0;
+let currentDevice = null;
+let deviceSearchReqId = 0;
+let cachedRestaurantsForDevices = [];
+
+function deviceBadge(calculatedStatus, persistentStatus) {
+  if (persistentStatus === "revoked" || calculatedStatus === "revoked") {
+    return '<span class="badge bad">Revoked</span>';
+  }
+  switch (calculatedStatus) {
+    case "online":
+      return '<span class="badge good">Online</span>';
+    case "offline":
+      return '<span class="badge warning">Offline</span>';
+    case "stale":
+      return '<span class="badge warning" style="opacity:0.8">Stale (&gt;24h)</span>';
+    default:
+      return `<span class="badge">${escapeHtml(calculatedStatus || "unknown")}</span>`;
+  }
+}
+
+async function populateDeviceRestaurantDropdowns() {
+  if (cachedRestaurantsForDevices.length) return;
+  try {
+    const data = await apiCall("/platform-admin/api/restaurants?limit=100");
+    cachedRestaurantsForDevices = data.restaurants || data || [];
+    const filterSelect = $("device-restaurant-filter");
+    if (filterSelect) {
+      filterSelect.innerHTML =
+        '<option value="">All restaurants</option>' +
+        cachedRestaurantsForDevices
+          .map(
+            (r) =>
+              `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`,
+          )
+          .join("");
+    }
+  } catch (err) {
+    console.error("Failed to preload restaurants for device filter", err);
+  }
+}
+
+async function loadDevices() {
+  const reqId = ++deviceSearchReqId;
+  await populateDeviceRestaurantDropdowns();
+
+  const params = new URLSearchParams();
+  params.set("page", devicePage);
+  params.set("limit", pageSize);
+  const searchVal = $("device-search-input").value.trim();
+  if (searchVal) params.set("search", searchVal);
+  const statusVal = $("device-status-filter").value;
+  if (statusVal && statusVal !== "all") params.set("status", statusVal);
+  const typeVal = $("device-type-filter").value;
+  if (typeVal) params.set("deviceType", typeVal);
+  const restVal = $("device-restaurant-filter").value;
+  if (restVal) params.set("restaurantId", restVal);
+
+  const query = params.toString();
+
+  const tbody = $("devices-tbody");
+  tbody.innerHTML =
+    '<tr><td colspan="8" class="empty">Loading devices…</td></tr>';
+
+  try {
+    const data = await apiCall(`/platform-admin/api/devices?${query}`);
+    if (reqId !== deviceSearchReqId) return;
+
+    const s = data.summary || {};
+    $("dev-stat-total").textContent = s.totalDevices ?? 0;
+    $("dev-stat-online").textContent = s.onlineDevices ?? 0;
+    $("dev-stat-offline").textContent = s.offlineDevices ?? 0;
+    $("dev-stat-stale").textContent = s.staleDevices ?? 0;
+    $("dev-stat-revoked").textContent = s.revokedDevices ?? 0;
+
+    const list = data.devices || [];
+    deviceTotalCount = data.totalCount ?? list.length;
+    tbody.innerHTML = "";
+
+    if (!list.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="8" class="empty">No registered devices match your criteria.</td></tr>';
+    } else {
+      list.forEach((dev) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><strong>${escapeHtml(dev.name)}</strong><br><small class="muted"><code>${escapeHtml(dev.deviceUid)}</code></small></td>
+          <td><strong>${escapeHtml(dev.restaurantName || "—")}</strong><br><small class="muted">${escapeHtml(dev.branchName || dev.branchCode || "Default branch")}</small></td>
+          <td>${escapeHtml((dev.deviceType || "desktop").toUpperCase())}<br><small class="muted">${escapeHtml(dev.os || dev.platform || "Web")}</small></td>
+          <td><code>v${escapeHtml(dev.appVersion || "1.0.0")}</code></td>
+          <td>${deviceBadge(dev.calculatedStatus, dev.status)}</td>
+          <td>${dev.lastSeenAt ? new Date(dev.lastSeenAt).toLocaleString() : "Never"}</td>
+          <td>${dev.lastSyncAt ? new Date(dev.lastSyncAt).toLocaleString() : "Never"}</td>
+          <td><button class="btn secondary btn-manage-device" data-id="${escapeHtml(dev.id)}">Manage</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    pager("device", devicePage, deviceTotalCount, pageSize);
+  } catch (error) {
+    if (reqId !== deviceSearchReqId) return;
+    tbody.innerHTML =
+      '<tr><td colspan="8" class="empty">Could not load devices. Adjust filters to retry.</td></tr>';
+    throw error;
+  }
+}
+
+$("device-search-input").addEventListener("input", () => {
+  devicePage = 1;
+  loadDevices().catch(handleError);
+});
+$("device-status-filter").addEventListener("change", () => {
+  devicePage = 1;
+  loadDevices().catch(handleError);
+});
+$("device-type-filter").addEventListener("change", () => {
+  devicePage = 1;
+  loadDevices().catch(handleError);
+});
+$("device-restaurant-filter").addEventListener("change", () => {
+  devicePage = 1;
+  loadDevices().catch(handleError);
+});
+$("device-prev").onclick = () => {
+  if (devicePage > 1) {
+    devicePage--;
+    loadDevices().catch(handleError);
+  }
+};
+$("device-next").onclick = () => {
+  const maxPage = Math.ceil(deviceTotalCount / pageSize);
+  if (devicePage < maxPage) {
+    devicePage++;
+    loadDevices().catch(handleError);
+  }
+};
+
+$("devices-tbody").addEventListener("click", (event) => {
+  const button = event.target.closest(".btn-manage-device");
+  if (button) viewDevice(button.dataset.id).catch(handleError);
+});
+
+$("close-device-detail-btn").onclick = () => {
+  $("device-detail-view").classList.add("hidden");
+  $("devices-page").classList.remove("hidden");
+  loadDevices().catch(handleError);
+};
+
+async function viewDevice(deviceId) {
+  const content = $("device-detail-content");
+  content.innerHTML =
+    '<div class="empty">Loading device administrative details…</div>';
+  $("devices-page").classList.add("hidden");
+  $("device-detail-view").classList.remove("hidden");
+
+  try {
+    const data = await apiCall(
+      `/platform-admin/api/devices/${encodeURIComponent(deviceId)}`,
+    );
+    currentDevice = data.device;
+    const d = data.device;
+    const restaurant = data.restaurant || {};
+    const branch = data.branch || {};
+    const sessions = data.activeSessions || [];
+    const audits = data.auditHistory || [];
+
+    $("device-detail-name").textContent = `${d.name} (${d.deviceUid})`;
+
+    if (d.status === "revoked") {
+      $("btn-revoke-device").classList.add("hidden");
+      $("btn-reactivate-device").classList.remove("hidden");
+    } else {
+      $("btn-revoke-device").classList.remove("hidden");
+      $("btn-reactivate-device").classList.add("hidden");
+    }
+
+    const sessionsMarkup = sessions.length
+      ? sessions
+          .map(
+            (s) => `<tr>
+          <td><strong>${escapeHtml(s.username || s.displayName || "Unknown")}</strong></td>
+          <td><code>${escapeHtml(s.ipAddress || "—")}</code></td>
+          <td>${escapeHtml(s.userAgent || "—")}</td>
+          <td>${s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleString() : "—"}</td>
+          <td>${s.expiresAt ? new Date(s.expiresAt).toLocaleString() : "—"}</td>
+        </tr>`,
+          )
+          .join("")
+      : '<tr><td colspan="5" class="empty">No active authenticated sessions for this device.</td></tr>';
+
+    const auditMarkup = audits.length
+      ? audits
+          .map(
+            (a) => `<tr>
+          <td><strong>${escapeHtml(a.action)}</strong></td>
+          <td>${escapeHtml(a.actorType || "platform_admin")}<br><small class="muted">${escapeHtml(a.actorId || "")}</small></td>
+          <td><code>${escapeHtml(a.ipAddress || "—")}</code></td>
+          <td>${date(a.createdAt)} ${new Date(a.createdAt).toLocaleTimeString()}</td>
+          <td><pre style="margin:0; font-size:11px; max-width:260px; overflow-x:auto;">${escapeHtml(JSON.stringify(a.metadata || {}, null, 1))}</pre></td>
+        </tr>`,
+          )
+          .join("")
+      : '<tr><td colspan="5" class="empty">No audit events recorded for this device.</td></tr>';
+
+    const revocationBox =
+      d.status === "revoked"
+        ? `<div style="background:var(--danger-bg, #fee2e2); border:1px solid var(--danger, #ef4444); border-radius:6px; padding:12px; margin-bottom:1rem;">
+          <strong style="color:var(--danger, #b91c1c);">Device Revoked on ${d.revokedAt ? new Date(d.revokedAt).toLocaleString() : "Unknown"}</strong>
+          <p style="margin:4px 0 0; color:#7f1d1d;">Reason: ${escapeHtml(d.revocationReason || "No reason specified.")}</p>
+        </div>`
+        : d.reactivatedAt
+          ? `<div style="background:var(--success-bg, #dcfce7); border:1px solid var(--success, #22c55e); border-radius:6px; padding:12px; margin-bottom:1rem;">
+            <strong style="color:var(--success, #15803d);">Device Reactivated on ${new Date(d.reactivatedAt).toLocaleString()}</strong>
+            <p style="margin:4px 0 0; color:#14532d;">Reason: ${escapeHtml(d.reactivationReason || "No reason specified.")}</p>
+          </div>`
+          : "";
+
+    content.innerHTML = `
+      ${revocationBox}
+      <div class="grid cols-2" style="margin-bottom:1.5rem;">
+        <article class="card">
+          <h3>Hardware & Identity</h3>
+          <p><strong>Device ID (UUID):</strong> <code>${escapeHtml(d.id)}</code></p>
+          <p><strong>Device UID / Serial:</strong> <code>${escapeHtml(d.deviceUid)}</code></p>
+          <p><strong>Display Name:</strong> ${escapeHtml(d.name)}</p>
+          <p><strong>Form Factor:</strong> <span class="badge">${escapeHtml(d.deviceType || "desktop")}</span></p>
+          <p><strong>Platform / OS:</strong> ${escapeHtml(d.platform || "Web")} (${escapeHtml(d.os || "Unknown OS")})</p>
+          <p><strong>App Version:</strong> <code>v${escapeHtml(d.appVersion || "1.0.0")}</code></p>
+          <p><strong>Persistent Status:</strong> ${badge(d.status)}</p>
+          <p><strong>Calculated Telemetry Status:</strong> ${deviceBadge(d.calculatedStatus, d.status)}</p>
+        </article>
+
+        <article class="card">
+          <h3>Tenant & Subscription Context</h3>
+          <p><strong>Restaurant:</strong> <strong>${escapeHtml(restaurant.name || "—")}</strong> (<code>${escapeHtml(restaurant.code || "—")}</code>)</p>
+          <p><strong>Branch:</strong> ${escapeHtml(branch.name || "Default branch")} (<code>${escapeHtml(branch.code || "default")}</code>)</p>
+          <p><strong>Subscription Status:</strong> ${badge(restaurant.subscriptionStatus || "active")}</p>
+          <p><strong>Subscription Plan:</strong> ${escapeHtml(restaurant.planName || "—")}</p>
+          <p><strong>Device Allowance:</strong> ${restaurant.activeDevicesCount ?? "—"} / ${restaurant.maxDevices ?? "—"} allowed devices</p>
+          <p><strong>Registered Date:</strong> ${d.createdAt ? new Date(d.createdAt).toLocaleString() : "—"}</p>
+          <p><strong>Last Heartbeat:</strong> ${d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString() : "Never"}</p>
+          <p><strong>Last Sync:</strong> ${d.lastSyncAt ? new Date(d.lastSyncAt).toLocaleString() : "Never"}</p>
+        </article>
+      </div>
+
+      <article class="card" style="margin-bottom:1.5rem;">
+        <div class="section-heading">
+          <div>
+            <h3>Active Sessions (${sessions.length})</h3>
+            <p class="muted">Currently active bearer and cookie sessions associated with this hardware device.</p>
+          </div>
+          ${sessions.length ? '<button id="btn-quick-revoke-sessions" class="btn secondary">Revoke all sessions</button>' : ""}
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>IP address</th>
+                <th>User agent</th>
+                <th>Last active</th>
+                <th>Expires</th>
+              </tr>
+            </thead>
+            <tbody>${sessionsMarkup}</tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Device Audit Log & Administrative Actions</h3>
+        <p class="muted">Tamper-evident record of registration, modifications, revoking, and reactivations.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Action</th>
+                <th>Actor</th>
+                <th>IP address</th>
+                <th>Timestamp</th>
+                <th>Metadata</th>
+              </tr>
+            </thead>
+            <tbody>${auditMarkup}</tbody>
+          </table>
+        </div>
+      </article>
+    `;
+
+    const quickRevoke = $("btn-quick-revoke-sessions");
+    if (quickRevoke) {
+      quickRevoke.onclick = () => revokeDeviceSessionsAction();
+    }
+  } catch (error) {
+    content.innerHTML =
+      '<div class="empty">Failed to load device details.</div>';
+    handleError(error);
+  }
+}
+
+$("open-register-device-modal").onclick = async () => {
+  const modal = $("register-device-modal");
+  const restSelect = $("reg-device-restaurant");
+  const branchSelect = $("reg-device-branch");
+  $("register-device-error").classList.add("hidden");
+  $("register-device-form").reset();
+
+  restSelect.innerHTML = "<option value=\"\">Loading restaurants…</option>";
+  branchSelect.innerHTML = '<option value="">Default branch</option>';
+
+  try {
+    const data = await apiCall("/platform-admin/api/restaurants?limit=100");
+    const rests = data.restaurants || data || [];
+    restSelect.innerHTML =
+      '<option value="">Select a restaurant tenant</option>' +
+      rests
+        .map(
+          (r) =>
+            `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)} (${escapeHtml(r.code)})</option>`,
+        )
+        .join("");
+
+    restSelect.onchange = async () => {
+      const restId = restSelect.value;
+      branchSelect.innerHTML = '<option value="">Default branch</option>';
+      if (!restId) return;
+      try {
+        const rData = await apiCall(
+          `/platform-admin/api/restaurants/${encodeURIComponent(restId)}`,
+        );
+        const branches = rData.branches || [];
+        if (branches.length) {
+          branchSelect.innerHTML =
+            '<option value="">Default branch</option>' +
+            branches
+              .map(
+                (b) =>
+                  `<option value="${escapeHtml(b.id)}">${escapeHtml(b.name)} (${escapeHtml(b.code)})</option>`,
+              )
+              .join("");
+        }
+      } catch (err) {
+        console.error("Failed to load branches for restaurant", err);
+      }
+    };
+
+    modal.showModal();
+  } catch (err) {
+    handleError(err);
+  }
+};
+
+$("register-device-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  $("register-device-error").classList.add("hidden");
+
+  try {
+    const payload = {
+      restaurantId: $("reg-device-restaurant").value,
+      branchId: $("reg-device-branch").value || null,
+      name: $("reg-device-name").value.trim(),
+      deviceUid: $("reg-device-uid").value.trim(),
+      deviceType: $("reg-device-type").value,
+      platform: $("reg-device-platform").value.trim() || "Web",
+      os: $("reg-device-os").value.trim() || null,
+      appVersion: $("reg-device-version").value.trim() || "1.0.0",
+    };
+
+    const res = await apiCall("/platform-admin/api/devices", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    $("register-device-modal").close();
+    toast(`Device "${res.device.name}" registered successfully.`);
+    devicePage = 1;
+    await loadDevices();
+    if (res.device?.id) await viewDevice(res.device.id);
+  } catch (error) {
+    $("register-device-error").textContent = error.message;
+    $("register-device-error").classList.remove("hidden");
+    handleError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$("btn-edit-device").onclick = async () => {
+  if (!currentDevice) return;
+  const modal = $("edit-device-modal");
+  $("edit-device-error").classList.add("hidden");
+
+  $("edit-dev-name").value = currentDevice.name || "";
+  $("edit-dev-type").value = currentDevice.deviceType || "desktop";
+  $("edit-dev-platform").value = currentDevice.platform || "Web";
+  $("edit-dev-os").value = currentDevice.os || "";
+  $("edit-dev-version").value = currentDevice.appVersion || "1.0.0";
+
+  const branchSelect = $("edit-dev-branch");
+  branchSelect.innerHTML = '<option value="">None / Default</option>';
+  try {
+    const rData = await apiCall(
+      `/platform-admin/api/restaurants/${encodeURIComponent(currentDevice.restaurantId)}`,
+    );
+    const branches = rData.branches || [];
+    branches.forEach((b) => {
+      const opt = document.createElement("option");
+      opt.value = b.id;
+      opt.textContent = `${b.name} (${b.code})`;
+      if (b.id === currentDevice.branchId) opt.selected = true;
+      branchSelect.appendChild(opt);
+    });
+  } catch (err) {
+    console.error("Failed to load branches for edit device", err);
+  }
+
+  modal.showModal();
+};
+
+$("edit-device-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  $("edit-device-error").classList.add("hidden");
+
+  try {
+    const payload = {
+      name: $("edit-dev-name").value.trim(),
+      branchId: $("edit-dev-branch").value || null,
+      deviceType: $("edit-dev-type").value,
+      platform: $("edit-dev-platform").value.trim() || null,
+      os: $("edit-dev-os").value.trim() || null,
+      appVersion: $("edit-dev-version").value.trim() || null,
+    };
+
+    await apiCall(
+      `/platform-admin/api/devices/${encodeURIComponent(currentDevice.id)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      },
+    );
+
+    $("edit-device-modal").close();
+    toast("Device metadata updated.");
+    await viewDevice(currentDevice.id);
+  } catch (error) {
+    $("edit-device-error").textContent = error.message;
+    $("edit-device-error").classList.remove("hidden");
+    handleError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$("btn-revoke-device").onclick = () => {
+  if (!currentDevice) return;
+  $("revoke-device-error").classList.add("hidden");
+  $("revoke-dev-reason").value = "";
+  $("revoke-dev-sessions-check").checked = true;
+  $("revoke-device-modal").showModal();
+};
+
+$("revoke-device-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  $("revoke-device-error").classList.add("hidden");
+
+  try {
+    const payload = {
+      reason: $("revoke-dev-reason").value.trim(),
+      revokeSessions: $("revoke-dev-sessions-check").checked,
+    };
+
+    await apiCall(
+      `/platform-admin/api/devices/${encodeURIComponent(currentDevice.id)}/revoke`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+
+    $("revoke-device-modal").close();
+    toast("Device revoked and sessions invalidated.");
+    await viewDevice(currentDevice.id);
+  } catch (error) {
+    $("revoke-device-error").textContent = error.message;
+    $("revoke-device-error").classList.remove("hidden");
+    handleError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+$("btn-reactivate-device").onclick = () => {
+  if (!currentDevice) return;
+  $("reactivate-device-error").classList.add("hidden");
+  $("reactivate-dev-reason").value = "";
+  $("reactivate-device-modal").showModal();
+};
+
+$("reactivate-device-form").onsubmit = async (event) => {
+  event.preventDefault();
+  const button = event.submitter;
+  button.disabled = true;
+  $("reactivate-device-error").classList.add("hidden");
+
+  try {
+    const payload = {
+      reason: $("reactivate-dev-reason").value.trim(),
+    };
+
+    await apiCall(
+      `/platform-admin/api/devices/${encodeURIComponent(currentDevice.id)}/reactivate`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+
+    $("reactivate-device-modal").close();
+    toast("Device reactivated.");
+    await viewDevice(currentDevice.id);
+  } catch (error) {
+    $("reactivate-device-error").textContent = error.message;
+    $("reactivate-device-error").classList.remove("hidden");
+    handleError(error);
+  } finally {
+    button.disabled = false;
+  }
+};
+
+async function revokeDeviceSessionsAction() {
+  if (!currentDevice) return;
+  if (
+    !(await confirmAction(
+      "Revoke device sessions?",
+      "All active users signed into this terminal will be signed out immediately.",
+    ))
+  ) {
+    return;
+  }
+
+  try {
+    await apiCall(
+      `/platform-admin/api/devices/${encodeURIComponent(currentDevice.id)}/revoke-sessions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reason: "Administrator remote session revocation",
+        }),
+      },
+    );
+    toast("All device sessions revoked.");
+    await viewDevice(currentDevice.id);
+  } catch (error) {
+    handleError(error);
+  }
+}
+$("btn-revoke-device-sessions").onclick = revokeDeviceSessionsAction;
+
+document.querySelectorAll("dialog [data-close]").forEach((btn) => {
+  btn.onclick = () => {
+    const dialogId = btn.getAttribute("data-close");
+    if (dialogId && $(dialogId)) $(dialogId).close();
+  };
+});

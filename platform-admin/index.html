@@ -40,8 +40,11 @@
             Overview
           </button>
           <button data-view="restaurants" class="nav-item">Restaurants</button>
+          <button data-view="devices" class="nav-item">Devices</button>
           <button data-view="plans" class="nav-item">Plans</button>
           <button data-view="payments" class="nav-item">Payments</button>
+          <button data-view="sync" class="nav-item">Sync monitor</button>
+          <button data-view="analytics" class="nav-item">Analytics</button>
           <button data-view="audits" class="nav-item">Audit log</button>
           <button data-view="security" class="nav-item">Security</button>
         </nav>
@@ -305,6 +308,217 @@
               </div>
             </div>
           </article>
+        </section>
+        <section id="sync-page" class="hidden">
+          <div class="stats">
+            <article class="stat">
+              <span>Total devices</span><strong id="sync-stat-total">—</strong>
+            </article>
+            <article class="stat">
+              <span>Online now</span><strong id="sync-stat-online">—</strong>
+            </article>
+            <article class="stat">
+              <span>Queued orders</span><strong id="sync-stat-pending">—</strong>
+            </article>
+            <article class="stat">
+              <span>Failed syncs</span><strong id="sync-stat-failed">—</strong>
+            </article>
+            <article class="stat">
+              <span>Sync errors</span><strong id="sync-stat-errors">—</strong>
+            </article>
+          </div>
+          <article class="card">
+            <div class="section-heading">
+              <div>
+                <h2>Offline synchronization & device telemetry</h2>
+                <p class="muted">Live status of POS terminals, pending order outboxes and synchronization failures.</p>
+              </div>
+              <button id="refresh-sync-btn" class="btn secondary">Refresh telemetry</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Restaurant</th>
+                    <th>Device</th>
+                    <th>Branch</th>
+                    <th>Platform / App</th>
+                    <th>Outbox queue</th>
+                    <th>Failures</th>
+                    <th>Last sync</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="sync-tbody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+        <section id="analytics-page" class="hidden">
+          <div class="stats">
+            <article class="stat">
+              <span>Monthly recurring (MRR)</span><strong id="analytics-mrr">—</strong>
+            </article>
+            <article class="stat">
+              <span>Annual run rate (ARR)</span><strong id="analytics-arr">—</strong>
+            </article>
+            <article class="stat">
+              <span>Revenue (last 30d)</span><strong id="analytics-30d-rev">—</strong>
+            </article>
+            <article class="stat">
+              <span>Revenue (all time)</span><strong id="analytics-total-rev">—</strong>
+            </article>
+          </div>
+          <div class="stats">
+            <article class="stat">
+              <span>Active subscriptions</span><strong id="analytics-active-subs">—</strong>
+            </article>
+            <article class="stat">
+              <span>Trial accounts</span><strong id="analytics-trial-subs">—</strong>
+            </article>
+            <article class="stat">
+              <span>Churned / cancelled</span><strong id="analytics-churned-subs">—</strong>
+            </article>
+            <article class="stat">
+              <span>Churn rate</span><strong id="analytics-churn-rate">—</strong>
+            </article>
+          </div>
+          <article class="card">
+            <div class="section-heading">
+              <div>
+                <h2>Revenue by subscription plan</h2>
+                <p class="muted">Live subscriber distribution and normalized recurring monthly revenue.</p>
+              </div>
+              <button id="export-payments-csv-btn" class="btn">⬇ Export Payments CSV</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Plan name</th>
+                    <th>Plan code</th>
+                    <th>Active accounts</th>
+                    <th>Total assigned</th>
+                    <th>Monthly MRR</th>
+                  </tr>
+                </thead>
+                <tbody id="analytics-plans-tbody"></tbody>
+              </table>
+            </div>
+          </article>
+          <article class="card">
+            <h2>Recent verified payments</h2>
+            <p class="muted">Latest approved customer transactions across all payment methods.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Restaurant</th>
+                    <th>Plan</th>
+                    <th>Amount</th>
+                    <th>Reference</th>
+                  </tr>
+                </thead>
+                <tbody id="analytics-payments-tbody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+        <section id="devices-page" class="hidden">
+          <div class="stats">
+            <article class="stat">
+              <span>Total devices</span><strong id="dev-stat-total">—</strong>
+            </article>
+            <article class="stat">
+              <span>Online now</span><strong id="dev-stat-online">—</strong>
+            </article>
+            <article class="stat">
+              <span>Offline</span><strong id="dev-stat-offline">—</strong>
+            </article>
+            <article class="stat">
+              <span>Stale (&gt;24h)</span><strong id="dev-stat-stale">—</strong>
+            </article>
+            <article class="stat">
+              <span>Revoked</span><strong id="dev-stat-revoked">—</strong>
+            </article>
+          </div>
+          <article class="card">
+            <div class="section-heading">
+              <div>
+                <h2>Enterprise device registry</h2>
+                <p class="muted">
+                  Registered terminals, live connection telemetry, and remote access revocation.
+                </p>
+              </div>
+              <button id="open-register-device-modal" class="btn">+ Register device</button>
+            </div>
+            <div class="filters">
+              <label class="grow" for="device-search-input">Search
+                <input id="device-search-input" type="search" placeholder="Name, UID, or restaurant..." maxlength="200" />
+              </label>
+              <label for="device-status-filter">Status
+                <select id="device-status-filter">
+                  <option value="all">All statuses</option>
+                  <option value="online">Online</option>
+                  <option value="offline">Offline</option>
+                  <option value="stale">Stale</option>
+                  <option value="revoked">Revoked</option>
+                </select>
+              </label>
+              <label for="device-type-filter">Type
+                <select id="device-type-filter">
+                  <option value="">All types</option>
+                  <option value="desktop">Desktop</option>
+                  <option value="laptop">Laptop</option>
+                  <option value="tablet">Tablet</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </label>
+              <label for="device-restaurant-filter">Restaurant
+                <select id="device-restaurant-filter">
+                  <option value="">All restaurants</option>
+                </select>
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Device</th>
+                    <th>Restaurant &amp; Branch</th>
+                    <th>Type &amp; OS</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Last seen</th>
+                    <th>Last sync</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="devices-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="device-page-info"></span>
+              <div>
+                <button id="device-prev" class="btn secondary">Previous</button>
+                <button id="device-next" class="btn secondary">Next</button>
+              </div>
+            </div>
+          </article>
+        </section>
+        <section id="device-detail-view" class="hidden">
+          <button id="close-device-detail-btn" class="btn secondary">← Back to devices</button>
+          <div class="section-heading">
+            <h2 id="device-detail-name">Device details</h2>
+            <div class="action-row">
+              <button id="btn-edit-device" class="btn secondary">Edit device</button>
+              <button id="btn-revoke-device-sessions" class="btn secondary">Revoke sessions</button>
+              <button id="btn-revoke-device" class="btn danger">Revoke device</button>
+              <button id="btn-reactivate-device" class="btn success hidden">Reactivate device</button>
+            </div>
+          </div>
+          <div id="device-detail-content"></div>
         </section>
       </main>
     </div>
@@ -585,6 +799,31 @@
         ><button id="confirm-accept" class="btn danger">Confirm</button>
       </div>
     </dialog>
+    <dialog id="branch-modal">
+      <form id="branch-form">
+        <h2 id="branch-modal-title">Create branch</h2>
+        <label for="branch-name">Branch name</label>
+        <input id="branch-name" required maxlength="160" placeholder="e.g. Clifton Branch" />
+        <label for="branch-code">Branch code (unique per restaurant)</label>
+        <input id="branch-code" required minlength="1" maxlength="64" placeholder="e.g. clifton" />
+        <label for="branch-phone">Contact phone</label>
+        <input id="branch-phone" maxlength="40" placeholder="0300..." />
+        <label for="branch-address">Address</label>
+        <textarea id="branch-address" rows="2" maxlength="500"></textarea>
+        <label for="branch-timezone">Timezone</label>
+        <input id="branch-timezone" required maxlength="100" value="Asia/Karachi" />
+        <label class="check">
+          <input id="branch-active" type="checkbox" checked /> Active branch
+        </label>
+        <label class="check">
+          <input id="branch-default" type="checkbox" /> Set as default branch
+        </label>
+        <div class="dialog-actions">
+          <button type="button" data-close="branch-modal" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn">Save branch</button>
+        </div>
+      </form>
+    </dialog>
     <dialog id="temporary-password-modal">
       <h2>Temporary password</h2>
       <p class="muted">
@@ -604,6 +843,102 @@
           Done
         </button>
       </div>
+    </dialog>
+    <dialog id="register-device-modal">
+      <form id="register-device-form">
+        <h2>Register new device</h2>
+        <p class="muted">Provision an authorized device under a restaurant tenant within plan allowances.</p>
+        <div id="register-device-error" class="error hidden" role="alert"></div>
+        <label for="reg-device-restaurant">Restaurant</label>
+        <select id="reg-device-restaurant" required></select>
+        <label for="reg-device-branch">Branch (optional)</label>
+        <select id="reg-device-branch">
+          <option value="">Default branch</option>
+        </select>
+        <label for="reg-device-name">Device display name</label>
+        <input id="reg-device-name" required maxlength="120" placeholder="e.g. Counter 1 Terminal" />
+        <label for="reg-device-uid">Device UID / Serial</label>
+        <input id="reg-device-uid" required maxlength="100" placeholder="e.g. TILL-01-CLIFF" />
+        <label for="reg-device-type">Device type</label>
+        <select id="reg-device-type" required>
+          <option value="desktop">Desktop</option>
+          <option value="laptop">Laptop</option>
+          <option value="tablet">Tablet</option>
+          <option value="mobile">Mobile</option>
+        </select>
+        <label for="reg-device-platform">Platform</label>
+        <input id="reg-device-platform" maxlength="80" value="Web" />
+        <label for="reg-device-os">Operating system</label>
+        <input id="reg-device-os" maxlength="80" placeholder="e.g. Windows 11 / Android 14" />
+        <label for="reg-device-version">App version</label>
+        <input id="reg-device-version" maxlength="40" value="1.0.0" />
+        <div class="dialog-actions">
+          <button type="button" data-close="register-device-modal" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn">Register device</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="edit-device-modal">
+      <form id="edit-device-form">
+        <h2>Edit device metadata</h2>
+        <div id="edit-device-error" class="error hidden" role="alert"></div>
+        <label for="edit-dev-name">Device display name</label>
+        <input id="edit-dev-name" required maxlength="120" />
+        <label for="edit-dev-branch">Assigned branch</label>
+        <select id="edit-dev-branch">
+          <option value="">None / Default</option>
+        </select>
+        <label for="edit-dev-type">Device type</label>
+        <select id="edit-dev-type" required>
+          <option value="desktop">Desktop</option>
+          <option value="laptop">Laptop</option>
+          <option value="tablet">Tablet</option>
+          <option value="mobile">Mobile</option>
+        </select>
+        <label for="edit-dev-platform">Platform</label>
+        <input id="edit-dev-platform" maxlength="80" />
+        <label for="edit-dev-os">Operating system</label>
+        <input id="edit-dev-os" maxlength="80" />
+        <label for="edit-dev-version">App version</label>
+        <input id="edit-dev-version" maxlength="40" />
+        <div class="dialog-actions">
+          <button type="button" data-close="edit-device-modal" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn">Save changes</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="revoke-device-modal">
+      <form id="revoke-device-form">
+        <h2>Revoke device access</h2>
+        <p class="muted">
+          Revoking this device permanently halts offline entitlements and prevents further authentication.
+        </p>
+        <div id="revoke-device-error" class="error hidden" role="alert"></div>
+        <label for="revoke-dev-reason">Revocation reason (required, min 3 characters)</label>
+        <textarea id="revoke-dev-reason" required minlength="3" maxlength="500" rows="3" placeholder="e.g. Hardware decommissioned or reported compromised."></textarea>
+        <label class="check">
+          <input type="checkbox" id="revoke-dev-sessions-check" checked /> Immediately revoke all active sessions for this device
+        </label>
+        <div class="dialog-actions">
+          <button type="button" data-close="revoke-device-modal" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn danger">Revoke device</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="reactivate-device-modal">
+      <form id="reactivate-device-form">
+        <h2>Reactivate device</h2>
+        <p class="muted">
+          Reactivating restores POS access and offline entitlement generation if the restaurant's subscription permits.
+        </p>
+        <div id="reactivate-device-error" class="error hidden" role="alert"></div>
+        <label for="reactivate-dev-reason">Reactivation reason (required, min 3 characters)</label>
+        <textarea id="reactivate-dev-reason" required minlength="3" maxlength="500" rows="3" placeholder="e.g. Device audited and verified secure."></textarea>
+        <div class="dialog-actions">
+          <button type="button" data-close="reactivate-device-modal" class="btn secondary">Cancel</button>
+          <button type="submit" class="btn success">Reactivate device</button>
+        </div>
+      </form>
     </dialog>
   </body>
 </html>

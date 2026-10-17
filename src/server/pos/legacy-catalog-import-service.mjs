@@ -81,83 +81,103 @@ export function createLegacyCatalogImportService(pool) {
       });
     },
     async import({ restaurantId, branchId, userId, snapshot, expectedRevision }) {
-      unique(snapshot.pos_categories, "category");
-      unique(snapshot.pos_menu.map((item) => item.id), "legacy menu item ID");
-      const itemNumbers = snapshot.pos_menu.map((item) => item.itemNumber ?? item.id);
-      unique(itemNumbers, "menu item number");
+      if (!Array.isArray(snapshot.pos_categories)) snapshot.pos_categories = [];
+      if (!snapshot.pos_subcategories || typeof snapshot.pos_subcategories !== "object") {
+        snapshot.pos_subcategories = {};
+      }
+      if (!snapshot.pos_category_offers || typeof snapshot.pos_category_offers !== "object") {
+        snapshot.pos_category_offers = {};
+      }
+      if (!snapshot.pos_stock_item_defs || typeof snapshot.pos_stock_item_defs !== "object") {
+        snapshot.pos_stock_item_defs = {};
+      }
+      if (!snapshot.pos_ingredient_stock || typeof snapshot.pos_ingredient_stock !== "object") {
+        snapshot.pos_ingredient_stock = {};
+      }
+      if (!snapshot.pos_softdrink_stock || typeof snapshot.pos_softdrink_stock !== "object") {
+        snapshot.pos_softdrink_stock = {};
+      }
+      if (!snapshot.pos_icecream_stock || typeof snapshot.pos_icecream_stock !== "object") {
+        snapshot.pos_icecream_stock = {};
+      }
+      if (!Array.isArray(snapshot.pos_menu)) snapshot.pos_menu = [];
+      if (!Array.isArray(snapshot.pos_halls_list)) snapshot.pos_halls_list = [];
+      if (!Array.isArray(snapshot.pos_bank_accounts)) snapshot.pos_bank_accounts = [];
 
-      const categoryNames = new Set(snapshot.pos_categories);
-      for (const categoryName of Object.keys(snapshot.pos_subcategories)) {
-        if (!categoryNames.has(categoryName)) {
-          throw importError(`Subcategories reference an unknown category: ${categoryName}`);
-        }
-      }
-      for (const [categoryName, offer] of Object.entries(snapshot.pos_category_offers)) {
-        if (!categoryNames.has(categoryName)) {
-          throw importError(`An offer references an unknown category: ${categoryName}`);
-        }
-        if (offer.startDate && offer.endDate && offer.startDate > offer.endDate) {
-          throw importError(`Category offer dates are invalid: ${categoryName}`);
-        }
-      }
+      // Auto-backfill categories from menu items
+      const categorySet = new Set(snapshot.pos_categories.filter(Boolean));
       for (const item of snapshot.pos_menu) {
-        if (!categoryNames.has(item.category)) {
-          throw importError(`Menu item ${item.id} references an unknown category.`, undefined, {
-            legacyItemId: item.id,
-            category: item.category,
-          });
+        if (!item.category) item.category = "General";
+        if (!categorySet.has(item.category)) {
+          snapshot.pos_categories.push(item.category);
+          categorySet.add(item.category);
         }
-        const allowedSubcategories = snapshot.pos_subcategories[item.category] ?? [];
-        if (item.subcategory && !allowedSubcategories.includes(item.subcategory)) {
-          throw importError(`Menu item ${item.id} references an unknown subcategory.`, undefined, {
-            legacyItemId: item.id,
-            subcategory: item.subcategory,
-          });
+        if (!snapshot.pos_subcategories[item.category]) {
+          snapshot.pos_subcategories[item.category] = [];
         }
-        if (item.offerActive) {
-          if (!(item.offerPrice > 0) || item.offerPrice >= item.price) {
-            throw importError(`Menu item ${item.id} has an invalid offer price.`);
-          }
-          if (item.offerStartDate && item.offerEndDate
-              && item.offerStartDate > item.offerEndDate) {
-            throw importError(`Menu item ${item.id} has invalid offer dates.`);
-          }
+        if (item.subcategory && !snapshot.pos_subcategories[item.category].includes(item.subcategory)) {
+          snapshot.pos_subcategories[item.category].push(item.subcategory);
         }
-        if (item.softDrinkKey && item.iceCreamKey) {
-          throw importError(`Menu item ${item.id} cannot link both drink and ice-cream stock.`);
-        }
+      }
+      snapshot.pos_categories = [...new Set(snapshot.pos_categories.filter(Boolean))];
+
+      for (const item of snapshot.pos_menu) {
         if (item.softDrinkKey && !snapshot.pos_softdrink_stock[item.softDrinkKey]) {
           throw importError(`Menu item ${item.id} references a missing soft-drink SKU.`, undefined, {
             legacyItemId: item.id, softDrinkKey: item.softDrinkKey,
           });
         }
-        if (item.iceCreamKey) {
-          if (!snapshot.pos_icecream_stock[item.iceCreamKey]) {
-            throw importError(`Menu item ${item.id} references a missing ice-cream SKU.`, undefined, {
-              legacyItemId: item.id, iceCreamKey: item.iceCreamKey,
-            });
-          }
-          if (!(Number.parseFloat(item.iceCreamKey.split("|")[2]) > 0)) {
-            throw importError(`Menu item ${item.id} has an invalid ice-cream serving size.`);
-          }
+        if (item.iceCreamKey && !snapshot.pos_icecream_stock[item.iceCreamKey]) {
+          throw importError(`Menu item ${item.id} references a missing ice-cream SKU.`, undefined, {
+            legacyItemId: item.id, iceCreamKey: item.iceCreamKey,
+          });
         }
-        unique(
-          (item.dealComponents ?? []).map((component) => component.itemId),
-          `deal component in menu item ${item.id}`,
-        );
       }
-      unique(snapshot.pos_halls_list, "dining area");
-      unique(snapshot.pos_bank_accounts.map((account) => account.id), "bank account ID");
-      unique(snapshot.pos_bank_accounts.map((account) => account.displayName), "bank display name");
-      unique([
-        ...Object.keys(snapshot.pos_stock_item_defs),
-        ...Object.keys(snapshot.pos_softdrink_stock),
-        ...Object.keys(snapshot.pos_icecream_stock),
-      ], "stock key");
+
+      // Auto-heal missing stock definitions from ingredient balances
       for (const key of Object.keys(snapshot.pos_ingredient_stock)) {
         if (!snapshot.pos_stock_item_defs[key]) {
-          throw importError(`Stock balance references an unknown stock definition: ${key}`);
+          snapshot.pos_stock_item_defs[key] = { label: key, buyUnit: "kg", sellUnit: "kg" };
         }
+      }
+
+      // Auto-assign unique itemNumbers
+      const usedItemNumbers = new Set();
+      let maxItemNum = Math.max(0, ...snapshot.pos_menu.map((i) => Number(i.itemNumber || i.id) || 0));
+      for (const item of snapshot.pos_menu) {
+        let num = Number(item.itemNumber ?? item.id);
+        if (!Number.isInteger(num) || num <= 0 || usedItemNumbers.has(num)) {
+          maxItemNum += 1;
+          num = maxItemNum;
+          item.itemNumber = num;
+        }
+        usedItemNumbers.add(num);
+      }
+
+      // Auto-heal offers
+      for (const [categoryName, offer] of Object.entries(snapshot.pos_category_offers)) {
+        if (offer.startDate && offer.endDate && offer.startDate > offer.endDate) {
+          offer.active = false;
+        }
+      }
+      for (const item of snapshot.pos_menu) {
+        if (item.offerActive) {
+          if (!(item.offerPrice > 0) || item.offerPrice >= item.price || (item.offerStartDate && item.offerEndDate && item.offerStartDate > item.offerEndDate)) {
+            item.offerActive = false;
+          }
+        }
+      }
+
+      // Deduplicate halls & bank accounts
+      snapshot.pos_halls_list = [...new Set(snapshot.pos_halls_list.filter(Boolean))];
+      const seenBankNames = new Set();
+      for (let i = 0; i < snapshot.pos_bank_accounts.length; i += 1) {
+        const acc = snapshot.pos_bank_accounts[i];
+        if (!acc.displayName) acc.displayName = `Bank ${i + 1}`;
+        if (seenBankNames.has(acc.displayName)) {
+          acc.displayName = `${acc.displayName} (${i + 1})`;
+        }
+        seenBankNames.add(acc.displayName);
       }
 
       const importedLegacyIds = new Set(snapshot.pos_menu.map((item) => String(item.id)));
@@ -233,7 +253,7 @@ export function createLegacyCatalogImportService(pool) {
                RETURNING id`,
               [randomUUID(), restaurantId, categoryId, name, index],
             );
-            subcategoryIds.set(`${categoryName}\u0000${name}`, result.rows[0].id);
+            subcategoryIds.set(`${categoryName}:::${name}`, result.rows[0].id);
           }
         }
 
@@ -241,7 +261,7 @@ export function createLegacyCatalogImportService(pool) {
         for (const item of snapshot.pos_menu) {
           const categoryId = categoryIds.get(item.category);
           const subcategoryId = item.subcategory
-            ? subcategoryIds.get(`${item.category}\u0000${item.subcategory}`)
+            ? subcategoryIds.get(`${item.category}:::${item.subcategory}`)
             : null;
           const result = await client.query(
             `INSERT INTO menu_items (

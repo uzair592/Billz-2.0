@@ -131,13 +131,16 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
                     COALESCE(SUM(discount_minor), 0) AS total_discounts,
                     COALESCE(SUM(delivery_minor), 0) AS total_delivery,
                     COALESCE(SUM(additional_charges_minor), 0) AS total_charges,
-                    COALESCE(SUM(total_minor), 0) AS total_completed
+                    COALESCE(SUM(total_minor), 0) AS total_completed,
+                    COALESCE(SUM(CASE WHEN incomplete_costing = true THEN 1 ELSE 0 END), 0)::int AS incomplete_costing_order_count
                FROM orders
               WHERE ${scopeWhere} AND order_status = 'completed'`,
             scopeValues,
           );
           const summaryRow = completedSummaryRes.rows[0];
           const completedOrderCount = Number(summaryRow.order_count);
+          const incompleteCostingOrderCount = Number(summaryRow.incomplete_costing_order_count ?? 0);
+          const hasIncompleteCosting = incompleteCostingOrderCount > 0;
           const grossSubtotalMinor = minor(summaryRow.gross_subtotal);
           const discountsMinor = minor(summaryRow.total_discounts);
           const deliveryMinor = minor(summaryRow.total_delivery);
@@ -352,7 +355,7 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
           const detailValues = detailParams.values;
           const detailedRowsRes = await client.query(
             `SELECT o.id, o.order_number, o.order_type, o.order_status, o.payment_status,
-                    o.total_minor, o.business_date, o.ordered_at,
+                    o.total_minor, o.incomplete_costing, o.business_date, o.ordered_at,
                     COALESCE(ref.refund_total, 0) AS refunded_minor
                FROM orders o
           LEFT JOIN (
@@ -394,6 +397,7 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
               orderType: row.order_type,
               orderStatus: row.order_status,
               paymentStatus: row.payment_status,
+              incompleteCosting: Boolean(row.incomplete_costing),
               totalMinor: total,
               refundedMinor: ref,
               netMinor: row.order_status === "cancelled" ? 0 : Math.max(0, total - ref),
@@ -420,6 +424,8 @@ export function createSalesReportService(pool, { clock = () => new Date() } = {}
               completedOrderCount,
               cancelledOrderCount,
               refundedOrderCount,
+              incompleteCostingOrderCount,
+              hasIncompleteCosting,
               grossSubtotalMinor,
               discountsMinor,
               deliveryMinor,

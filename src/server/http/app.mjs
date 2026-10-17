@@ -42,6 +42,20 @@ const loginSchema = z.union([
   }),
 ]);
 
+const revokeAndLoginSchema = z.union([
+  z.object({
+    restaurantCode: z.string().trim().min(1).max(64).optional(),
+    username: z.string().trim().min(1).max(320),
+    password: z.string().min(1).max(200),
+    sessionToRevokeId: z.string().uuid(),
+  }),
+  z.object({
+    email: z.string().trim().email().max(320),
+    password: z.string().min(1).max(200),
+    sessionToRevokeId: z.string().uuid(),
+  }),
+]);
+
 const verificationSchema = z.object({
   token: z.string().min(32).max(200),
 });
@@ -79,9 +93,12 @@ const orderSchema = z.object({
   customerName: z.string().trim().max(160).nullable().optional(),
   customerPhone: z.string().trim().max(40).nullable().optional(),
   riderName: z.string().trim().max(120).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  isKot: z.boolean().optional(),
   items: z.array(z.object({
     menuItemId: z.uuid(),
     quantity: z.number().int().min(1).max(999),
+    notes: z.string().trim().max(255).nullable().optional(),
   }).strict()).min(1).max(100),
   discount: z.discriminatedUnion("type", [
     z.object({ type: z.literal("flat"), valueMinor: z.number().int().min(0) }).strict(),
@@ -276,36 +293,38 @@ const purchaseListQuerySchema = z.object({
   cursor: z.string().trim().max(500).optional(),
 }).strict();
 
-const legacyDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional();
+const legacyDateSchema = z.union([
+  z.string().regex(/^\d{4}-\d{2}-\d{2}/).transform((val) => val.slice(0, 10)),
+  z.literal("").transform(() => null),
+  z.null(),
+  z.undefined().transform(() => null),
+]);
 const legacyCategoryOfferSchema = z.object({
-  active: z.boolean(),
-  discountType: z.enum(["flat", "percent"]),
-  discountValue: z.number().positive().max(1_000_000),
-  startDate: legacyDateSchema,
-  endDate: legacyDateSchema,
-}).passthrough().refine(
-  (offer) => offer.discountType !== "percent" || offer.discountValue <= 100,
-  "Percentage discounts cannot exceed 100.",
-);
+  active: z.boolean().optional().default(false),
+  discountType: z.enum(["flat", "percent"]).optional().default("flat"),
+  discountValue: z.coerce.number().finite().min(0).max(1_000_000).optional().default(0),
+  startDate: legacyDateSchema.optional(),
+  endDate: legacyDateSchema.optional(),
+}).passthrough();
 const legacyMenuItemSchema = z.object({
-  id: z.number().int().safe().nonnegative(),
-  itemNumber: z.number().int().safe().positive().nullable().optional(),
-  category: z.string().trim().min(1).max(160),
+  id: z.coerce.number().int().safe().nonnegative(),
+  itemNumber: z.coerce.number().int().safe().nullable().optional(),
+  category: z.string().trim().max(160).optional().default("General"),
   subcategory: z.string().trim().max(160).nullable().optional(),
   name: z.string().trim().min(1).max(200),
   desc: z.string().max(2_000).nullable().optional(),
-  price: z.number().finite().min(0).max(10_000_000),
-  recipeOthersCost: z.number().finite().min(0).max(10_000_000).optional(),
+  price: z.coerce.number().finite().min(0).max(10_000_000),
+  recipeOthersCost: z.coerce.number().finite().min(0).max(10_000_000).optional(),
   dealComponents: z.array(z.object({
-    itemId: z.number().int().safe().nonnegative(),
-    qty: z.number().positive().max(10_000),
+    itemId: z.coerce.number().int().safe().nonnegative(),
+    qty: z.coerce.number().positive().max(10_000),
   }).passthrough()).max(500).optional(),
   offerActive: z.boolean().optional(),
-  offerPrice: z.number().finite().min(0).max(10_000_000).optional(),
-  offerStartDate: legacyDateSchema,
-  offerEndDate: legacyDateSchema,
-  softDrinkKey: z.string().trim().min(1).max(300).optional(),
-  iceCreamKey: z.string().trim().min(1).max(300).optional(),
+  offerPrice: z.coerce.number().finite().min(0).max(10_000_000).optional(),
+  offerStartDate: legacyDateSchema.optional(),
+  offerEndDate: legacyDateSchema.optional(),
+  softDrinkKey: z.string().trim().max(300).nullable().optional(),
+  iceCreamKey: z.string().trim().max(300).nullable().optional(),
 }).passthrough();
 export const legacyCatalogSchema = z.object({
   pos_categories: z.array(z.string().trim().min(1).max(160)).max(1_000),
@@ -319,43 +338,43 @@ export const legacyCatalogSchema = z.object({
     label: z.string().trim().min(1).max(200),
     buyUnit: z.enum(["kg", "number"]),
     sellUnit: z.enum(["kg", "number"]),
-    gramsPerPiece: z.number().positive().optional(),
+    gramsPerPiece: z.coerce.number().positive().optional(),
   }).passthrough()).default({}),
   pos_ingredient_stock: z.record(z.string(), z.object({
-    stockGrams: z.number().finite().default(0),
-    avgCostPerGram: z.number().finite().min(0).default(0),
-    minThresholdGrams: z.number().finite().min(0).default(0),
-    avgUnitWeightGrams: z.number().finite().min(0).optional(),
+    stockGrams: z.coerce.number().finite().default(0),
+    avgCostPerGram: z.coerce.number().finite().min(0).default(0),
+    minThresholdGrams: z.coerce.number().finite().min(0).default(0),
+    avgUnitWeightGrams: z.coerce.number().finite().min(0).optional(),
   }).passthrough()).default({}),
   pos_softdrink_stock: z.record(z.string(), z.object({
-    stockUnits: z.number().finite().default(0),
-    avgCostPerUnit: z.number().finite().min(0).default(0),
-    sellPrice: z.number().finite().min(0).optional(),
+    stockUnits: z.coerce.number().finite().default(0),
+    avgCostPerUnit: z.coerce.number().finite().min(0).default(0),
+    sellPrice: z.coerce.number().finite().min(0).optional(),
   }).passthrough()).default({}),
-  pos_softdrink_threshold: z.number().finite().min(0).default(6),
+  pos_softdrink_threshold: z.coerce.number().finite().min(0).default(6),
   pos_icecream_stock: z.record(z.string(), z.object({
-    stockGrams: z.number().finite().default(0),
-    avgCostPerGram: z.number().finite().min(0).default(0),
-    sellPrice: z.number().finite().min(0).optional(),
-    minThresholdGrams: z.number().finite().min(0).optional(),
+    stockGrams: z.coerce.number().finite().default(0),
+    avgCostPerGram: z.coerce.number().finite().min(0).default(0),
+    sellPrice: z.coerce.number().finite().min(0).optional(),
+    minThresholdGrams: z.coerce.number().finite().min(0).optional(),
   }).passthrough()).default({}),
-  pos_icecream_threshold: z.number().finite().min(0).default(500),
-  pos_total_tables: z.number().int().min(0).max(10_000).default(0),
+  pos_icecream_threshold: z.coerce.number().finite().min(0).default(500),
+  pos_total_tables: z.coerce.number().int().min(0).max(10_000).default(0),
   pos_halls_list: z.array(z.string().trim().min(1).max(160)).max(1_000).default([]),
   pos_bank_accounts: z.array(z.object({
-    id: z.union([z.string().min(1).max(100), z.number().int().safe()]),
+    id: z.union([z.string().min(1).max(100), z.coerce.number().int().safe()]),
     displayName: z.string().trim().min(1).max(160),
     bankName: z.string().trim().min(1).max(160),
     accountNumber: z.string().trim().max(100).optional(),
-    openingBalance: z.number().finite().default(0),
-    asOfDate: legacyDateSchema,
+    openingBalance: z.coerce.number().finite().default(0),
+    asOfDate: legacyDateSchema.optional(),
     active: z.boolean().optional(),
   }).passthrough()).max(1_000).default([]),
 }).strict();
 
 const legacyCatalogImportSchema = legacyCatalogSchema.extend({
   expectedRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
-});
+}).strict();
 
 function setSessionCookie(reply, session, secureCookies) {
   reply.setCookie(SESSION_COOKIE_NAME, session.token, {
@@ -712,6 +731,63 @@ export async function buildHttpApp({
             code: "INVALID_CREDENTIALS",
           });
         }
+        if (err.code === "DEVICE_LIMIT_REACHED") {
+          return reply.code(409).send({
+            error: err.message,
+            code: "DEVICE_LIMIT_REACHED",
+            deviceLimit: err.deviceLimit,
+            activeSessions: err.activeSessions || [],
+          });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/api/auth/revoke-and-login",
+    { config: { rateLimit: { max: 100, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const input = revokeAndLoginSchema.parse(request.body);
+      const attempt = { scope: "restaurant", ...input, password: undefined, ipAddress: request.ip };
+      await loginThrottle?.check(attempt);
+      try {
+        const session = await authService.revokeAndLogin({
+          ...input,
+          ...requestMetadata(request),
+        });
+        await loginThrottle?.succeeded(attempt);
+        setSessionCookie(reply, session, secureCookies);
+        return { user: publicUser(session.user) };
+      } catch (err) {
+        if (err.code === "RESTAURANT_SUSPENDED") {
+          return reply.code(403).send({
+            error: err.message,
+            code: "RESTAURANT_SUSPENDED",
+            restaurant: err.restaurant,
+          });
+        }
+        if (err.code === "USER_DISABLED") {
+          return reply.code(403).send({
+            error: err.message,
+            code: "USER_DISABLED",
+          });
+        }
+        if (err.code === "INVALID_CREDENTIALS") {
+          await loginThrottle?.failed(attempt);
+          return reply.code(401).send({
+            error: err.message,
+            code: "INVALID_CREDENTIALS",
+          });
+        }
+        if (err.code === "DEVICE_LIMIT_REACHED") {
+          return reply.code(409).send({
+            error: err.message,
+            code: "DEVICE_LIMIT_REACHED",
+            deviceLimit: err.deviceLimit,
+            activeSessions: err.activeSessions || [],
+          });
+        }
         throw err;
       }
     },
@@ -772,6 +848,42 @@ export async function buildHttpApp({
         || subscriptionService)) {
     const guards = createRequestGuards({ authService, tenantContextService });
     if (financeService) await registerFinanceRoutes(app, { guards, financeService });
+
+    app.get(
+      "/api/pos/sessions",
+      {
+        preHandler: [
+          guards.authenticate,
+          guards.tenant(),
+        ],
+      },
+      async (request) => {
+        if (typeof authService.listSessionsForTenant !== "function") return { sessions: [] };
+        const sessions = await authService.listSessionsForTenant(request.tenant.restaurant.id);
+        return { sessions };
+      },
+    );
+
+    app.delete(
+      "/api/pos/sessions/:sessionId",
+      {
+        preHandler: [
+          guards.authenticate,
+          guards.tenant(PERMISSION.SETTINGS_MANAGE),
+        ],
+      },
+      async (request, reply) => {
+        const { sessionId } = z.object({ sessionId: z.string().uuid() }).parse(request.params);
+        if (typeof authService.revokeSessionForTenant !== "function") {
+          return reply.code(404).send({ error: "Session management not available." });
+        }
+        const result = await authService.revokeSessionForTenant(
+          request.tenant.restaurant.id,
+          sessionId,
+        );
+        return reply.code(200).send({ ok: result });
+      },
+    );
 
     if (menuService) {
       app.get(
@@ -896,6 +1008,36 @@ export async function buildHttpApp({
             input,
           });
           return reply.code(result.replayed ? 200 : 201).send(result);
+        },
+      );
+
+      const syncTelemetrySchema = z.object({
+        deviceUid: z.string().trim().min(1).max(128),
+        branchId: z.uuid().nullable().optional(),
+        deviceName: z.string().trim().max(120).nullable().optional(),
+        platform: z.string().trim().max(64).nullable().optional(),
+        appVersion: z.string().trim().max(64).nullable().optional(),
+        pendingOrdersCount: z.number().int().min(0).default(0),
+        failedSyncCount: z.number().int().min(0).default(0),
+        lastSyncAt: z.iso.datetime({ offset: true }).nullable().optional(),
+        lastErrorMessage: z.string().trim().max(1000).nullable().optional(),
+      }).strict();
+
+      app.post(
+        "/api/pos/sync/telemetry",
+        {
+          preHandler: [
+            guards.authenticate,
+            guards.tenant(),
+          ],
+        },
+        async (request) => {
+          if (!platformAdminPortalService) return { ok: true };
+          const telemetry = syncTelemetrySchema.parse(request.body);
+          return platformAdminPortalService.recordDeviceSyncTelemetry({
+            restaurantId: request.tenant.restaurant.id,
+            ...telemetry,
+          });
         },
       );
 
@@ -1566,6 +1708,18 @@ export async function buildHttpApp({
         },
         async (request) => {
           const deviceId = request.headers["x-device-id"] || request.query?.deviceId || "POS-Till-01";
+          if (databasePool) {
+            const devCheck = await databasePool.query(
+              "SELECT status FROM devices WHERE restaurant_id = $1 AND (id::text = $2 OR device_uid = $2) LIMIT 1",
+              [request.tenant.restaurant.id, String(deviceId)],
+            );
+            if (devCheck.rows[0] && devCheck.rows[0].status === "revoked") {
+              const error = new Error("This device has been revoked and cannot receive offline entitlements.");
+              error.code = "DEVICE_REVOKED";
+              error.statusCode = 403;
+              throw error;
+            }
+          }
           return entitlementService.issueForSession({
             sessionToken: request.cookies[SESSION_COOKIE_NAME],
             restaurantId: request.tenant.restaurant.id,
@@ -1580,6 +1734,78 @@ export async function buildHttpApp({
         },
       );
     }
+
+    const deviceHeartbeatSchema = z.object({
+      deviceId: z.string().uuid().optional().nullable(),
+      deviceUid: z.string().trim().max(100).optional().nullable(),
+      name: z.string().trim().max(120).optional().nullable(),
+      deviceType: z.enum(["desktop", "laptop", "tablet", "mobile"]).optional().nullable(),
+      platform: z.string().trim().max(80).optional().nullable(),
+      os: z.string().trim().max(80).optional().nullable(),
+      appVersion: z.string().trim().max(40).optional().nullable(),
+      syncStatus: z.any().optional().nullable(),
+    });
+
+    app.post(
+      "/api/pos/devices/heartbeat",
+      { config: { subscriptionExempt: true } },
+      async (request, reply) => {
+        if (!platformAdminPortalService) return { ok: true, status: "online" };
+        const body = deviceHeartbeatSchema.parse(request.body || {});
+        let restaurantId = null;
+        let sessionId = null;
+        try {
+          if (request.headers.authorization || request.cookies?.session_token) {
+            await guards.authenticate(request, reply);
+            await guards.tenant()(request, reply);
+            restaurantId = request.tenant?.restaurant?.id || null;
+            sessionId = request.auth?.session?.id || null;
+          }
+        } catch {
+          if (!body.deviceId) {
+            return reply.code(401).send({ error: "Authentication required" });
+          }
+        }
+
+        const result = await platformAdminPortalService.recordDeviceHeartbeat({
+          restaurantId,
+          sessionId,
+          ...body,
+        });
+        return result;
+      },
+    );
+
+    const posRegisterDeviceSchema = z.object({
+      deviceUid: z.string().trim().min(1).max(100),
+      name: z.string().trim().min(1).max(120),
+      deviceType: z.enum(["desktop", "laptop", "tablet", "mobile"]).default("desktop"),
+      platform: z.string().trim().max(80).default("Web"),
+      os: z.string().trim().max(80).optional().nullable(),
+      appVersion: z.string().trim().max(40).optional().nullable(),
+      branchId: z.uuid().optional().nullable(),
+    }).strict();
+
+    app.post(
+      "/api/pos/devices/register",
+      {
+        preHandler: [
+          guards.authenticate,
+          guards.tenant(PERMISSION.SETTINGS_MANAGE),
+        ],
+      },
+      async (request, reply) => {
+        if (!platformAdminPortalService) {
+          return reply.code(400).send({ error: "Platform service unavailable" });
+        }
+        const body = posRegisterDeviceSchema.parse(request.body);
+        const device = await platformAdminPortalService.registerDevice({
+          restaurantId: request.tenant.restaurant.id,
+          ...body,
+        });
+        return reply.code(201).send(device);
+      },
+    );
 
     if (storageService) {
       const fileGuards = [guards.authenticate, guards.tenant(PERMISSION.SETTINGS_MANAGE)];

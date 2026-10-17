@@ -16,9 +16,13 @@ export async function freezeInventoryRecipes(client, restaurantId, lines, legacy
     byProduct.get(recipe.product_id).push(recipe);
   }
   const items = new Map();
+  const missingInventoryItemIds = new Set();
   for (const id of [...new Set(recipes.map(r => r.inventory_item_id))].sort()) {
     const item = await lockInventoryItem(client, restaurantId, id);
-    if (!item) throw new Error("Recipe inventory item is missing.");
+    if (!item) {
+      missingInventoryItemIds.add(id);
+      continue;
+    }
     items.set(id, item);
   }
   function expand(line, multiplier = 1, usage = new Map()) {
@@ -32,7 +36,13 @@ export async function freezeInventoryRecipes(client, restaurantId, lines, legacy
   for (const line of lines) {
     const usage = expand(line);
     line.inventoryRecipe = [];
-    if (!usage.size) continue;
+    line.skippedInventoryUsage = [];
+    if (!usage.size) {
+      if (!line.recipe || line.recipe.length === 0) {
+        line.incompleteCosting = true;
+      }
+      continue;
+    }
     const legacyUsage = new Map();
     function legacy(component, multiplier = 1) {
       if (!byProduct.has(component.menuItemId)) for (const ingredient of legacyCatalog.get(component.menuItemId)?.recipe || []) {
@@ -41,9 +51,17 @@ export async function freezeInventoryRecipes(client, restaurantId, lines, legacy
       for (const child of component.componentSnapshots || component.components || []) legacy(child, multiplier * Number(child.quantity));
     }
     legacy(line);
-    line.inventoryRecipe = [...usage].map(([inventoryItemId, quantityPerUnit]) => ({
-      inventoryItemId, quantityPerUnit, unitCostMinor: Number(items.get(inventoryItemId).average_cost_minor),
+    const availableUsage = [...usage].filter(([id]) => items.has(id));
+    const skippedUsage = [...usage].filter(([id]) => !items.has(id));
+    line.inventoryRecipe = availableUsage.map(([inventoryItemId, quantityPerUnit]) => ({
+      inventoryItemId, quantityPerUnit, unitCostMinor: Number(items.get(inventoryItemId).average_cost_minor || 0),
     }));
+    line.skippedInventoryUsage = skippedUsage.map(([inventoryItemId, quantityPerUnit]) => ({
+      inventoryItemId, quantityPerUnit, reason: "missing_inventory_item",
+    }));
+    if (skippedUsage.length > 0) {
+      line.incompleteCosting = true;
+    }
     line.inventoryUnitCostMinor = Math.round(line.inventoryRecipe.reduce((sum, r) => sum + r.quantityPerUnit * r.unitCostMinor, 0));
     line.recipe = [...legacyUsage].map(([stockItemId, quantityBaseUnits]) => ({ stockItemId, quantityBaseUnits }));
   }

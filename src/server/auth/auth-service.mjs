@@ -195,6 +195,61 @@ export function createAuthService({ repository, mailer, passwordPepper, clock = 
       await repository.revokeSession(hashOpaqueToken(token), clock());
     },
 
+    async revokeAndLogin({ restaurantCode, username, email, password, sessionToRevokeId, ipAddress = null, userAgent = null }) {
+      if (!sessionToRevokeId) {
+        throw Object.assign(new Error("Session to revoke is required."), { code: "SESSION_ID_REQUIRED", statusCode: 400 });
+      }
+      let lookup;
+      if (username) {
+        if (restaurantCode) {
+          lookup = await repository.findUserByRestaurantAndUsername({ restaurantCode, username });
+        } else {
+          lookup = await repository.findUserByUsernameOnly({ username });
+        }
+      } else if (email) {
+        const u = await repository.findUserByEmail(normalizeEmail(email));
+        lookup = { user: u, restaurant: u ? { id: u.restaurantId } : null };
+      }
+      const { restaurant, user } = lookup || {};
+      const validPassword = await verifyPassword(user?.passwordHash, password, passwordPepper);
+      if (!user || !validPassword) throw authenticationError();
+      if (user.status === "disabled" || user.status === "suspended") {
+        throw Object.assign(new Error("This user account is disabled."), { code: "USER_DISABLED", statusCode: 403 });
+      }
+
+      const now = clock();
+      const session = createTokenPair();
+      const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS);
+      await repository.revokeAndCreateSession({
+        userId: user.id,
+        expectedPasswordHash: user.passwordHash,
+        expectedUsername: user.username ?? null,
+        expectedEmail: user.email,
+        sessionToRevokeId,
+        now,
+        expectedRestaurantId: user.restaurantId ?? restaurant?.id ?? null,
+        expectedRestaurantCode: restaurantCode ?? null,
+        tokenHash: session.tokenHash,
+        ipAddress,
+        userAgent,
+        expiresAt,
+      });
+      return { token: session.token, expiresAt, user: publicUser(user) };
+    },
+
+    async listSessionsForTenant(restaurantIdOrOpts) {
+      if (!repository.listRestaurantSessions) return [];
+      const restaurantId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.restaurantId : restaurantIdOrOpts;
+      return repository.listRestaurantSessions(restaurantId, clock());
+    },
+
+    async revokeSessionForTenant(restaurantIdOrOpts, sessionId) {
+      if (!repository.revokeRestaurantSession) return false;
+      const restaurantId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.restaurantId : restaurantIdOrOpts;
+      const targetSessionId = typeof restaurantIdOrOpts === "object" ? restaurantIdOrOpts?.sessionId : sessionId;
+      return repository.revokeRestaurantSession(restaurantId, targetSessionId, clock());
+    },
+
     /**
      * The restaurants this account may sign into. A device needs this before it
      * can send the trusted restaurant header the POS API requires.

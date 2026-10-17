@@ -32,6 +32,10 @@ function publicOrder(row, canViewReports = true) {
     additionalChargesMinor: Number(row.additional_charges_minor),
     totalMinor: Number(row.total_minor),
     ...(row.cost_of_goods_minor == null || !canViewReports ? {} : { costOfGoodsMinor: Number(row.cost_of_goods_minor) }),
+    incompleteCosting: Boolean(row.incomplete_costing),
+    skippedStockDeductions: typeof row.skipped_stock_deductions === "string"
+      ? JSON.parse(row.skipped_stock_deductions)
+      : (row.skipped_stock_deductions ?? []),
     businessDate: row.business_date,
     orderedAt: row.ordered_at,
   };
@@ -135,7 +139,9 @@ export function createOrderService(
           const existing = await client.query(
             `SELECT id, order_number, order_type, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
-                    additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at,
+                    additional_charges_minor, total_minor, cost_of_goods_minor,
+                    incomplete_costing, skipped_stock_deductions,
+                    business_date, ordered_at,
                     request_hash
                FROM orders
               WHERE idempotency_key = $1`,
@@ -304,21 +310,51 @@ export function createOrderService(
             : { rows: [] };
           const stockById = new Map(stockResult.rows.map((row) => [row.stock_item_id, row]));
           const legacyWarnings = [];
+          const skippedDeductions = [];
+          let hasIncompleteCosting = false;
+
           for (const [stockItemId, required] of stockUsage) {
             const balance = stockById.get(stockItemId);
-            if (!balance) throw apiError("Inventory balance could not be initialized.", "STOCK_BALANCE_MISSING", 409);
-            if (Number(balance.quantity_base_units) < required) legacyWarnings.push({ type: "negative_stock", stockItemId, quantityAfter: Number(balance.quantity_base_units) - required });
+            if (!balance) {
+              hasIncompleteCosting = true;
+              skippedDeductions.push({ stockItemId, required, reason: "missing_stock_balance" });
+              legacyWarnings.push({ type: "missing_stock_balance", stockItemId, required });
+              continue;
+            }
+            if (Number(balance.quantity_base_units) < required) {
+              legacyWarnings.push({ type: "negative_stock", stockItemId, quantityAfter: Number(balance.quantity_base_units) - required });
+            }
           }
 
           for (const line of menuLines) {
-            const recipeUnitCostMinor = line.recipe.reduce((sum, recipeItem) => {
+            const hasLegacyRecipe = line.recipe && line.recipe.length > 0;
+            const hasInvRecipe = line.inventoryRecipe && line.inventoryRecipe.length > 0;
+            if (!hasLegacyRecipe && !hasInvRecipe) {
+              hasIncompleteCosting = true;
+              skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, reason: "missing_recipe" });
+            }
+            if (line.skippedInventoryUsage?.length) {
+              hasIncompleteCosting = true;
+              for (const sk of line.skippedInventoryUsage) {
+                skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, inventoryItemId: sk.inventoryItemId, reason: sk.reason });
+              }
+            }
+            if (line.incompleteCosting) {
+              hasIncompleteCosting = true;
+            }
+
+            const recipeUnitCostMinor = (line.recipe || []).reduce((sum, recipeItem) => {
               const balance = stockById.get(recipeItem.stockItemId);
+              if (!balance || balance.average_cost_minor_per_base_unit == null) {
+                hasIncompleteCosting = true;
+                return sum;
+              }
               return sum + (
                 Number(recipeItem.quantityBaseUnits)
                 * Number(balance.average_cost_minor_per_base_unit)
               );
             }, 0);
-            line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + line.otherCostMinor);
+            line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + (line.otherCostMinor ?? 0));
           }
 
           const pricing = MoneyEngine.calculate(pricingInput(menuLines, input));
@@ -337,7 +373,7 @@ export function createOrderService(
             (sum, line) => sum + line.unitCostMinor * line.quantity,
             0,
           );
-          const orderId = randomUUID();
+          const orderId = input.orderId || randomUUID();
           const sequenceResult = await client.query(
             `INSERT INTO order_sequences (restaurant_id, branch_id, next_number)
              VALUES ($1, $2, 2)
@@ -350,8 +386,8 @@ export function createOrderService(
           let kitchenTicket = null;
           // Posting a POS invoice completes the financial sale. Kitchen tickets
           // have their own fulfillment status; open-order callers can explicitly
-          // request "new" without making finalized sales disappear from reports.
-          const initialOrderStatus = input.orderStatus ?? "completed";
+          // request "new" or "in_progress" without making finalized sales disappear from reports.
+          const initialOrderStatus = input.orderStatus ?? (input.isKot ? "preparing" : "completed");
           const orderResult = await client.query(
             `INSERT INTO orders (
                id, restaurant_id, branch_id, idempotency_key, order_number,
@@ -360,7 +396,8 @@ export function createOrderService(
                subtotal_minor, discount_type, discount_value, discount_minor,
                delivery_minor, additional_charges_minor, total_minor,
                cost_of_goods_minor, business_date, ordered_at, completed_at,
-               created_by_user_id, updated_by_user_id, request_hash
+               created_by_user_id, updated_by_user_id, request_hash,
+               incomplete_costing, skipped_stock_deductions
              ) VALUES (
                $1, $2, $3, $4, $5,
                $6, $23, $7, $8,
@@ -368,11 +405,14 @@ export function createOrderService(
                $12, $13, $14, $15,
                $16, $17, $18,
                $19, $20, $21, $25,
-               $22, $22, $24
+               $22, $22, $24,
+               $26, $27
              )
              RETURNING id, order_number, order_type, order_status, payment_status,
                        subtotal_minor, discount_minor, delivery_minor,
-                       additional_charges_minor, total_minor, cost_of_goods_minor, business_date, ordered_at`,
+                       additional_charges_minor, total_minor, cost_of_goods_minor,
+                       incomplete_costing, skipped_stock_deductions,
+                       business_date, ordered_at`,
             [
               orderId, restaurantId, branchId, input.idempotencyKey, orderNumber,
               input.orderType, paymentStatus, input.tableId ?? null,
@@ -387,6 +427,7 @@ export function createOrderService(
               costOfGoodsMinor, businessDate, now, userId,
               initialOrderStatus, requestHash,
               initialOrderStatus === "completed" ? now : null,
+              hasIncompleteCosting, JSON.stringify(skippedDeductions),
             ],
           );
 
@@ -405,10 +446,12 @@ export function createOrderService(
                 line.unitCostMinor,
                 JSON.stringify({
                   version: 2,
-                  items: line.recipe,
+                  items: line.recipe || [],
                   inventoryItems: line.inventoryRecipe || [],
-                  components: line.componentSnapshots,
+                  components: line.componentSnapshots || [],
                   offer: line.offer,
+                  ...(line.skippedInventoryUsage?.length ? { skippedDeductions: line.skippedInventoryUsage } : {}),
+                  ...(line.incompleteCosting ? { incompleteCosting: true } : {}),
                 }),
                 index,
               ],
@@ -428,50 +471,43 @@ export function createOrderService(
             );
           }
 
-          for (const [stockItemId, required] of stockUsage) {
-            await client.query(
-              `UPDATE inventory_balances
-                   SET quantity_base_units = quantity_base_units - $4,
-                       version = version + 1, updated_at = $5
-                 WHERE restaurant_id = $1 AND branch_id = $2 AND stock_item_id = $3`,
-              [restaurantId, branchId, stockItemId, required, now],
-            );
-            await client.query(
-              `INSERT INTO stock_movements (
-                 id, restaurant_id, branch_id, stock_item_id, order_id,
-                 movement_type, quantity_delta, idempotency_key, occurred_at,
-                 created_by_user_id
-               ) VALUES ($1, $2, $3, $4, $5, 'sale', $6, $7, $8, $9)`,
-              [
-                randomUUID(), restaurantId, branchId, stockItemId, orderId,
-                -required, randomUUID(), now, userId,
-              ],
-            );
-          }
+          if (initialOrderStatus === "completed") {
+            for (const [stockItemId, required] of stockUsage) {
+              if (!stockById.has(stockItemId)) continue;
+              await client.query(
+                `UPDATE inventory_balances
+                     SET quantity_base_units = quantity_base_units - $4,
+                         version = version + 1, updated_at = $5
+                   WHERE restaurant_id = $1 AND branch_id = $2 AND stock_item_id = $3`,
+                [restaurantId, branchId, stockItemId, required, now],
+              );
+              await client.query(
+                `INSERT INTO stock_movements (
+                   id, restaurant_id, branch_id, stock_item_id, order_id,
+                   movement_type, quantity_delta, idempotency_key, occurred_at,
+                   created_by_user_id
+                 ) VALUES ($1, $2, $3, $4, $5, 'sale', $6, $7, $8, $9)`,
+                [
+                  randomUUID(), restaurantId, branchId, stockItemId, orderId,
+                  -required, randomUUID(), now, userId,
+                ],
+              );
+            }
 
-          // Milestone 14: deduct ingredient stock from the
-          // inventory domain for the completed order. This runs
-          // inside the authoritative order transaction, so the
-          // order, its lines, and the inventory deduction commit
-          // or roll back together — a failure can never leave a
-          // completed order with half-applied stock changes.
-          //
-          // The consumption is exactly once per order: the
-          // inventory_consumptions row is claimed with
-          // ON CONFLICT DO NOTHING, so a replayed checkout
-          // returns the original outcome instead of deducting
-          // twice. Missing recipes and negative balances are
-          // collected as warnings and never block checkout.
-          inventoryConsumption = await consumeInventory.consumeWithinTransaction(
-            client,
-            {
-              restaurantId,
-              orderId,
-              lines: menuLines,
-              userId,
-              now,
-            },
-          );
+            inventoryConsumption = await consumeInventory.consumeWithinTransaction(
+              client,
+              {
+                restaurantId,
+                orderId,
+                lines: menuLines,
+                userId,
+                now,
+              },
+            );
+            inventoryConsumption.warnings.push(...legacyWarnings);
+          } else {
+            inventoryConsumption = { replayed: false, consumedItemCount: 0, warnings: legacyWarnings, movements: [] };
+          }
 
           inventoryConsumption.warnings.push(...legacyWarnings);
           if (paymentMinor > 0) {
@@ -711,18 +747,50 @@ export function createOrderService(
 
           const newTotalPaid = totalPaid + amountMinor;
           const newPaymentStatus = newTotalPaid >= totalMinor ? "paid" : "partially_paid";
+          const becomesCompleted = newPaymentStatus === "paid" && order.order_status !== "completed";
+          const updatedOrderStatus = becomesCompleted ? "completed" : order.order_status;
           const updatedOrderRes = await client.query(
             `UPDATE orders
                 SET payment_status = $3,
-                    completed_at = CASE WHEN $3 = 'paid' AND completed_at IS NULL THEN $4 ELSE completed_at END,
-                    updated_at = $4
+                    order_status = $4,
+                    completed_at = CASE WHEN $4 = 'completed' AND completed_at IS NULL THEN $5 ELSE completed_at END,
+                    updated_at = $5
               WHERE restaurant_id = $1 AND id = $2
               RETURNING id, order_number, order_type, order_status, payment_status,
                         subtotal_minor, discount_minor, delivery_minor,
                         additional_charges_minor, total_minor, cost_of_goods_minor,
+                        incomplete_costing, skipped_stock_deductions,
                         business_date, ordered_at`,
-            [restaurantId, orderId, newPaymentStatus, now],
+            [restaurantId, orderId, newPaymentStatus, updatedOrderStatus, now],
           );
+
+          if (becomesCompleted && consumeInventory) {
+            const existingConsumption = await client.query(
+              `SELECT id FROM inventory_consumptions WHERE restaurant_id = $1 AND order_id = $2`,
+              [restaurantId, orderId],
+            );
+            if (existingConsumption.rowCount === 0) {
+              const orderItemsRes = await client.query(
+                `SELECT menu_item_id, quantity, recipe_snapshot
+                   FROM order_items
+                  WHERE restaurant_id = $1 AND order_id = $2`,
+                [restaurantId, orderId],
+              );
+              const lines = orderItemsRes.rows.map(row => ({
+                menuItemId: row.menu_item_id,
+                quantity: row.quantity,
+                inventoryRecipe: row.recipe_snapshot?.inventoryItems || undefined,
+                recipe: row.recipe_snapshot?.items || undefined,
+              }));
+              await consumeInventory.consumeWithinTransaction(client, {
+                restaurantId,
+                orderId,
+                lines,
+                userId,
+                now,
+              });
+            }
+          }
 
           return {
             payment: {
