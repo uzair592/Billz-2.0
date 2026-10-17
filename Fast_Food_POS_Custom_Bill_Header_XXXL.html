@@ -4945,6 +4945,7 @@
       .badge-negative { background: #fee2e2; color: #b91c1c; }
 
 </style>
+  <link rel="stylesheet" href="/src/client/workspace-layout.css">
   </head>
   <body>
     
@@ -5270,6 +5271,7 @@
             />
           </label>
         </div>
+      <button type="button" id="retry-backup-sync" class="menu-btn hidden" onclick="retryCatalogSync()">↻ Retry Backup Sync</button>
       </aside>
 
       <main class="content-area">
@@ -5338,7 +5340,7 @@
           <div class="dashboard-page-head">
             <div>
               <span class="section-kicker">Today</span>
-              <h1>Business overview</h1>
+              <h1>Dashboard</h1>
               <p id="dashboard-today-date"></p>
             </div>
             <button
@@ -6222,7 +6224,7 @@
             </div>
           </div>
 
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start;">
+          <div id="kds-board" tabindex="0" aria-label="Kitchen tickets: new, preparing and ready" style="display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 10px; align-items: start;">
             <!-- Column 1: New Tickets -->
             <div style="background: #fff; border-radius: 12px; padding: 18px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-height: 450px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px;">
@@ -6276,7 +6278,7 @@
             "
           >
             <div>
-              <h1>Order History Ledger</h1>
+              <h1>View Orders</h1>
               <p>
                 Track historical customer ticket receipts, search names, and
                 apply date range parameters.
@@ -7713,7 +7715,7 @@
             "
           >
             <div>
-              <h1>Manage Menu & Deals</h1>
+              <h1>Menu &amp; Deals</h1>
               <p>
                 Configure menu details, item prices, and attach descriptions or
                 deal items.
@@ -19900,6 +19902,7 @@
           await Storage.setMany({ pos_business_name: settings.businessName, pos_business_name_provided: true, pos_business_phone: settings.phone || "", pos_business_address: settings.address || "" });
         }
         await initSystemData();
+        if (window.BILLZ_MANAGED) document.getElementById("retry-backup-sync").classList.toggle("hidden", !(await Storage.get("pos_pending_order_restore")));
         // 🏪 Both of these MUST run after initSystemData, since businessName/businessPhone/businessAddress
         // are only loaded from storage in there — running them earlier would paint the defaults instead.
         bootStep(3, "applying business info");
@@ -29327,6 +29330,7 @@
       // --- 📥 MASTER RESTORE SYSTEM ENGINE (IMPORT FROM FILE) ---
       // Tracks categories rebuilt from menu items during the last restore, purely so the summary can say so
       let restoredCategoryRecovery = [];
+      let backupRestoreRunning = false;
 
       function importSystemBackupFile(event) {
         const role = window.BILLZ_ROLE || AppState.session?.userRole || "cashier";
@@ -29337,6 +29341,9 @@
         }
         const selectedFileObj = event.target.files[0];
         if (!selectedFileObj) return;
+        if (backupRestoreRunning) return;
+        backupRestoreRunning = true;
+        event.target.disabled = true;
 
         const fileReaderInstance = new FileReader();
         fileReaderInstance.onload = async function (e) {
@@ -29568,6 +29575,10 @@
               restoreWriteBuffer = null;
               await Storage.setMany(staged);
 
+              if (window.BILLZ_MANAGED) {
+                await Storage.set("pos_pending_order_restore", { orders: parsedBackupData.pos_orders || [], catalogPending: true });
+                document.getElementById("retry-backup-sync").classList.remove("hidden");
+              }
               let cloudSyncSuccess = true;
               let cloudSyncErrorMsg = null;
               if (window.BiteTechCloudSync) {
@@ -29610,14 +29621,25 @@
                 }
               }
 
+              if (window.BILLZ_MANAGED && cloudSyncSuccess) {
+                await Storage.set("pos_pending_order_restore", { orders: parsedBackupData.pos_orders || [], catalogPending: false });
+                try {
+                  await window.BiteTechCloudSync.restoreOrders(parsedBackupData.pos_orders || []);
+                  await Storage.set("pos_pending_order_restore", null);
+                  document.getElementById("retry-backup-sync").classList.add("hidden");
+                } catch (restoreError) {
+                  cloudSyncSuccess = false;
+                  cloudSyncErrorMsg = restoreError.message;
+                }
+              }
               rebuildEntireUIAfterRestore();
 
               if (!cloudSyncSuccess) {
                 alert(
-                  `⚠️ Local Restore Succeeded, but Cloud Catalog Sync Failed!\n\n` +
+                  `⚠️ Backup saved on this device; shared restore is incomplete.\n\n` +
                   `Reason: ${cloudSyncErrorMsg}\n\n` +
-                  `Your items were restored in this browser, but taking orders will fail until the catalog is synced with the server.\n\n` +
-                  `Run window.retryCatalogSync() or use 'Retry Cloud Sync' in Settings to publish.`
+                  `Your backup is safe on this device. Some menu items or historical bills are not yet available on other devices.\n\n` +
+                  `Choose Retry Backup Sync in the sidebar to finish safely. Previously imported bills will not be duplicated.`
                 );
               } else {
                 alert(buildRestoreSummaryMessage(parsedBackupData));
@@ -29636,11 +29658,18 @@
             console.error(err);
           } finally {
             restoreWriteBuffer = null;
+            backupRestoreRunning = false;
             // Always clear the picker, so selecting the very same file again still fires onchange
-            if (event && event.target) event.target.value = "";
+            if (event && event.target) { event.target.value = ""; event.target.disabled = false; }
           }
         };
 
+        fileReaderInstance.onerror = function () {
+          backupRestoreRunning = false;
+          event.target.disabled = false;
+          event.target.value = "";
+          alert("Could not read the backup file. Your existing data was kept. Please select the file again.");
+        };
         // Start reading string lines from the selected local PC data file
         fileReaderInstance.readAsText(selectedFileObj);
       }
@@ -29651,14 +29680,22 @@
           return;
         }
         try {
-          const cloudRes = await window.BiteTechCloudSync.importCatalog({
+          const pending = await Storage.get("pos_pending_order_restore");
+          const cloudRes = !pending || pending.catalogPending ? await window.BiteTechCloudSync.importCatalog({
             restaurantId: window.BILLZ_TENANT_ID,
             forceOverwrite: true,
-          });
+          }) : null;
           if (cloudRes?.context) {
             await Storage.set("pos_cloud_context_v1", cloudRes.context);
           }
-          alert("✅ Cloud catalog published successfully! All restored menu items are now active for billing.");
+          if (pending) {
+            await Storage.set("pos_pending_order_restore", { ...pending, catalogPending: false });
+            await window.BiteTechCloudSync.restoreOrders(pending.orders || []);
+            await Storage.set("pos_pending_order_restore", null);
+          }
+          document.getElementById("retry-backup-sync").classList.add("hidden");
+          await window.renderOrdersHistory?.();
+          alert("✅ Backup synced. Restored bills are available in View Orders. Historical bills do not change current stock or cash balances; review their original costs and payments.");
         } catch (err) {
           alert(`❌ Cloud catalog sync failed:\n\n${err.message || err}`);
         }

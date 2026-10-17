@@ -184,7 +184,7 @@ export function createOrderHistoryUI({
         : "badge-takeaway";
 
     tr.innerHTML = `
-      <td><strong>#${escapeHtml(String(order.orderNumber))}</strong>${order.legacyOrderId != null ? `<div style="font-size:10px;color:#94a3b8;">local #${escapeHtml(String(order.legacyOrderId))}</div>` : ""}</td>
+      <td><strong>#${escapeHtml(String(order.orderNumber))}</strong>${order.restored ? `<div class="restored-bill-note">Restored #${escapeHtml(order.originalOrderNumber)} · historical</div>` : ""}${order.legacyOrderId != null ? `<div style="font-size:10px;color:#94a3b8;">local #${escapeHtml(String(order.legacyOrderId))}</div>` : ""}</td>
       <td>${escapeHtml(order.date)} <span style="color:#94a3b8; font-size:12px; margin-left:4px;">${escapeHtml(order.time || "")}</span></td>
       <td><strong>${escapeHtml(order.customerName || "Walk-In Customer")}</strong>${order.statusReason ? `<div style="font-size:11px;color:#94a3b8;">${escapeHtml(order.statusReason)}</div>` : ""}</td>
       <td><span class="badge ${typeClass}">${escapeHtml(order.orderType)}</span>${order.orderType === "Dine-In" && order.tableNumber ? ` <span class="badge" style="background:#e0e7ff; color:#3730a3;">🪑 #${escapeHtml(order.tableNumber)}</span>` : ""}</td>
@@ -195,7 +195,7 @@ export function createOrderHistoryUI({
       <td style="text-align:center;">${statusBadge}</td>
       <td style="text-align:center; white-space:nowrap;">
         <button type="button" class="edit-item-btn history-reprint-btn" style="margin:0; background:#0ea5e9; padding:4px 10px;">🖨️ Print</button>
-        ${cancelled ? "" : `<button type="button" class="delete-item-btn history-cancel-btn" style="margin:0 0 0 4px; padding:4px 10px;">❌ Cancel</button>`}
+        ${cancelled || order.restored ? "" : `<button type="button" class="delete-item-btn history-cancel-btn" style="margin:0 0 0 4px; padding:4px 10px;">❌ Cancel</button>`}
       </td>
     `;
 

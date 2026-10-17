@@ -38,7 +38,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
         { restaurantId, userId },
         async (client) => {
           const orderResult = await client.query(
-            `SELECT id, branch_id, order_number, order_status, payment_status, total_minor
+            `SELECT id, branch_id, order_number, order_status, payment_status, total_minor, restore_key
                FROM orders
               WHERE id = $1
               FOR UPDATE`,
@@ -46,6 +46,7 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
           );
           const order = orderResult.rows[0];
           if (!order) throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
+          if (order.restore_key) throw apiError("This historical bill is read-only; reconcile its original payments before making adjustments.", "HISTORICAL_ORDER_READ_ONLY", 409);
 
           const existingResult = await client.query(
             `SELECT cancelled_at, reason, refunded_minor, restocked

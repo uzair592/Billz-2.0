@@ -1,3 +1,4 @@
+import { createLegacyOrderRestoreService } from "./pos/legacy-order-restore-service.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { buildHttpApp } from "./http/app.mjs";
@@ -199,6 +200,7 @@ export async function createServer({
     orderHistoryService,
     orderCancellationService,
     catalogImportService,
+    legacyOrderRestoreService: createLegacyOrderRestoreService(database),
     businessSettingsService,
     salesReportService,
     supplierService,

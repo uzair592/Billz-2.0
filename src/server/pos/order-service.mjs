@@ -651,7 +651,7 @@ export function createOrderService(
             `SELECT id, order_number, order_type, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
                     additional_charges_minor, total_minor, cost_of_goods_minor,
-                    business_date, ordered_at
+                    business_date, ordered_at, restore_key
                FROM orders
               WHERE restaurant_id = $1 AND id = $2
               FOR UPDATE`,
@@ -661,6 +661,7 @@ export function createOrderService(
           if (!order) {
             throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
           }
+          if (order.restore_key) throw apiError("This historical bill is read-only; reconcile its original payments before making adjustments.", "HISTORICAL_ORDER_READ_ONLY", 409);
           if (order.order_status === "cancelled") {
             throw apiError("Cannot settle payment for a cancelled order.", "ORDER_CANCELLED", 409);
           }

@@ -215,6 +215,25 @@ export function createLegacyCloudAdapter({
   return Object.freeze({
     importCatalog: importCatalogImpl,
 
+    async restoreOrders(records) {
+      const current = await session.currentUser();
+      if (!current?.user || !current.restaurantId) throw new OrderSyncError("Sign in before restoring bills.", { code: "RESTAURANT_REQUIRED", status: 401 });
+      let imported = 0, skipped = 0;
+      for (let offset = 0; offset < records.length; offset += 250) {
+        const selected = await session.activeRestaurant();
+        if (selected !== current.restaurantId) throw new OrderSyncError("Restaurant changed. Return to the original restaurant to retry restore.", { code: "CLOUD_TENANT_MISMATCH", status: 403 });
+        const response = await fetchImpl("/api/pos/import/legacy-orders", {
+          method: "POST", credentials: "same-origin",
+          headers: { "content-type": "application/json", "x-restaurant-id": current.restaurantId },
+          body: JSON.stringify({ orders: records.slice(offset, offset + 250) }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new OrderSyncError(result.error || "Historical bills could not be restored. Retry from Settings.", { status: response.status, code: result.code || "ORDER_RESTORE_FAILED" });
+        imported += result.imported; skipped += result.skipped;
+      }
+      return { imported, skipped };
+    },
+
     async enqueueLegacyOrder(order) {
       const context = await storage.get(CLOUD_CONTEXT_KEY);
       if (!context?.restaurantId || !context?.mappings) {
