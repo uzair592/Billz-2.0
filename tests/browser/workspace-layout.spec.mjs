@@ -13,8 +13,8 @@ async function openPos(page) {
     return route.fulfill({ json: { plans: [], subscription: null, tickets: [] } });
   });
   await page.goto("/");
-  await page.waitForFunction(() => window.BiteTechSalesReport);
-  await page.evaluate(async () => { await Storage.setMany({ pos_setup_done: true, pos_business_name: "Layout Cafe", pos_business_name_provided: true }); });
+  await page.waitForFunction(() => window.BiteTechSalesReport && typeof bootFinished !== "undefined" && bootFinished);
+  await page.evaluate(async () => { await Storage.setMany({ pos_setup_done: true, pos_pin_code: "8429", pos_business_name: "Layout Cafe", pos_business_name_provided: true }); });
   await page.reload();
   await expect(page.locator(".app-container")).toBeVisible();
 }
