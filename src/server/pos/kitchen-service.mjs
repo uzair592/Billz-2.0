@@ -21,7 +21,7 @@ export function createKitchenService(pool, { clock = () => new Date() } = {}) {
                  kt.items, kt.notes, kt.created_at, kt.started_at, kt.ready_at,
                  kt.served_at, kt.cancelled_at,
                  o.order_number, o.order_type, o.table_id, o.customer_name,
-                 rt.name AS table_name
+                 rt.table_number AS table_name
             FROM kitchen_tickets kt
             JOIN orders o ON o.restaurant_id = kt.restaurant_id AND o.id = kt.order_id
             LEFT JOIN restaurant_tables rt ON rt.restaurant_id = o.restaurant_id AND rt.id = o.table_id

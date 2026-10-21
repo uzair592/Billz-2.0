@@ -106,6 +106,12 @@ test("KOT order lifecycle remains consistent across devices", async t => {
   });
   await t.test("cancelling an unpaid KOT never adds stock and clears its active kitchen queue",async()=>{
     const before=await balances(), sale=await create(), id=sale.order.id;
+    const table=(await admin.query(`INSERT INTO restaurant_tables(restaurant_id,branch_id,table_number)
+      VALUES($1,$2,'Family 4') RETURNING id`,[a.restaurantId,a.branchId])).rows[0].id;
+    await admin.query(`UPDATE orders SET table_id=$2 WHERE id=$1`,[id,table]);
+    const visible=await kitchen.listTickets({restaurantId:a.restaurantId,userId:a.userId,branchId:a.branchId});
+    assert.equal(visible.tickets.find(row=>row.orderId===id).tableName,"Family 4");
+    assert.equal((await kitchen.listTickets({restaurantId:b.restaurantId,userId:b.userId,branchId:b.branchId})).tickets.length,0);
     const input={...context,orderId:id,reason:"",idempotencyKey:randomUUID()};
     const result=await cancellations.cancel(input); assert.equal(result.cancellation.refundedMinor,0);
     assert.deepEqual(await balances(),before);
