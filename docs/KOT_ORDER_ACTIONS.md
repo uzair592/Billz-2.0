@@ -6,6 +6,8 @@ In View Orders, Take Payment records a cash or bank payment against the existing
 
 Owners, managers and waiters with order-edit permission can change unpaid open orders, including served KOTs. Existing line prices and recipe/cost snapshots stay fixed; newly added menu items use server prices. Changed quantities produce ADD/REMOVE kitchen tickets. A version conflict asks the user to reopen the latest bill. Paid, completed and restored historical bills are protected from financial edits.
 
+The KDS reads the dining table number from the shared restaurant tables, including takeaway tickets without a table. The ticket list remains scoped to the signed-in restaurant and branch.
+
 Cancel Order removes the order from active kitchen queues, refunds captured tenders and reverses only stock that was deducted. A blank optional reason is valid. The legacy Delete entry point uses this recorded cancellation; it does not erase the audit trail. Cashiers retain their existing payment permission and do not gain cancellation/edit permission.
 
 Payment/edit retry payloads are stored per restaurant/order and reused after an uncertain network result, including reload. Fields remain locked until that attempt is confirmed or definitively refused. Server locks, payment retry validation and amendment audit keys prevent double recording and stale overwrites.
