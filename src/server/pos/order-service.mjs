@@ -41,7 +41,7 @@ function publicOrder(row, canViewReports = true) {
   };
 }
 
-function pricingInput(menuLines, input) {
+export function pricingInput(menuLines, input) {
   return {
     items: menuLines.map((line) => ({ price: line.priceMinor / 100, qty: line.quantity })),
     discountType: input.discount?.type ?? "flat",
@@ -95,6 +95,209 @@ function effectiveItemPrice(item) {
     };
   }
   return { priceMinor: regularPriceMinor, offer: null };
+}
+
+export async function prepareOrderLines(client, { restaurantId, branchId, businessDate, input }) {
+  const requestedIds = input.items.map((item) => item.menuItemId);
+  const menuResult = await client.query(
+    `SELECT mi.id, mi.name, mi.item_type, mi.price_minor,
+            mi.other_cost_minor,
+            io.offer_price_minor,
+            co.discount_type AS category_discount_type,
+            co.discount_minor AS category_discount_minor,
+            co.discount_percent AS category_discount_percent,
+            COALESCE(recipes.items, '[]'::jsonb) AS recipe,
+            COALESCE(components.items, '[]'::jsonb) AS components
+       FROM menu_items mi
+       LEFT JOIN menu_item_offers io
+         ON io.restaurant_id = mi.restaurant_id
+        AND io.menu_item_id = mi.id
+        AND io.is_active = true
+        AND (io.starts_on IS NULL OR io.starts_on <= $1::date)
+        AND (io.ends_on IS NULL OR io.ends_on >= $1::date)
+       LEFT JOIN menu_category_offers co
+         ON co.restaurant_id = mi.restaurant_id
+        AND co.category_id = mi.category_id
+        AND co.is_active = true
+        AND (co.starts_on IS NULL OR co.starts_on <= $1::date)
+        AND (co.ends_on IS NULL OR co.ends_on >= $1::date)
+       LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object(
+                'stockItemId', r.stock_item_id,
+                'quantityBaseUnits', r.quantity_base_units
+              ) ORDER BY r.stock_item_id) AS items
+           FROM menu_item_recipe_items r
+          WHERE r.restaurant_id = mi.restaurant_id
+            AND r.menu_item_id = mi.id
+       ) recipes ON true
+       LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object(
+                'menuItemId', c.component_menu_item_id,
+                'quantity', c.quantity
+              ) ORDER BY c.component_menu_item_id) AS items
+           FROM menu_item_components c
+          WHERE c.restaurant_id = mi.restaurant_id
+            AND c.menu_item_id = mi.id
+       ) components ON true
+      WHERE mi.is_active = true`,
+    [businessDate],
+  );
+  const byId = new Map(menuResult.rows.map((row) => [row.id, row]));
+  if (requestedIds.some((id) => !byId.has(id))) {
+    throw apiError("One or more menu items are no longer available.", "MENU_CHANGED", 409);
+  }
+
+  function expandMenuItem(itemId, path = []) {
+    if (path.includes(itemId)) {
+      throw apiError(
+        "A deal contains a circular component reference.",
+        "INVALID_DEAL_CONFIGURATION",
+        409,
+        { menuItemId: itemId },
+      );
+    }
+    const item = byId.get(itemId);
+    if (!item) {
+      throw apiError(
+        "A deal component is no longer available.",
+        "DEAL_COMPONENT_UNAVAILABLE",
+        409,
+        { menuItemId: itemId },
+      );
+    }
+
+    const recipeByStockItem = new Map();
+    for (const recipeItem of item.recipe ?? []) {
+      recipeByStockItem.set(
+        recipeItem.stockItemId,
+        (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
+          + Number(recipeItem.quantityBaseUnits),
+      );
+    }
+
+    let otherCostMinor = Number(item.other_cost_minor);
+    const componentSnapshots = [];
+    for (const component of item.components ?? []) {
+      const quantity = Number(component.quantity);
+      const expanded = expandMenuItem(component.menuItemId, [...path, itemId]);
+      for (const recipeItem of expanded.recipe) {
+        recipeByStockItem.set(
+          recipeItem.stockItemId,
+          (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
+            + recipeItem.quantityBaseUnits * quantity,
+        );
+      }
+      otherCostMinor += expanded.otherCostMinor * quantity;
+      componentSnapshots.push({
+        menuItemId: expanded.item.id,
+        name: expanded.item.name,
+        itemType: expanded.item.item_type,
+        quantity,
+        unitPriceMinor: Number(expanded.item.price_minor),
+        components: expanded.componentSnapshots,
+      });
+    }
+
+    return {
+      item,
+      recipe: [...recipeByStockItem].map(([stockItemId, quantityBaseUnits]) => ({
+        stockItemId,
+        quantityBaseUnits,
+      })),
+      otherCostMinor,
+      componentSnapshots,
+    };
+  }
+
+  const menuLines = input.items.map((line) => {
+    const expanded = expandMenuItem(line.menuItemId);
+    const item = expanded.item;
+    const pricing = effectiveItemPrice(item);
+    return {
+      ...line,
+      name: item.name,
+      priceMinor: pricing.priceMinor,
+      offer: pricing.offer,
+      otherCostMinor: expanded.otherCostMinor,
+      recipe: expanded.recipe,
+      componentSnapshots: expanded.componentSnapshots,
+    };
+  });
+
+  await freezeInventoryRecipes(client, restaurantId, menuLines, byId);
+  const stockUsage = new Map();
+  for (const line of menuLines) {
+    for (const recipeItem of line.recipe) {
+      const quantity = Number(recipeItem.quantityBaseUnits) * line.quantity;
+      stockUsage.set(
+        recipeItem.stockItemId,
+        (stockUsage.get(recipeItem.stockItemId) ?? 0) + quantity,
+      );
+    }
+  }
+  const stockIds = [...stockUsage.keys()];
+  for (const stockItemId of [...stockIds].sort()) await client.query(`INSERT INTO inventory_balances
+    (restaurant_id, branch_id, stock_item_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [restaurantId, branchId, stockItemId]);
+  const stockResult = stockIds.length
+    ? await client.query(
+        `SELECT stock_item_id, quantity_base_units,
+                average_cost_minor_per_base_unit
+           FROM inventory_balances
+          WHERE branch_id = $1 AND stock_item_id = ANY($2::uuid[])
+          ORDER BY stock_item_id FOR UPDATE`,
+        [branchId, stockIds],
+      )
+    : { rows: [] };
+  const stockById = new Map(stockResult.rows.map((row) => [row.stock_item_id, row]));
+  const legacyWarnings = [];
+  const skippedDeductions = [];
+  let hasIncompleteCosting = false;
+
+  for (const [stockItemId, required] of stockUsage) {
+    const balance = stockById.get(stockItemId);
+    if (!balance) {
+      hasIncompleteCosting = true;
+      skippedDeductions.push({ stockItemId, required, reason: "missing_stock_balance" });
+      legacyWarnings.push({ type: "missing_stock_balance", stockItemId, required });
+      continue;
+    }
+    if (Number(balance.quantity_base_units) < required) {
+      legacyWarnings.push({ type: "negative_stock", stockItemId, quantityAfter: Number(balance.quantity_base_units) - required });
+    }
+  }
+
+  for (const line of menuLines) {
+    const hasLegacyRecipe = line.recipe && line.recipe.length > 0;
+    const hasInvRecipe = line.inventoryRecipe && line.inventoryRecipe.length > 0;
+    if (!hasLegacyRecipe && !hasInvRecipe) {
+      hasIncompleteCosting = true;
+      skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, reason: "missing_recipe" });
+    }
+    if (line.skippedInventoryUsage?.length) {
+      hasIncompleteCosting = true;
+      for (const sk of line.skippedInventoryUsage) {
+        skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, inventoryItemId: sk.inventoryItemId, reason: sk.reason });
+      }
+    }
+    if (line.incompleteCosting) {
+      hasIncompleteCosting = true;
+    }
+
+    const recipeUnitCostMinor = (line.recipe || []).reduce((sum, recipeItem) => {
+      const balance = stockById.get(recipeItem.stockItemId);
+      if (!balance || balance.average_cost_minor_per_base_unit == null) {
+        hasIncompleteCosting = true;
+        return sum;
+      }
+      return sum + (
+        Number(recipeItem.quantityBaseUnits)
+        * Number(balance.average_cost_minor_per_base_unit)
+      );
+    }, 0);
+    line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + (line.otherCostMinor ?? 0));
+  }
+
+  return { menuLines, stockUsage, stockById, legacyWarnings, skippedDeductions, hasIncompleteCosting };
 }
 
 export function createOrderService(
@@ -158,204 +361,8 @@ export function createOrderService(
             return { order: publicOrder(existing.rows[0], canViewReports), replayed: true };
           }
 
-          const requestedIds = input.items.map((item) => item.menuItemId);
-          const menuResult = await client.query(
-            `SELECT mi.id, mi.name, mi.item_type, mi.price_minor,
-                    mi.other_cost_minor,
-                    io.offer_price_minor,
-                    co.discount_type AS category_discount_type,
-                    co.discount_minor AS category_discount_minor,
-                    co.discount_percent AS category_discount_percent,
-                    COALESCE(recipes.items, '[]'::jsonb) AS recipe,
-                    COALESCE(components.items, '[]'::jsonb) AS components
-               FROM menu_items mi
-               LEFT JOIN menu_item_offers io
-                 ON io.restaurant_id = mi.restaurant_id
-                AND io.menu_item_id = mi.id
-                AND io.is_active = true
-                AND (io.starts_on IS NULL OR io.starts_on <= $1::date)
-                AND (io.ends_on IS NULL OR io.ends_on >= $1::date)
-               LEFT JOIN menu_category_offers co
-                 ON co.restaurant_id = mi.restaurant_id
-                AND co.category_id = mi.category_id
-                AND co.is_active = true
-                AND (co.starts_on IS NULL OR co.starts_on <= $1::date)
-                AND (co.ends_on IS NULL OR co.ends_on >= $1::date)
-               LEFT JOIN LATERAL (
-                 SELECT jsonb_agg(jsonb_build_object(
-                        'stockItemId', r.stock_item_id,
-                        'quantityBaseUnits', r.quantity_base_units
-                      ) ORDER BY r.stock_item_id) AS items
-                   FROM menu_item_recipe_items r
-                  WHERE r.restaurant_id = mi.restaurant_id
-                    AND r.menu_item_id = mi.id
-               ) recipes ON true
-               LEFT JOIN LATERAL (
-                 SELECT jsonb_agg(jsonb_build_object(
-                        'menuItemId', c.component_menu_item_id,
-                        'quantity', c.quantity
-                      ) ORDER BY c.component_menu_item_id) AS items
-                   FROM menu_item_components c
-                  WHERE c.restaurant_id = mi.restaurant_id
-                    AND c.menu_item_id = mi.id
-               ) components ON true
-              WHERE mi.is_active = true`,
-            [businessDate],
-          );
-          const byId = new Map(menuResult.rows.map((row) => [row.id, row]));
-          if (requestedIds.some((id) => !byId.has(id))) {
-            throw apiError("One or more menu items are no longer available.", "MENU_CHANGED", 409);
-          }
-
-          function expandMenuItem(itemId, path = []) {
-            if (path.includes(itemId)) {
-              throw apiError(
-                "A deal contains a circular component reference.",
-                "INVALID_DEAL_CONFIGURATION",
-                409,
-                { menuItemId: itemId },
-              );
-            }
-            const item = byId.get(itemId);
-            if (!item) {
-              throw apiError(
-                "A deal component is no longer available.",
-                "DEAL_COMPONENT_UNAVAILABLE",
-                409,
-                { menuItemId: itemId },
-              );
-            }
-
-            const recipeByStockItem = new Map();
-            for (const recipeItem of item.recipe ?? []) {
-              recipeByStockItem.set(
-                recipeItem.stockItemId,
-                (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
-                  + Number(recipeItem.quantityBaseUnits),
-              );
-            }
-
-            let otherCostMinor = Number(item.other_cost_minor);
-            const componentSnapshots = [];
-            for (const component of item.components ?? []) {
-              const quantity = Number(component.quantity);
-              const expanded = expandMenuItem(component.menuItemId, [...path, itemId]);
-              for (const recipeItem of expanded.recipe) {
-                recipeByStockItem.set(
-                  recipeItem.stockItemId,
-                  (recipeByStockItem.get(recipeItem.stockItemId) ?? 0)
-                    + recipeItem.quantityBaseUnits * quantity,
-                );
-              }
-              otherCostMinor += expanded.otherCostMinor * quantity;
-              componentSnapshots.push({
-                menuItemId: expanded.item.id,
-                name: expanded.item.name,
-                itemType: expanded.item.item_type,
-                quantity,
-                unitPriceMinor: Number(expanded.item.price_minor),
-                components: expanded.componentSnapshots,
-              });
-            }
-
-            return {
-              item,
-              recipe: [...recipeByStockItem].map(([stockItemId, quantityBaseUnits]) => ({
-                stockItemId,
-                quantityBaseUnits,
-              })),
-              otherCostMinor,
-              componentSnapshots,
-            };
-          }
-
-          const menuLines = input.items.map((line) => {
-            const expanded = expandMenuItem(line.menuItemId);
-            const item = expanded.item;
-            const pricing = effectiveItemPrice(item);
-            return {
-              ...line,
-              name: item.name,
-              priceMinor: pricing.priceMinor,
-              offer: pricing.offer,
-              otherCostMinor: expanded.otherCostMinor,
-              recipe: expanded.recipe,
-              componentSnapshots: expanded.componentSnapshots,
-            };
-          });
-
-          await freezeInventoryRecipes(client, restaurantId, menuLines, byId);
-          const stockUsage = new Map();
-          for (const line of menuLines) {
-            for (const recipeItem of line.recipe) {
-              const quantity = Number(recipeItem.quantityBaseUnits) * line.quantity;
-              stockUsage.set(
-                recipeItem.stockItemId,
-                (stockUsage.get(recipeItem.stockItemId) ?? 0) + quantity,
-              );
-            }
-          }
-          const stockIds = [...stockUsage.keys()];
-          for (const stockItemId of [...stockIds].sort()) await client.query(`INSERT INTO inventory_balances
-            (restaurant_id, branch_id, stock_item_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [restaurantId, branchId, stockItemId]);
-          const stockResult = stockIds.length
-            ? await client.query(
-                `SELECT stock_item_id, quantity_base_units,
-                        average_cost_minor_per_base_unit
-                   FROM inventory_balances
-                  WHERE branch_id = $1 AND stock_item_id = ANY($2::uuid[])
-                  ORDER BY stock_item_id FOR UPDATE`,
-                [branchId, stockIds],
-              )
-            : { rows: [] };
-          const stockById = new Map(stockResult.rows.map((row) => [row.stock_item_id, row]));
-          const legacyWarnings = [];
-          const skippedDeductions = [];
-          let hasIncompleteCosting = false;
-
-          for (const [stockItemId, required] of stockUsage) {
-            const balance = stockById.get(stockItemId);
-            if (!balance) {
-              hasIncompleteCosting = true;
-              skippedDeductions.push({ stockItemId, required, reason: "missing_stock_balance" });
-              legacyWarnings.push({ type: "missing_stock_balance", stockItemId, required });
-              continue;
-            }
-            if (Number(balance.quantity_base_units) < required) {
-              legacyWarnings.push({ type: "negative_stock", stockItemId, quantityAfter: Number(balance.quantity_base_units) - required });
-            }
-          }
-
-          for (const line of menuLines) {
-            const hasLegacyRecipe = line.recipe && line.recipe.length > 0;
-            const hasInvRecipe = line.inventoryRecipe && line.inventoryRecipe.length > 0;
-            if (!hasLegacyRecipe && !hasInvRecipe) {
-              hasIncompleteCosting = true;
-              skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, reason: "missing_recipe" });
-            }
-            if (line.skippedInventoryUsage?.length) {
-              hasIncompleteCosting = true;
-              for (const sk of line.skippedInventoryUsage) {
-                skippedDeductions.push({ menuItemId: line.menuItemId, name: line.name, quantity: line.quantity, inventoryItemId: sk.inventoryItemId, reason: sk.reason });
-              }
-            }
-            if (line.incompleteCosting) {
-              hasIncompleteCosting = true;
-            }
-
-            const recipeUnitCostMinor = (line.recipe || []).reduce((sum, recipeItem) => {
-              const balance = stockById.get(recipeItem.stockItemId);
-              if (!balance || balance.average_cost_minor_per_base_unit == null) {
-                hasIncompleteCosting = true;
-                return sum;
-              }
-              return sum + (
-                Number(recipeItem.quantityBaseUnits)
-                * Number(balance.average_cost_minor_per_base_unit)
-              );
-            }, 0);
-            line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + (line.otherCostMinor ?? 0));
-          }
+          const { menuLines, stockUsage, stockById, legacyWarnings, skippedDeductions, hasIncompleteCosting } =
+            await prepareOrderLines(client, { restaurantId, branchId, businessDate, input });
 
           const pricing = MoneyEngine.calculate(pricingInput(menuLines, input));
           if (input.expectedTotalMinor !== undefined && input.expectedTotalMinor !== pricing.minor.total) throw apiError("Menu prices changed. Refresh the catalog and check the bill before taking payment.", "PRICE_CHANGED", 409);
@@ -601,9 +608,18 @@ export function createOrderService(
       );
     },
 
+    async paymentAccounts({ tenant, userId }) {
+      const restaurantId = tenant.restaurant.id;
+      return withTenantTransaction(pool, { restaurantId, userId }, async client => {
+        const result = await client.query(`SELECT id, display_name, account_type FROM financial_accounts
+          WHERE restaurant_id=$1 AND is_active=true AND (branch_id IS NULL OR branch_id=$2)
+          ORDER BY account_type, display_name, id`, [restaurantId, tenant.membership.defaultBranchId]);
+        return { accounts: result.rows.map(row => ({id:row.id, displayName:row.display_name, accountType:row.account_type})) };
+      });
+    },
+
     async settlePayment({ tenant, userId, orderId, input }) {
       const restaurantId = tenant.restaurant.id;
-      const branchId = tenant.membership.defaultBranchId;
       const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
       const now = clock();
 
@@ -617,12 +633,18 @@ export function createOrderService(
               [input.idempotencyKey],
             );
             const existingPayment = await client.query(
-              `SELECT id, order_id, amount_minor, payment_method, status, received_at
+              `SELECT id, order_id, financial_account_id, amount_minor, payment_method, status, received_at
                  FROM order_payments
                 WHERE restaurant_id = $1 AND idempotency_key = $2`,
               [restaurantId, input.idempotencyKey],
             );
             if (existingPayment.rows[0]) {
+              const previous = existingPayment.rows[0];
+              if (previous.order_id !== orderId || Number(previous.amount_minor) !== input.amountMinor
+                  || previous.payment_method !== input.paymentMethod
+                  || (input.financialAccountId && previous.financial_account_id !== input.financialAccountId)) {
+                throw apiError("This retry key belongs to another payment.", "IDEMPOTENCY_CONFLICT", 409);
+              }
               const orderRes = await client.query(
                 `SELECT id, order_number, order_type, order_status, payment_status,
                         subtotal_minor, discount_minor, delivery_minor,
@@ -651,7 +673,7 @@ export function createOrderService(
             `SELECT id, order_number, order_type, order_status, payment_status,
                     subtotal_minor, discount_minor, delivery_minor,
                     additional_charges_minor, total_minor, cost_of_goods_minor,
-                    business_date, ordered_at, restore_key
+                    business_date, ordered_at, restore_key, branch_id
                FROM orders
               WHERE restaurant_id = $1 AND id = $2
               FOR UPDATE`,
@@ -661,6 +683,7 @@ export function createOrderService(
           if (!order) {
             throw apiError("Order not found.", "ORDER_NOT_FOUND", 404);
           }
+          const branchId = order.branch_id;
           if (order.restore_key) throw apiError("This historical bill is read-only; reconcile its original payments before making adjustments.", "HISTORICAL_ORDER_READ_ONLY", 409);
           if (order.order_status === "cancelled") {
             throw apiError("Cannot settle payment for a cancelled order.", "ORDER_CANCELLED", 409);
@@ -755,14 +778,14 @@ export function createOrderService(
                 SET payment_status = $3,
                     order_status = $4,
                     completed_at = CASE WHEN $4 = 'completed' AND completed_at IS NULL THEN $5 ELSE completed_at END,
-                    updated_at = $5
+                    version = version + 1, updated_by_user_id = $6, updated_at = $5
               WHERE restaurant_id = $1 AND id = $2
               RETURNING id, order_number, order_type, order_status, payment_status,
                         subtotal_minor, discount_minor, delivery_minor,
                         additional_charges_minor, total_minor, cost_of_goods_minor,
                         incomplete_costing, skipped_stock_deductions,
                         business_date, ordered_at`,
-            [restaurantId, orderId, newPaymentStatus, updatedOrderStatus, now],
+            [restaurantId, orderId, newPaymentStatus, updatedOrderStatus, now, userId],
           );
 
           if (becomesCompleted && consumeInventory) {
@@ -780,9 +803,11 @@ export function createOrderService(
               const lines = orderItemsRes.rows.map(row => ({
                 menuItemId: row.menu_item_id,
                 quantity: row.quantity,
-                inventoryRecipe: row.recipe_snapshot?.inventoryItems || undefined,
-                recipe: row.recipe_snapshot?.items || undefined,
+                inventoryRecipe: row.recipe_snapshot?.inventoryItems || [],
+                recipe: row.recipe_snapshot?.items || [],
               }));
+              // Match checkout/cancellation lock ordering: migrated inventory
+              // first, then sorted legacy balances, across concurrent orders.
               await consumeInventory.consumeWithinTransaction(client, {
                 restaurantId,
                 orderId,
@@ -790,9 +815,29 @@ export function createOrderService(
                 userId,
                 now,
               });
+              // KOT defers both stock systems until final settlement. Use the
+              // original recipe snapshots, never today's recipe definitions.
+              const legacyUsage = new Map();
+              for (const line of lines) for (const recipe of line.recipe) legacyUsage.set(recipe.stockItemId,
+                (legacyUsage.get(recipe.stockItemId) || 0) + Number(recipe.quantityBaseUnits) * Number(line.quantity));
+              for (const [stockItemId, quantity] of [...legacyUsage].sort(([a],[b]) => a.localeCompare(b))) {
+                const balance = await client.query(`UPDATE inventory_balances
+                  SET quantity_base_units=quantity_base_units-$4, version=version+1, updated_at=$5
+                  WHERE restaurant_id=$1 AND branch_id=$2 AND stock_item_id=$3 RETURNING stock_item_id`,
+                  [restaurantId,branchId,stockItemId,quantity,now]);
+                if (balance.rowCount) await client.query(`INSERT INTO stock_movements
+                  (restaurant_id,branch_id,stock_item_id,order_id,movement_type,quantity_delta,idempotency_key,occurred_at,created_by_user_id)
+                  VALUES($1,$2,$3,$4,'sale',$5,$6,$7,$8)`,
+                  [restaurantId,branchId,stockItemId,orderId,-quantity,randomUUID(),now,userId]);
+              }
             }
           }
 
+          await client.query(`INSERT INTO order_edit_events (restaurant_id,order_id,actor_user_id,event_type,changes,note)
+            VALUES($1,$2,$3,'payment',$4,'Payment received')`, [restaurantId,orderId,userId,JSON.stringify([
+              {label:"Amount received",from:totalPaid,to:newTotalPaid},
+              {label:"Payment status",from:order.payment_status,to:newPaymentStatus},
+            ])]);
           return {
             payment: {
               id: paymentId,

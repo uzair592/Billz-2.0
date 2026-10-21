@@ -176,7 +176,7 @@ export function createOrderHistoryUI({
       tr.style.opacity = "0.7";
     }
 
-    const remainingDue = unpaid ? order.totalBill : 0;
+    const remainingDue = !cancelled && unpaid ? Math.max(0, order.totalBill - order.amountReceived) : 0;
     const typeClass = order.orderType === "Dine-In"
       ? "badge-dinein"
       : order.orderType === "Delivery"
@@ -194,8 +194,9 @@ export function createOrderHistoryUI({
       <td style="color:#94a3b8; font-size:12px;">—</td>
       <td style="text-align:center;">${statusBadge}</td>
       <td style="text-align:center; white-space:nowrap;">
+        <button type="button" class="edit-item-btn history-open-btn" style="margin:0 4px 0 0; background:#166534; padding:4px 10px;">${unpaid && order.actions?.canPay ? "Take Payment" : "Open Bill"}</button>
         <button type="button" class="edit-item-btn history-reprint-btn" style="margin:0; background:#0ea5e9; padding:4px 10px;">🖨️ Print</button>
-        ${cancelled || order.restored ? "" : `<button type="button" class="delete-item-btn history-cancel-btn" style="margin:0 0 0 4px; padding:4px 10px;">❌ Cancel</button>`}
+        ${cancelled || order.restored || order.actions?.canCancel === false ? "" : `<button type="button" class="delete-item-btn history-cancel-btn" style="margin:0 0 0 4px; padding:4px 10px;">❌ Cancel</button>`}
       </td>
     `;
 
@@ -203,6 +204,11 @@ export function createOrderHistoryUI({
     // names can never leak into a JavaScript string literal.
     tr.addEventListener("click", () => {
       window.showOrderInvoiceDetailsView(order.id);
+    });
+    tr.querySelector(".history-open-btn")?.addEventListener("click", event => {
+      event.stopPropagation();
+      if (unpaid && order.actions?.canPay) window.BillzOrderActions.handle("payment",order.id);
+      else window.showOrderInvoiceDetailsView(order.id);
     });
     tr.querySelector(".history-reprint-btn")?.addEventListener("click", (event) => {
       event.stopPropagation();

@@ -257,6 +257,8 @@ export function createLegacyCloudAdapter({
       };
     },
 
+    async confirmCheckout() { await storage.set("pos_checkout_attempt", null); },
+
     async checkoutOnline(order) {
       const current = await session.currentUser();
       if (!current?.user) throw new Error("Sign in before completing online checkout.");

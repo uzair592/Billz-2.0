@@ -16,6 +16,7 @@ import { projectRoot } from './helpers/legacy-source.mjs';
  * try to connect before the database is reachable.
  */
 const EXCLUDED = new Set([
+  'order-actions-postgres.test.mjs',
   'production-verification-postgres.test.mjs',
   'legacy-order-restore-postgres.test.mjs',
   'admin-mfa-postgres.test.mjs',

@@ -253,6 +253,13 @@ export const orderCancellationApi = {
   },
 };
 
+// Existing bills are changed on the server, never in a device-local ledger.
+export const orderActionsApi = {
+  paymentAccounts() { return apiRequest("/pos/payment-accounts"); },
+  pay(orderId, body) { return apiRequest(`/pos/orders/${encodeURIComponent(orderId)}/payments`, { method: "POST", body }); },
+  amend(orderId, body) { return apiRequest(`/pos/orders/${encodeURIComponent(orderId)}`, { method: "PATCH", body }); },
+};
+
 // Order creation — POST /api/pos/orders
 export const orderApi = {
   /**

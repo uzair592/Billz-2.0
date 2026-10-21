@@ -116,6 +116,20 @@ const orderSchema = z.object({
   }).strict().optional(),
 }).strict();
 
+const amendOrderSchema = z.object({
+  idempotencyKey: z.uuid(),
+  expectedVersion: z.number().int().positive(),
+  customerName: z.string().trim().max(160).optional(),
+  customerPhone: z.string().trim().max(40).optional(),
+  discount: orderSchema.shape.discount,
+  deliveryMinor: z.number().int().min(0).optional(),
+  items: z.array(z.object({
+    orderItemId: z.uuid().optional(), menuItemId: z.uuid().optional(),
+    quantity: z.number().int().min(1).max(999),
+  }).strict().refine(line => Boolean(line.orderItemId) !== Boolean(line.menuItemId),
+    "Provide an existing order line or a new menu item.")).min(1).max(100),
+}).strict();
+
 const orderHistoryQuerySchema = z.object({
   businessDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -423,6 +437,7 @@ export async function buildHttpApp({
   kitchenService = null,
   businessSettingsService = null,
   orderService = null,
+  orderAmendmentService = null,
   orderHistoryService = null,
   orderCancellationService = null,
   orderRefundService = null,
@@ -1013,6 +1028,10 @@ export async function buildHttpApp({
         },
       );
 
+      app.get("/api/pos/payment-accounts", {
+        preHandler: [guards.authenticate, guards.tenant(PERMISSION.PAYMENT_PROCESS)],
+      }, request => orderService.paymentAccounts({ tenant: request.tenant, userId: request.auth.user.id }));
+
       const syncTelemetrySchema = z.object({
         deviceUid: z.string().trim().min(1).max(128),
         branchId: z.uuid().nullable().optional(),
@@ -1070,6 +1089,14 @@ export async function buildHttpApp({
           return reply.code(result.replayed ? 200 : 201).send(result);
         },
       );
+    }
+
+    if (orderAmendmentService) {
+      app.patch("/api/pos/orders/:orderId", {
+        preHandler: [guards.authenticate, guards.tenant(PERMISSION.ORDER_EDIT)],
+      }, async (request) => orderAmendmentService.amend({ tenant: request.tenant,
+        userId: request.auth.user.id, orderId: orderParamsSchema.parse(request.params).orderId,
+        input: amendOrderSchema.parse(request.body) }));
     }
 
     if (orderHistoryService) {

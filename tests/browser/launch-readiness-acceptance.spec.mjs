@@ -87,6 +87,54 @@ test.describe("Production server readiness journeys", () => {
       await expect(page.locator("#cloud-sales-report-container")).toContainText("200.00");
       await page.screenshot({ path: `tests/browser/screenshots/readiness-profit-${size.name}.png` });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 2)).toBe(true);
+      // The reported journey: KOT -> edit -> serve -> cashier payment -> owner cancellation.
+      await goTo(page, "new-order"); await page.evaluate(() => {
+        setOrderType("Takeaway"); window.__kotPrints = [];
+        window.populateReceiptSlipAndPrint = async (order,targets) => { window.__kotPrints.push({order,targets}); };
+      });
+      if (!(await page.locator('#food-grid button.food-card[aria-label="Add Readiness Burger to bill"]').isVisible())) {
+        await page.locator("#food-grid button.food-card").filter({hasText:"Burgers"}).click();
+      }
+      await page.locator('#food-grid button.food-card[aria-label="Add Readiness Burger to bill"]').click();
+      const kotResponse = page.waitForResponse(response => response.url().endsWith("/api/pos/orders") && response.request().method() === "POST");
+      await page.locator("#btn-kot-bill").click();
+      if (await page.locator("#missing-stock-confirm-modal").isVisible()) await page.locator("#btn-continue-billing").click();
+      const kotSaved = await kotResponse; expect(kotSaved.status()).toBe(201);
+      const kot = (await kotSaved.json()).order;
+      expect(kot.totalMinor).toBe(10000); expect(kot.paymentStatus).toBe("unpaid"); expect(kot.orderStatus).toBe("preparing");
+      await expect.poll(() => page.evaluate(() => cart.length)).toBe(0);
+      const printed = await page.evaluate(() => window.__kotPrints);
+      expect(printed).toHaveLength(1);expect(printed[0].targets).toEqual(["kitchen"]);expect(printed[0].order.orderNumber).toBe(kot.orderNumber);
+      expect(printed[0].order.items[0]).not.toHaveProperty("price");
+      await goTo(page, "view-orders");
+      const ownerKotRow = page.locator("#history-orders-rows tr").filter({has:page.locator("td:first-child strong",{hasText:`#${kot.orderNumber}`})});
+      await ownerKotRow.click(); await page.locator('[data-order-action="edit"]').click();
+      await page.getByLabel("Quantity for Readiness Burger",{exact:true}).fill("2");
+      await page.getByRole("button",{name:"Save Changes",exact:true}).click();
+      await expect(page.locator(".order-action-overlay")).toHaveCount(0);
+      await page.getByRole("button",{name:"Close",exact:true}).click();
+      await goTo(page, "kitchen");
+      const kotCards = page.locator("#kds-board .kds-card").filter({hasText:new RegExp(`Order #${kot.orderNumber}(?:\\s|$)`)});
+      await expect(kotCards).toHaveCount(2);
+      for (const label of ["Start Cooking","Mark Ready","Mark Served"]) {
+        for (let index=0;index<2;index++) {
+          await kotCards.getByRole("button",{name:new RegExp(label)}).first().click();
+          await expect(kotCards.getByRole("button",{name:new RegExp(label)})).toHaveCount(1-index);
+        }
+      }
+      await expect(kotCards).toHaveCount(0);
+      await goTo(second,"view-orders");
+      const cashierKotRow = second.locator("#history-orders-rows tr").filter({has:second.locator("td:first-child strong",{hasText:`#${kot.orderNumber}`})});
+      await cashierKotRow.click();
+      await expect(second.locator('[data-order-action="edit"]')).toHaveCount(0);
+      await second.locator('[data-order-action="payment"]').click();
+      await expect(second.getByLabel("Amount received (Rs.)",{exact:true})).toHaveValue("200.00");
+      const paymentSaved = second.waitForResponse(response=>response.url().endsWith(`/api/pos/orders/${kot.id}/payments`) && response.request().method()==="POST");
+      await second.getByRole("button",{name:"Record Payment",exact:true}).click();expect((await paymentSaved).status()).toBe(201);
+      await expect(second.locator('[data-order-action="payment"]')).toHaveCount(0);
+      await goTo(page,"view-orders");await ownerKotRow.click();await page.locator('[data-order-action="cancel"]').click();
+      await page.locator("#cloud-cancel-confirm").click();await expect(page.locator("#invoice-modal-overlay")).toBeHidden();
+      await expect(ownerKotRow).toContainText("Cancelled");
       // Explicitly visit the production history, stock and purchasing screens; mocked suites exercise their detailed controls.
       for (const screen of ["view-orders", "inventory", "purchases"]) { await goTo(page, screen); }
       if (size.name === "laptop") {
@@ -104,7 +152,7 @@ test.describe("Production server readiness journeys", () => {
         expect(retried.status()).toBe(200);
         expect((await retried.json()).skipped).toBe(3);
         await expect(page.locator("#retry-backup-sync")).toBeHidden();
-        expect(Number((await control.query("SELECT count(*) FROM orders WHERE restaurant_id = (SELECT restaurant_id FROM orders WHERE id=$1)", [orders[0].id])).rows[0].count)).toBe(5);
+        expect(Number((await control.query("SELECT count(*) FROM orders WHERE restaurant_id = (SELECT restaurant_id FROM orders WHERE id=$1)", [orders[0].id])).rows[0].count)).toBe(6);
       }
       expect(errors).toEqual([]);
     } finally { await device.close(); }
