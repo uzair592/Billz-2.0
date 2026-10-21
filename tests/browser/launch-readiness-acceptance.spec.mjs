@@ -133,6 +133,8 @@ test.describe("Production server readiness journeys", () => {
       const paymentSaved = second.waitForResponse(response=>response.url().endsWith(`/api/pos/orders/${kot.id}/payments`) && response.request().method()==="POST");
       await second.getByRole("button",{name:"Record Payment",exact:true}).click();expect((await paymentSaved).status()).toBe(201);
       await expect(second.locator('[data-order-action="payment"]')).toHaveCount(0);
+      await second.getByRole("button",{name:"Close",exact:true}).click();
+      await expect(second.locator("#invoice-modal-overlay")).toBeHidden();
       await goTo(page,"view-orders");await ownerKotRow.click();await page.locator('[data-order-action="cancel"]').click();
       await page.locator("#cloud-cancel-confirm").click();await expect(page.locator("#invoice-modal-overlay")).toBeHidden();
       await expect(ownerKotRow).toContainText("Cancelled");
