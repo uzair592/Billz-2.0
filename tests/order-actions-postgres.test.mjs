@@ -21,7 +21,7 @@ test("KOT order lifecycle remains consistent across devices", async t => {
   const bank = (await admin.query(`INSERT INTO financial_accounts(restaurant_id,branch_id,account_type,display_name)
     VALUES($1,$2,'bank','Restaurant bank') RETURNING id`,[a.restaurantId,a.branchId])).rows[0].id;
   const legacyStock = (await admin.query(`INSERT INTO stock_items(restaurant_id,name,stock_type,base_unit)
-    VALUES($1,'Dough','ingredient','g') RETURNING id`,[a.restaurantId])).rows[0].id;
+    VALUES($1,'Dough','ingredient','gram') RETURNING id`,[a.restaurantId])).rows[0].id;
   await admin.query(`INSERT INTO inventory_balances(restaurant_id,branch_id,stock_item_id,quantity_base_units,average_cost_minor_per_base_unit)
     VALUES($1,$2,$3,1000,10)`,[a.restaurantId,a.branchId,legacyStock]);
   const migratedStock = (await admin.query(`INSERT INTO inventory_items(restaurant_id,name,base_unit,current_quantity,average_cost_minor,idempotency_key)

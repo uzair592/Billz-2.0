@@ -113,8 +113,9 @@ test.describe("Production server readiness journeys", () => {
       await page.getByRole("button",{name:"Save Changes",exact:true}).click();
       await expect(page.locator(".order-action-overlay")).toHaveCount(0);
       await page.getByRole("button",{name:"Close",exact:true}).click();
+      expect((await control.query("SELECT id FROM kitchen_tickets WHERE order_id=$1", [kot.id])).rowCount).toBe(2);
       await goTo(page, "kitchen");
-      const kotCards = page.locator("#kds-board .kds-card").filter({hasText:new RegExp(`Order #${kot.orderNumber}(?:\\s|$)`)});
+      const kotCards = page.locator("#kds-board .kds-card").filter({hasText:new RegExp(`Order #${kot.orderNumber}(?![0-9])`)});
       await expect(kotCards).toHaveCount(2);
       for (const label of ["Start Cooking","Mark Ready","Mark Served"]) {
         for (let index=0;index<2;index++) {
