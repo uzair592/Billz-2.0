@@ -97,6 +97,34 @@ function effectiveItemPrice(item) {
   return { priceMinor: regularPriceMinor, offer: null };
 }
 
+function resolveExtraBaseUnitsPerItem(extra, def) {
+  const qty = Number(extra.quantity);
+  const baseUnitsPerSell = Number(def.base_units_per_sell_unit) || 1;
+  const unit = extra.unit ? String(extra.unit).toLowerCase() : null;
+  const baseUnit = String(def.base_unit || "").toLowerCase();
+  const sellUnit = String(def.sell_unit || "").toLowerCase();
+
+  if (unit) {
+    if (unit === baseUnit || (baseUnit === "gram" && unit === "g") || (baseUnit === "piece" && (unit === "pcs" || unit === "pc" || unit === "unit"))) {
+      return qty;
+    }
+    if (unit === "kg" && baseUnit === "gram") {
+      return qty * 1000;
+    }
+    if (unit === sellUnit || (sellUnit === "number" && (unit === "pcs" || unit === "pc" || unit === "piece"))) {
+      return qty * baseUnitsPerSell;
+    }
+  }
+
+  if ((sellUnit === "g" || sellUnit === "gram") && baseUnit === "gram") {
+    return qty;
+  }
+  if ((sellUnit === "number" || sellUnit === "piece") && baseUnit === "piece") {
+    return qty;
+  }
+  return qty * baseUnitsPerSell;
+}
+
 export async function prepareOrderLines(client, { restaurantId, branchId, businessDate, input }) {
   const requestedIds = input.items.map((item) => item.menuItemId);
   const menuResult = await client.query(
@@ -209,10 +237,53 @@ export async function prepareOrderLines(client, { restaurantId, branchId, busine
     };
   }
 
+  const extraStockItemIds = new Set();
+  for (const line of input.items) {
+    for (const extra of line.extras || []) {
+      if (extra?.stockItemId) extraStockItemIds.add(extra.stockItemId);
+    }
+  }
+
+  const extraStockItemsById = new Map();
+  if (extraStockItemIds.size > 0) {
+    const extraItemsRes = await client.query(
+      `SELECT id, name, base_unit, sell_unit, base_units_per_sell_unit
+         FROM stock_items
+        WHERE restaurant_id = $1 AND id = ANY($2::uuid[]) AND is_active = true`,
+      [restaurantId, [...extraStockItemIds]],
+    );
+    for (const row of extraItemsRes.rows) {
+      extraStockItemsById.set(row.id, row);
+    }
+    for (const line of input.items) {
+      for (const extra of line.extras || []) {
+        if (!extraStockItemsById.has(extra.stockItemId)) {
+          throw apiError("One or more extra ingredients are no longer available.", "EXTRA_UNAVAILABLE", 409);
+        }
+        const qty = Number(extra.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw apiError("Extra ingredient quantity must be positive.", "INVALID_EXTRA_QUANTITY", 400);
+        }
+      }
+    }
+  }
+
   const menuLines = input.items.map((line) => {
     const expanded = expandMenuItem(line.menuItemId);
     const item = expanded.item;
     const pricing = effectiveItemPrice(item);
+    const preparedExtras = (line.extras || []).map((extra) => {
+      const def = extraStockItemsById.get(extra.stockItemId);
+      const qtyPerItemBaseUnits = resolveExtraBaseUnitsPerItem(extra, def);
+      const totalBaseUnits = qtyPerItemBaseUnits * Number(line.quantity);
+      return {
+        stockItemId: extra.stockItemId,
+        nameSnapshot: def.name,
+        quantityBaseUnits: totalBaseUnits,
+        quantityBaseUnitsPerItem: qtyPerItemBaseUnits,
+        priceMinor: Number(extra.priceMinor) || 0,
+      };
+    });
     return {
       ...line,
       name: item.name,
@@ -221,6 +292,7 @@ export async function prepareOrderLines(client, { restaurantId, branchId, busine
       otherCostMinor: expanded.otherCostMinor,
       recipe: expanded.recipe,
       componentSnapshots: expanded.componentSnapshots,
+      extras: preparedExtras,
     };
   });
 
@@ -232,6 +304,12 @@ export async function prepareOrderLines(client, { restaurantId, branchId, busine
       stockUsage.set(
         recipeItem.stockItemId,
         (stockUsage.get(recipeItem.stockItemId) ?? 0) + quantity,
+      );
+    }
+    for (const extra of line.extras || []) {
+      stockUsage.set(
+        extra.stockItemId,
+        (stockUsage.get(extra.stockItemId) ?? 0) + extra.quantityBaseUnits,
       );
     }
   }
@@ -294,7 +372,23 @@ export async function prepareOrderLines(client, { restaurantId, branchId, busine
         * Number(balance.average_cost_minor_per_base_unit)
       );
     }, 0);
-    line.unitCostMinor = Math.round(recipeUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + (line.otherCostMinor ?? 0));
+
+    let extrasUnitCostMinor = 0;
+    for (const extra of line.extras || []) {
+      const balance = stockById.get(extra.stockItemId);
+      if (!balance || balance.average_cost_minor_per_base_unit == null) {
+        hasIncompleteCosting = true;
+        extra.costMinor = 0;
+      } else {
+        const costPerBaseUnit = Number(balance.average_cost_minor_per_base_unit);
+        const unitCost = Math.round(costPerBaseUnit * extra.quantityBaseUnitsPerItem);
+        const totalCost = Math.round(costPerBaseUnit * extra.quantityBaseUnits);
+        extra.costMinor = totalCost;
+        extrasUnitCostMinor += unitCost;
+      }
+    }
+
+    line.unitCostMinor = Math.round(recipeUnitCostMinor + extrasUnitCostMinor + (line.inventoryUnitCostMinor ?? 0) + (line.otherCostMinor ?? 0));
   }
 
   return { menuLines, stockUsage, stockById, legacyWarnings, skippedDeductions, hasIncompleteCosting };
@@ -463,6 +557,19 @@ export function createOrderService(
                 index,
               ],
             );
+
+            for (const extra of line.extras || []) {
+              await client.query(
+                `INSERT INTO order_item_extras (
+                   id, restaurant_id, order_item_id, stock_item_id,
+                   name_snapshot, quantity_base_units, price_minor, cost_minor
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [
+                  randomUUID(), restaurantId, lineId, extra.stockItemId,
+                  extra.nameSnapshot, extra.quantityBaseUnits, extra.priceMinor, extra.costMinor,
+                ],
+              );
+            }
           }
 
           for (const charge of pricing.additionalCharges) {
@@ -591,6 +698,11 @@ export function createOrderService(
                 menuItemId: line.menuItemId,
                 name: line.name,
                 quantity: line.quantity,
+                extras: (line.extras || []).map((e) => ({
+                  stockItemId: e.stockItemId,
+                  name: e.nameSnapshot,
+                  quantity: e.quantityBaseUnits,
+                })),
                 notes: line.notes || null,
               })),
               notes: input.kitchenNotes || input.notes || null,
@@ -795,12 +907,13 @@ export function createOrderService(
             );
             if (existingConsumption.rowCount === 0) {
               const orderItemsRes = await client.query(
-                `SELECT menu_item_id, quantity, recipe_snapshot
+                `SELECT id, menu_item_id, quantity, recipe_snapshot
                    FROM order_items
                   WHERE restaurant_id = $1 AND order_id = $2`,
                 [restaurantId, orderId],
               );
               const lines = orderItemsRes.rows.map(row => ({
+                id: row.id,
                 menuItemId: row.menu_item_id,
                 quantity: row.quantity,
                 inventoryRecipe: row.recipe_snapshot?.inventoryItems || [],
@@ -820,6 +933,23 @@ export function createOrderService(
               const legacyUsage = new Map();
               for (const line of lines) for (const recipe of line.recipe) legacyUsage.set(recipe.stockItemId,
                 (legacyUsage.get(recipe.stockItemId) || 0) + Number(recipe.quantityBaseUnits) * Number(line.quantity));
+              const itemIds = orderItemsRes.rows.map((r) => r.id);
+              if (itemIds.length > 0) {
+                const extrasRes = await client.query(
+                  `SELECT stock_item_id, quantity_base_units
+                     FROM order_item_extras
+                    WHERE restaurant_id = $1 AND order_item_id = ANY($2::uuid[])`,
+                  [restaurantId, itemIds],
+                );
+                for (const extra of extrasRes.rows) {
+                  if (extra.stock_item_id) {
+                    legacyUsage.set(
+                      extra.stock_item_id,
+                      (legacyUsage.get(extra.stock_item_id) || 0) + Number(extra.quantity_base_units),
+                    );
+                  }
+                }
+              }
               for (const [stockItemId, quantity] of [...legacyUsage].sort(([a],[b]) => a.localeCompare(b))) {
                 const balance = await client.query(`UPDATE inventory_balances
                   SET quantity_base_units=quantity_base_units-$4, version=version+1, updated_at=$5

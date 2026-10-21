@@ -65,6 +65,48 @@ describe("legacy cloud adapter", () => {
     );
   });
 
+  it("maps extras while preserving quantities and stock mappings", () => {
+    const stockExtraId = "55555555-5555-4555-8555-555555555555";
+    const mappingsWithStock = {
+      ...mappings,
+      stockItems: { cheese: stockExtraId },
+    };
+    const order = legacyOrder({
+      items: [
+        {
+          id: 7,
+          name: "Burger",
+          price: 500,
+          qty: 2,
+          extras: [{ key: "cheese", qty: 50 }],
+        },
+      ],
+    });
+    const payload = buildCloudOrderPayload(order, mappingsWithStock);
+    assert.equal(payload.items.length, 1);
+    assert.equal(payload.items[0].extras.length, 1);
+    assert.equal(payload.items[0].extras[0].stockItemId, stockExtraId);
+    assert.equal(payload.items[0].extras[0].quantity, 50);
+  });
+
+  it("refuses orders with unmapped extra stock items", () => {
+    const order = legacyOrder({
+      items: [
+        {
+          id: 7,
+          name: "Burger",
+          price: 500,
+          qty: 1,
+          extras: [{ key: "unmapped_extra", qty: 25 }],
+        },
+      ],
+    });
+    assert.throws(
+      () => buildCloudOrderPayload(order, mappings),
+      (error) => error.code === "LEGACY_MAPPING_MISSING" && error.retriable === false,
+    );
+  });
+
   it("persists mappings only after a successful catalog import", async () => {
     const storage = memoryStorage();
     let request;

@@ -173,7 +173,15 @@ export function mapCloudOrderDetail(detail) {
       price: fromMinor(item?.unitPriceMinor),
       offerLabel,
       originalPrice,
-      extras: [],
+      extras: asArray(item?.extras).map((extra) => ({
+        id: extra.id,
+        key: extra.key ?? extra.stockItemId ?? extra.name,
+        name: extra.name,
+        qty: Number(extra.quantityBaseUnits ?? extra.qty) || 0,
+        price: fromMinor(extra.priceMinor ?? 0),
+        cost: fromMinor(extra.costMinor ?? 0),
+        stockItemId: extra.stockItemId,
+      })),
       lineCostAtSale: item?.lineCostMinor != null
         ? fromMinor(item.lineCostMinor) : unitCost * (Number(item?.quantity) || 0),
       unitCostAtSale: unitCost,

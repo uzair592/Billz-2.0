@@ -630,6 +630,38 @@ export function createOrderRefundService(pool, { clock = () => new Date() } = {}
                   [restaurantId, order.branch_id, stockItemId, restockQtyDelta, now],
                 );
               }
+
+              const extras = (await client.query(
+                `SELECT stock_item_id, quantity_base_units
+                   FROM order_item_extras
+                  WHERE restaurant_id = $1 AND order_item_id = $2`,
+                [restaurantId, item.orderItemId],
+              )).rows;
+              for (const extra of extras) {
+                if (!extra.stock_item_id || origQty <= 0) continue;
+                const restockQtyDelta = (Number(extra.quantity_base_units) / origQty) * item.quantity;
+                const movementKey = `${refundId}:${item.orderItemId}:extra:${extra.stock_item_id}`;
+                await client.query(
+                  `INSERT INTO stock_movements (
+                     id, restaurant_id, branch_id, stock_item_id, order_id,
+                     movement_type, quantity_delta, idempotency_key, occurred_at,
+                     created_by_user_id
+                   ) VALUES (
+                     gen_random_uuid(), $1, $2, $3, $4,
+                     'sale_reversal', $5, md5($6::text)::uuid, $7, $8
+                   )
+                   ON CONFLICT (restaurant_id, idempotency_key) DO NOTHING`,
+                  [restaurantId, order.branch_id, extra.stock_item_id, orderId, restockQtyDelta, movementKey, now, userId],
+                );
+                await client.query(
+                  `UPDATE inventory_balances
+                      SET quantity_base_units = quantity_base_units + $4,
+                          version = version + 1,
+                          updated_at = $5
+                    WHERE restaurant_id = $1 AND branch_id = $2 AND stock_item_id = $3`,
+                  [restaurantId, order.branch_id, extra.stock_item_id, restockQtyDelta, now],
+                );
+              }
             }
           }
 

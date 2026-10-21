@@ -36,6 +36,7 @@ const EXCLUDED = new Set([
   'graceful-shutdown.test.mjs',
   'backup-restore.test.mjs',
   'super-admin-device-management.test.mjs',
+  'ingredient-extras-postgres.test.mjs',
 ]);
 
 const testsDir = path.join(projectRoot, 'tests');

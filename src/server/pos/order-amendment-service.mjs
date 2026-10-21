@@ -35,6 +35,50 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some(id => !byId.has(id))) {
           throw apiError("One or more order lines have changed.", "ORDER_ITEMS_CHANGED", 409);
         }
+        const allExtrasStockItemIds = new Set();
+        for (const item of input.items) {
+          for (const extra of item.extras || []) {
+            if (extra?.stockItemId) allExtrasStockItemIds.add(extra.stockItemId);
+          }
+        }
+        let extraStockMap = new Map();
+        if (allExtrasStockItemIds.size > 0) {
+          const res = await client.query(
+            `SELECT s.id, s.name, s.base_unit, s.sell_unit, s.base_units_per_sell_unit,
+                    COALESCE(b.average_cost_minor_per_base_unit, 0) AS avg_cost
+               FROM stock_items s
+               LEFT JOIN inventory_balances b
+                 ON b.restaurant_id = s.restaurant_id
+                AND b.branch_id = $3
+                AND b.stock_item_id = s.id
+              WHERE s.restaurant_id = $1 AND s.id = ANY($2::uuid[]) AND s.is_active = true`,
+            [restaurantId, [...allExtrasStockItemIds], order.branch_id],
+          );
+          extraStockMap = new Map(res.rows.map(r => [r.id, r]));
+        }
+
+        function prepareLineExtras(rawExtras, lineQty) {
+          return (rawExtras || []).map(extra => {
+            const def = extraStockMap.get(extra.stockItemId);
+            if (!def) throw apiError("One or more extra ingredients are unavailable.", "EXTRA_UNAVAILABLE", 409);
+            const qty = Number(extra.quantity);
+            if (!Number.isFinite(qty) || qty <= 0) throw apiError("Extra ingredient quantity must be positive.", "INVALID_EXTRA_QUANTITY", 400);
+            const conversion = Number(def.base_units_per_sell_unit) || 1;
+            const baseUnitsPerItem = (def.sell_unit === "number" && def.base_unit === "gram")
+              ? qty * conversion
+              : qty;
+            const totalBaseUnits = baseUnitsPerItem * lineQty;
+            const costPerBaseUnit = Number(def.avg_cost) || 0;
+            return {
+              stockItemId: extra.stockItemId,
+              nameSnapshot: def.name,
+              quantityBaseUnits: totalBaseUnits,
+              priceMinor: Number(extra.priceMinor) || 0,
+              costMinor: Math.round(costPerBaseUnit * totalBaseUnits),
+            };
+          });
+        }
+
         const prepared = await prepareOrderLines(client, {
           restaurantId, branchId: order.branch_id, businessDate: order.business_day,
           input: { items: input.items.filter(line => !line.orderItemId) },
@@ -43,9 +87,10 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         const lines = input.items.map(line => {
           if (!line.orderItemId) return { ...prepared.menuLines[nextNew++], id: randomUUID() };
           const old = byId.get(line.orderItemId);
+          const preparedExistingExtras = line.extras !== undefined ? prepareLineExtras(line.extras, line.quantity) : undefined;
           return { id: old.id, menuItemId: old.menu_item_id, name: old.item_name_snapshot,
             quantity: line.quantity, priceMinor: Number(old.unit_price_minor), unitCostMinor: Number(old.unit_cost_minor),
-            snapshot: old.recipe_snapshot, notes: old.notes };
+            snapshot: old.recipe_snapshot, notes: old.notes, extras: preparedExistingExtras };
         });
         const oldCharges = (await client.query(`SELECT name, charge_type, charge_value FROM order_charges
           WHERE restaurant_id=$1 AND order_id=$2 ORDER BY created_at, id`, [restaurantId, orderId])).rows;
@@ -85,6 +130,33 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
           if (line.snapshot) {
             await client.query(`UPDATE order_items SET quantity=$3, line_total_minor=$4, sort_order=$5
               WHERE restaurant_id=$1 AND id=$2 AND order_id=$6`, [restaurantId, line.id, line.quantity, line.priceMinor * line.quantity, index, orderId]);
+            if (line.extras !== undefined) {
+              await client.query(`DELETE FROM order_item_extras WHERE restaurant_id=$1 AND order_item_id=$2`, [restaurantId, line.id]);
+              for (const extra of line.extras || []) {
+                await client.query(
+                  `INSERT INTO order_item_extras (
+                     id, restaurant_id, order_item_id, stock_item_id,
+                     name_snapshot, quantity_base_units, price_minor, cost_minor
+                   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                  [
+                    randomUUID(), restaurantId, line.id, extra.stockItemId,
+                    extra.nameSnapshot, extra.quantityBaseUnits, extra.priceMinor, extra.costMinor,
+                  ],
+                );
+              }
+            } else {
+              const old = byId.get(line.id);
+              if (old && Number(old.quantity) !== line.quantity && Number(old.quantity) > 0) {
+                const ratio = line.quantity / Number(old.quantity);
+                await client.query(
+                  `UPDATE order_item_extras
+                      SET quantity_base_units = quantity_base_units * $3,
+                          cost_minor = ROUND(cost_minor * $3)
+                    WHERE restaurant_id = $1 AND order_item_id = $2`,
+                  [restaurantId, line.id, ratio],
+                );
+              }
+            }
           } else {
             await client.query(`INSERT INTO order_items (id,restaurant_id,order_id,menu_item_id,item_name_snapshot,
               quantity,unit_price_minor,line_total_minor,unit_cost_minor,recipe_snapshot,sort_order)
@@ -92,6 +164,18 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
               line.quantity,line.priceMinor,line.priceMinor*line.quantity,line.unitCostMinor,JSON.stringify({version:2,
                 items:line.recipe||[],inventoryItems:line.inventoryRecipe||[],components:line.componentSnapshots||[],offer:line.offer,
                 incompleteCosting:!!line.incompleteCosting,skippedDeductions:line.skippedInventoryUsage||[]}),index]);
+            for (const extra of line.extras || []) {
+              await client.query(
+                `INSERT INTO order_item_extras (
+                   id, restaurant_id, order_item_id, stock_item_id,
+                   name_snapshot, quantity_base_units, price_minor, cost_minor
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [
+                  randomUUID(), restaurantId, line.id, extra.stockItemId,
+                  extra.nameSnapshot, extra.quantityBaseUnits, extra.priceMinor, extra.costMinor,
+                ],
+              );
+            }
           }
         }
         await client.query(`DELETE FROM order_charges WHERE restaurant_id=$1 AND order_id=$2`, [restaurantId,orderId]);
@@ -102,6 +186,11 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         const delta = lines.flatMap(line => {
           const difference = line.quantity - Number(byId.get(line.id)?.quantity || 0);
           return difference ? [{ menuItemId: line.menuItemId, name: line.name, quantity: Math.abs(difference),
+            extras: (line.extras || []).map((e) => ({
+              stockItemId: e.stockItemId,
+              name: e.nameSnapshot,
+              quantity: e.quantityBaseUnits,
+            })),
             notes: difference > 0 ? "ADD to order" : "REMOVE from order", adjustment: difference > 0 ? "add" : "remove" }] : [];
         });
         for (const old of oldItems.filter(old => !suppliedIds.includes(old.id))) delta.push({ menuItemId:old.menu_item_id,

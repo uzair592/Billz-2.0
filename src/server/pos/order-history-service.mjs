@@ -305,6 +305,30 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
           const cancellation = cancellationResult.rows[0];
           const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
           const canViewRecipes = tenant?.membership?.role ? (hasPermission(tenant.membership.role, PERMISSION.RECIPES_MANAGE) || hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW)) : true;
+
+          const itemIds = itemResult.rows.map((r) => r.id);
+          const extrasResult = itemIds.length > 0
+            ? await client.query(
+                `SELECT id, order_item_id, stock_item_id, name_snapshot, quantity_base_units, price_minor, cost_minor
+                   FROM order_item_extras
+                  WHERE restaurant_id = $1 AND order_item_id = ANY($2::uuid[])
+                  ORDER BY created_at`,
+                [restaurantId, itemIds],
+              )
+            : { rows: [] };
+          const extrasByItemId = new Map();
+          for (const extra of extrasResult.rows) {
+            if (!extrasByItemId.has(extra.order_item_id)) extrasByItemId.set(extra.order_item_id, []);
+            extrasByItemId.get(extra.order_item_id).push({
+              id: extra.id,
+              stockItemId: extra.stock_item_id,
+              name: extra.name_snapshot,
+              quantityBaseUnits: Number(extra.quantity_base_units),
+              priceMinor: minor(extra.price_minor),
+              ...(canViewReports ? { costMinor: minor(extra.cost_minor) } : {}),
+            });
+          }
+
           return {
             order: {
               ...mapOrderRow(row),
@@ -327,6 +351,7 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
               lineTotalMinor: minor(item.line_total_minor),
               ...(canViewReports ? { unitCostMinor: minor(item.unit_cost_minor) } : {}),
               recipe: canViewRecipes ? (item.recipe_snapshot ?? {}) : {},
+              extras: extrasByItemId.get(item.id) ?? [],
               notes: item.notes ?? null,
             })),
             charges: chargeResult.rows.map((charge) => ({

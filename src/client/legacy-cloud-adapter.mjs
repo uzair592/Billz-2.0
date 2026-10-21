@@ -71,10 +71,19 @@ export function buildCloudOrderPayload(order, mappings) {
   const payload = {
     businessDate: order.date,
     orderType: type,
-    items: order.items.map((item) => ({
-      menuItemId: requireMapping(mappings.menuItems, item.id, "Menu item"),
-      quantity: Number(item.qty),
-    })),
+    items: order.items.map((item) => {
+      const extras = (item.extras || [])
+        .filter((extra) => extra && (extra.key || extra.stockItemId))
+        .map((extra) => ({
+          stockItemId: extra.stockItemId || requireMapping(mappings.stockItems, extra.key, `Stock extra (${extra.key})`),
+          quantity: Number(extra.qty ?? extra.quantity ?? 0),
+        }));
+      return {
+        menuItemId: requireMapping(mappings.menuItems, item.id, "Menu item"),
+        quantity: Number(item.qty),
+        ...(extras.length > 0 ? { extras } : {}),
+      };
+    }),
     deliveryMinor: minor(order.deliveryCharges),
     additionalCharges: (order.additionalCharges ?? [])
       .filter((charge) => charge.enabled !== false && Number(charge.value) > 0)
@@ -293,7 +302,6 @@ export function createLegacyCloudAdapter({
           }
         }
       }
-      if (order.items.some(item => (item.extras || []).length)) throw new Error("Cloud checkout does not yet support ingredient extras. Remove extras before taking payment.");
       const payload = buildCloudOrderPayload(order, context.mappings);
       payload.expectedTotalMinor = minor(order.totalBill);
       const fingerprint = JSON.stringify(payload);
