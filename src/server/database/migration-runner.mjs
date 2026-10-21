@@ -39,6 +39,13 @@ function checksum(sql) {
   return createHash("sha256").update(sql, "utf8").digest("hex");
 }
 
+export function checksumMatches(recordedChecksum, sql) {
+  if (recordedChecksum === checksum(sql)) return true;
+  if (recordedChecksum === checksum(sql.replace(/\r\n/g, "\n"))) return true;
+  if (recordedChecksum === checksum(sql.replace(/\r?\n/g, "\r\n"))) return true;
+  return false;
+}
+
 function parseFilename(file) {
   const match = /^(\d+)_(.+)\.sql$/.exec(file);
   if (!match) return null;
@@ -128,7 +135,7 @@ export async function runMigrations({ pool, migrationsDir, logger = console }) {
       const existing = applied.get(migration.version);
 
       if (existing) {
-        if (existing.checksum !== digest) {
+        if (!checksumMatches(existing.checksum, sql)) {
           throw Object.assign(new Error(
             `Migration ${migration.file} was already applied with a different checksum. `
             + "Applied migrations must never change; create a new migration instead.",
@@ -205,7 +212,7 @@ export async function verifyMigrationsCurrent({ pool, migrationsDir }) {
       if (!existing) {
         return { current: false, pending: migration.file };
       }
-      if (existing.checksum !== digest) {
+      if (!checksumMatches(existing.checksum, sql)) {
         return { current: false, drifted: migration.file };
       }
     }
