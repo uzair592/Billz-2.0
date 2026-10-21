@@ -22,6 +22,16 @@ function mapSummary(row, canViewReports = true) {
   };
 }
 
+function allowedActions(row, role) {
+  return {
+    canPay: !row.restore_key && row.order_status !== "cancelled" && ["unpaid", "partially_paid"].includes(row.payment_status)
+      && hasPermission(role, PERMISSION.PAYMENT_PROCESS),
+    canEdit: !row.restore_key && !["completed", "cancelled"].includes(row.order_status) && row.payment_status === "unpaid"
+      && hasPermission(role, PERMISSION.ORDER_EDIT),
+    canCancel: !row.restore_key && row.order_status !== "cancelled" && hasPermission(role, PERMISSION.ORDER_CANCEL),
+  };
+}
+
 function mapOrderRow(row) {
   return {
     id: row.id,
@@ -39,6 +49,7 @@ function mapOrderRow(row) {
     deliveryMinor: minor(row.delivery_minor),
     additionalChargesMinor: minor(row.additional_charges_minor),
     totalMinor: minor(row.total_minor),
+    ...(row.received_minor != null ? { receivedMinor: minor(row.received_minor) } : {}),
     businessDate: row.business_date,
     orderedAt: row.ordered_at,
     cancelledAt: row.cancelled_at ?? null,
@@ -144,12 +155,16 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
                     o.subtotal_minor, o.discount_minor, o.delivery_minor,
                     o.additional_charges_minor, o.total_minor,
                     to_char(o.business_date, 'YYYY-MM-DD') AS business_date,
-                    o.ordered_at,
+                    o.ordered_at, COALESCE(p.received_minor,0) AS received_minor,
                     o.restore_key, o.restore_metadata, o.cancelled_at, o.cancellation_reason
                FROM orders o
                LEFT JOIN restaurant_tables t
                  ON t.restaurant_id = o.restaurant_id
                 AND t.id = o.table_id
+               LEFT JOIN LATERAL (
+                 SELECT SUM(amount_minor) AS received_minor FROM order_payments
+                 WHERE restaurant_id=o.restaurant_id AND order_id=o.id AND status='captured'
+               ) p ON true
               WHERE o.branch_id = $1
                 AND ($2::date IS NULL OR o.business_date = $2::date)
                 AND ($3::date IS NULL OR o.business_date >= $3::date)
@@ -205,7 +220,7 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
 
           const canViewReports = tenant?.membership?.role ? hasPermission(tenant.membership.role, PERMISSION.REPORT_VIEW) : true;
           return {
-            orders: rows.map(mapOrderRow),
+            orders: rows.map(row => ({ ...mapOrderRow(row), actions: allowedActions(row, tenant.membership.role) })),
             summary: mapSummary(summaryResult.rows[0] ?? {}, canViewReports),
             nextCursor: hasMore && last
               ? encodeOrderCursor({ businessDate: last.business_date, orderNumber: last.order_number })
@@ -231,7 +246,7 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
                     o.delivery_minor, o.additional_charges_minor, o.total_minor,
                     o.cost_of_goods_minor,
                     to_char(o.business_date, 'YYYY-MM-DD') AS business_date,
-                    o.ordered_at, o.completed_at,
+                    o.ordered_at, o.completed_at, o.version,
                     o.restore_key, o.restore_metadata, o.cancelled_at, o.cancellation_reason, o.legacy_order_id
                FROM orders o
                LEFT JOIN restaurant_tables t
@@ -297,10 +312,12 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
               discountValue: Number(row.discount_value ?? 0),
               ...(canViewReports ? { costOfGoodsMinor: minor(row.cost_of_goods_minor) } : {}),
               completedAt: row.completed_at ?? null,
+              version: Number(row.version) || 1,
               legacyOrderId: row.legacy_order_id === null || row.legacy_order_id === undefined
                 ? null
                 : Number(row.legacy_order_id),
             },
+            actions: allowedActions(row, tenant.membership.role),
             items: itemResult.rows.map((item) => ({
               id: item.id,
               menuItemId: item.menu_item_id ?? null,

@@ -21,7 +21,7 @@ export function createKitchenService(pool, { clock = () => new Date() } = {}) {
                  kt.items, kt.notes, kt.created_at, kt.started_at, kt.ready_at,
                  kt.served_at, kt.cancelled_at,
                  o.order_number, o.order_type, o.table_id, o.customer_name,
-                 rt.name AS table_name
+                 rt.table_number AS table_name
             FROM kitchen_tickets kt
             JOIN orders o ON o.restaurant_id = kt.restaurant_id AND o.id = kt.order_id
             LEFT JOIN restaurant_tables rt ON rt.restaurant_id = o.restaurant_id AND rt.id = o.table_id
@@ -81,6 +81,12 @@ export function createKitchenService(pool, { clock = () => new Date() } = {}) {
       const now = clock();
 
       return withTenantTransaction(pool, { restaurantId, userId }, async (client) => {
+        // Use the same order-before-ticket lock order as payment, edits and
+        // cancellation. Concurrent stations must not overwrite a newer edit.
+        const lookup = (await client.query(`SELECT order_id FROM kitchen_tickets WHERE restaurant_id=$1 AND id=$2`,
+          [restaurantId,ticketId])).rows[0];
+        if (!lookup) throw apiError("Kitchen ticket not found.", "TICKET_NOT_FOUND", 404);
+        await client.query(`SELECT id FROM orders WHERE restaurant_id=$1 AND id=$2 FOR UPDATE`, [restaurantId,lookup.order_id]);
         const ticketResult = await client.query(
           `SELECT id, order_id, status FROM kitchen_tickets
             WHERE restaurant_id = $1 AND id = $2
@@ -147,7 +153,7 @@ export function createKitchenService(pool, { clock = () => new Date() } = {}) {
         if (targetOrderStatus) {
           await client.query(
             `UPDATE orders
-                SET order_status = $3, updated_at = $4
+                SET order_status = $3, version = version + 1, updated_at = $4
               WHERE restaurant_id = $1 AND id = $2 AND order_status NOT IN ('cancelled', 'completed')`,
             [restaurantId, ticket.order_id, targetOrderStatus, now],
           );

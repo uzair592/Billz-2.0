@@ -161,6 +161,9 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
             );
           }
 
+          await client.query(`UPDATE kitchen_tickets SET status='cancelled', cancelled_at=$3
+            WHERE restaurant_id=$1 AND order_id=$2 AND status IN ('new','preparing','ready')`, [restaurantId,orderId,now]);
+
           const paymentStatus = refundedMinor > 0 ? "refunded" : order.payment_status;
           await client.query(
             `UPDATE orders

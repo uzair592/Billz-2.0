@@ -425,35 +425,22 @@ test("reprint fetches the cloud order and populates the receipt slip", async ({ 
   );
 });
 
-test("local mutations are blocked for cloud orders", async ({ page }) => {
-  const dialogs = [];
-  page.on("dialog", (dialog) => {
-    dialogs.push(dialog.message());
-    dialog.accept();
+test("legacy cloud entry points open server actions and never mutate the device ledger", async ({ page }) => {
+  const dialogs = []; let mutations = 0;
+  page.on("dialog", dialog => { dialogs.push(dialog.message()); dialog.accept(); });
+  mockApi(page, route => {
+    if (route.request().method() !== "GET") mutations++;
+    return route.fulfill({json:cloudOrderDetail()});
   });
-  let mutatingRequests = 0;
-  mockApi(page, (route, url) => {
-    if (route.request().method() !== "GET") {
-      mutatingRequests += 1;
-    }
-    return route.fulfill({ json: {} });
-  });
-
-  await openPos(page);
-  await configureCloud(page);
-
-  await page.evaluate((orderId) => {
-    window.deleteBill(orderId);
-    window.enterEditOrderMode(orderId);
-    window.setInvoiceOrderPaymentStatus(orderId, "Paid");
-    window.updateOrderRemainingDue(orderId);
-  }, ORDER_ID);
-
-  expect(dialogs.length).toBe(4);
-  expect(
-    dialogs.every((message) => message.includes("cloud")),
-  ).toBe(true);
-  expect(mutatingRequests).toBe(0);
+  await openPos(page); await configureCloud(page);
+  const before = await page.evaluate(() => JSON.stringify(orders));
+  await page.evaluate(id => { void window.deleteBill(id); }, ORDER_ID);
+  await expect(page.locator("#cloud-cancel-dialog-overlay")).toBeVisible();
+  await page.locator("#cloud-cancel-back").click();
+  await page.evaluate(id => window.setInvoiceOrderPaymentStatus(id,"Unpaid"),ORDER_ID);
+  expect(dialogs.some(message=>/Use Refund/.test(message))).toBe(true);
+  expect(await page.evaluate(() => JSON.stringify(orders))).toBe(before);
+  expect(mutations).toBe(0);
 });
 
 test("cancelling a cloud order posts the reason with an idempotency key", async ({ page }) => {

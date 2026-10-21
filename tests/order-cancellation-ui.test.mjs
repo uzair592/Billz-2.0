@@ -243,6 +243,20 @@ describe("order cancellation UI", () => {
     assert.deepEqual(cancelled, [orderId]);
   });
 
+  it("confirms an empty optional reason instead of treating it as Go Back", async () => {
+    const requests = [];
+    const { dom, ui, restore } = setup({ fetchImpl: async (url, init) => {
+      requests.push({url,init});
+      return jsonResponse(init.method === "POST" ? {replayed:false} : cloudOrderDetail());
+    } });
+    try {
+      const pending = ui.cancelCloudOrder(orderId);
+      await confirmDialog(dom, ""); await pending;
+      assert.equal(requests.filter(row=>row.init.method === "POST").length,1);
+      assert.equal(JSON.parse(requests.at(-1).init.body).reason, "");
+    } finally { restore(); }
+  });
+
   it("acknowledges a replayed cancellation without compensating twice", async () => {
     const { dom, ui, restore } = setup({
       fetchImpl: async (url) =>
@@ -309,7 +323,7 @@ describe("order cancellation UI", () => {
     assert.equal(dom.alerts.length, 0);
   });
 
-  it("requires the cloud catalog before cancelling", async () => {
+  it("requires sign-in context outside managed mode before cancelling", async () => {
     const { dom, ui, restore } = setup({ context: null });
     try {
       await ui.cancelCloudOrder(orderId);
@@ -317,7 +331,7 @@ describe("order cancellation UI", () => {
       restore();
     }
 
-    assert.match(dom.alerts[0], /Sign in and copy this till's catalog/);
+    assert.match(dom.alerts[0], /Sign in to cancel this order/);
   });
 
   it("ignores local (numeric) order ids", async () => {

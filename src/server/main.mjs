@@ -19,6 +19,7 @@ import { createLegacyCatalogImportService } from "./pos/legacy-catalog-import-se
 import { createBusinessSettingsService } from "./pos/business-settings-service.mjs";
 import { createOrderRefundService } from "./pos/order-refund-service.mjs";
 import { createSalesReportService } from "./pos/sales-report-service.mjs";
+import { createOrderAmendmentService } from "./pos/order-amendment-service.mjs";
 import { createOrderService } from "./pos/order-service.mjs";
 import { createKitchenService } from "./pos/kitchen-service.mjs";
 import { createMenuService } from "./pos/menu-service.mjs";
@@ -196,6 +197,7 @@ export async function createServer({
     menuService,
     kitchenService,
     orderService,
+    orderAmendmentService: createOrderAmendmentService(database, { kitchenService }),
     orderRefundService,
     orderHistoryService,
     orderCancellationService,

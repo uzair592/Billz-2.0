@@ -13,10 +13,9 @@
  * local lookup, and everything works exactly as before when the
  * cloud is unreachable.
  *
- * Cloud orders are server-authoritative: local mutations
- * (editing, payment-status flips, remaining-due edits, local
- * deletion) are blocked for them — the cloud only exposes
- * cancellation as a compensating action.
+ * Cloud orders remain server-authoritative. Payment, unpaid-order edits and
+ * cancellation are delegated to the server action controller; none of these
+ * actions may update the device-local ledger.
  *
  * Only a genuine network failure falls back to the local
  * renderer (the order may exist in this device's ledger if
@@ -37,7 +36,7 @@ import {
 import { CLOUD_CONTEXT_KEY } from "./legacy-cloud-adapter.mjs";
 
 const CLOUD_MUTATION_MESSAGE =
-  "This order is stored in the cloud and cannot be changed from this device. Cancel it instead if it was placed in error.";
+  "Sign in to manage this cloud order. Reload if its actions are unavailable.";
 
 export function createOrderDetailUI({ storage } = {}) {
   if (!storage || typeof storage.get !== "function") {
@@ -89,11 +88,13 @@ export function createOrderDetailUI({ storage } = {}) {
   }
 
   async function showCloudOrderDetails(orderId) {
-    const mapped = await fetchCloudOrder(orderId);
+    const detail = await orderHistoryApi.get(orderId);
+    const mapped = mapCloudOrderDetail(detail);
     withCloudOrderVisible(mapped, () => {
       legacyShowOrderInvoiceDetailsView(mapped.id);
     });
     injectCloudRefundButton(orderId, mapped);
+    await window.BillzOrderActions?.decorate(orderId, detail);
   }
 
   /**
@@ -176,13 +177,14 @@ export function createOrderDetailUI({ storage } = {}) {
     reprintCloudOrder,
   );
 
-  // Cloud orders are read-only outside the cancellation flow.
+  // Legacy entry points must use the server controller for UUID orders.
   ["updateOrderRemainingDue", "setInvoiceOrderPaymentStatus",
     "enterEditOrderMode", "deleteBill"].forEach((name) => {
     const original = window[name];
     if (typeof original !== "function") return;
     window[name] = function guarded(...args) {
       if (isCloudOrderId(args[0])) {
+        if (window.BillzOrderActions) return window.BillzOrderActions.handle(name, ...args);
         alert(CLOUD_MUTATION_MESSAGE);
         return;
       }

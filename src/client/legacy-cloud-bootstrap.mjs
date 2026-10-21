@@ -7,6 +7,7 @@ import {
   createLegacyCloudAdapter,
 } from "./legacy-cloud-adapter.mjs";
 import { createOrderHistoryUI } from "./order-history-ui.mjs";
+import { createOrderActionsUI } from "./order-actions-ui.mjs";
 import { createOrderDetailUI } from "./order-detail-ui.mjs";
 import { createOrderCancellationUI } from "./order-cancellation-ui.mjs";
 import { createOrderRefundUI } from "./order-refund-ui.mjs";
@@ -41,6 +42,11 @@ const orderCancellation = createOrderCancellationUI({
     window.renderOrdersHistory();
   },
 });
+
+const orderActions = createOrderActionsUI({ storage, onUpdated: async () => {
+  await window.renderOrdersHistory?.();
+} });
+window.BillzOrderActions = orderActions;
 
 // Partial refunds for cloud orders. The refund modal is
 // reachable from the order detail invoice; a successful

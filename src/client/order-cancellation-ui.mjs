@@ -75,10 +75,10 @@ export function createOrderCancellationUI({
       closeDialog();
 
       const overlay = document.createElement("div");
-      overlay.className = "modal-overlay";
+      overlay.className = "order-action-overlay order-action-cancel";
       overlay.id = "cloud-cancel-dialog-overlay";
       overlay.style.cssText =
-        "position:fixed; inset:0; background:rgba(15,23,42,0.55); display:flex; align-items:center; justify-content:center; z-index:1000; padding:16px;";
+        "position:fixed; inset:0; background:rgba(15,23,42,0.55); display:flex; align-items:center; justify-content:center; z-index:12001; padding:16px;";
 
       const items = (order.items ?? [])
         .map((item) => escapeHtml(`${item.qty}x ${item.name}`))
@@ -89,7 +89,7 @@ export function createOrderCancellationUI({
              aria-labelledby="cloud-cancel-title"
              style="background:white; border-radius:12px; padding:24px; max-width:520px; width:100%; box-shadow:0 20px 40px rgba(0,0,0,0.25);">
           <h2 id="cloud-cancel-title" style="margin:0 0 6px; color:#dc2626; font-size:18px;">
-            ❌ Cancel cloud order #${escapeHtml(order.orderNumber)}
+            ❌ Cancel order #${escapeHtml(order.orderNumber)}
           </h2>
           <p style="margin:0 0 10px; font-size:13px; color:#64748b;">
             ${escapeHtml(order.customerName || "Walk-In Customer")} ·
@@ -99,7 +99,7 @@ export function createOrderCancellationUI({
             ${items}
           </p>
           <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:10px 12px; font-size:12px; color:#991b1b; margin-bottom:14px;">
-            The cloud will reverse the stock, refund any captured payment and
+            This will reverse deducted stock, refund any captured payment and
             exclude this order from revenue. This is recorded permanently and
             cannot be undone.
           </div>
@@ -130,12 +130,12 @@ export function createOrderCancellationUI({
 
       overlay.querySelector("#cloud-cancel-back").addEventListener("click", () => finish(null));
       overlay.querySelector("#cloud-cancel-confirm").addEventListener("click", () => {
-        finish(reasonInput.value.trim() || null);
+        finish(reasonInput.value.trim());
       });
       reasonInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
-          finish(reasonInput.value.trim() || null);
+          finish(reasonInput.value.trim());
         }
         if (event.key === "Escape") {
           event.preventDefault();
@@ -183,9 +183,9 @@ export function createOrderCancellationUI({
 
   async function cancelCloudOrder(orderId) {
     if (!isCloudOrderId(orderId)) return;
-    if (!await cloudConfigured()) {
+    if (!globalThis.BILLZ_MANAGED && !await cloudConfigured()) {
       alert(
-        "This order lives in the cloud. Sign in and copy this till's catalog to the cloud before cancelling cloud orders.",
+        "Sign in to cancel this order.",
       );
       return;
     }
@@ -207,7 +207,6 @@ export function createOrderCancellationUI({
     const reason = await askCancellationReason(order);
     if (reason === null) return;
 
-    const confirmButton = dialog?.querySelector("#cloud-cancel-confirm");
     try {
       const result = await orderCancellationApi.cancel(orderId, {
         reason,

@@ -19158,28 +19158,23 @@
         }
 
         try {
-          // If in managed cloud mode, register the open KOT order with backend
-          if (window.BILLZ_MANAGED && window.BiteTechCloudSync) {
-            try {
-              const kotCloudOrder = {
-                id: displayOrderNumber,
-                orderType: currentOrderType,
-                tableNumber,
-                hall,
-                customerName,
-                riderName,
-                date: currentTemplateDate,
-                items: JSON.parse(JSON.stringify(cart)),
-                deliveryCharges: 0,
-                additionalCharges: [],
-                totalBill: 0,
-                paymentStatus: "Unpaid",
-                isKot: true,
-              };
-              await window.BiteTechCloudSync.checkoutOnline(kotCloudOrder);
-            } catch (cloudErr) {
-              console.warn("Cloud KOT registration note:", cloudErr.message);
-            }
+          // An unpaid KOT is a real saved order. Never print after a failed save.
+          if (window.BILLZ_MANAGED) {
+            const discountType = document.getElementById("discount-type-select").value;
+            const discountValue = Number(document.getElementById("discount-value-input").value) || 0;
+            const deliveryCharges = currentOrderType === "Delivery"
+              ? Number(document.getElementById("delivery-charge-input").value) || 0 : 0;
+            const pricing = MoneyEngine.calculate({ items: cart, discountType, discountValue,
+              deliveryFee: deliveryCharges, additionalCharges: cartAdditionalCharges });
+            const accepted = await window.BiteTechCloudSync.checkoutOnline({
+              id: displayOrderNumber, orderType: currentOrderType, tableNumber, hall,
+              customerName, customerPhone: normalizeCustomerPhone(document.getElementById("cust-phone").value), riderName,
+              date: currentTemplateDate, items: JSON.parse(JSON.stringify(cart)),
+              discountType, discountValue, deliveryCharges, additionalCharges: pricing.additionalCharges,
+              totalBill: pricing.total, paymentStatus: "Unpaid", amountReceived: null, isKot: true,
+            });
+            kotOrderData.id = accepted.order.id;
+            kotOrderData.orderNumber = accepted.order.orderNumber;
           }
 
           // Enqueue kitchen print job
@@ -19187,16 +19182,36 @@
 
           // Record snapshot of sent items
           window._lastKotCartItems = JSON.parse(JSON.stringify(cart));
+          if (window.BILLZ_MANAGED) {
+            await window.BiteTechCloudSync.confirmCheckout();
+            cart = [];
+            cartAdditionalCharges = [];
+            window._lastKotCartItems = null;
+            window._checkoutMissingStockConfirmed = false;
+            clearCartDraft();
+            for (const id of ["cust-name", "cust-phone", "delivery-rider-input", "amount-received-input"]) document.getElementById(id).value = "";
+            document.getElementById("discount-value-input").value = 0;
+            document.getElementById("delivery-charge-input").value = 0;
+            renderAdditionalCharges();
+            renderCart();
+          }
 
           const feedbackEl = document.getElementById("order-save-feedback");
           if (feedbackEl) {
             feedbackEl.textContent = `👨‍🍳 KOT sent to kitchen for ${tableNumber ? "Table " + tableNumber : "Order #" + displayOrderNumber}`;
+            if (window.BILLZ_MANAGED) {
+              feedbackEl.textContent = `KOT saved · Unpaid bill #${kotOrderData.orderNumber}. Take payment from View Orders. `;
+              const open = document.createElement("button");
+              open.type = "button"; open.textContent = "Open Bill";
+              open.onclick = () => { switchScreen("view-orders"); window.showOrderInvoiceDetailsView(kotOrderData.id); };
+              feedbackEl.append(open);
+            }
             feedbackEl.classList.remove("hidden");
-            setTimeout(() => feedbackEl.classList.add("hidden"), 5000);
+            if (!window.BILLZ_MANAGED) setTimeout(() => feedbackEl.classList.add("hidden"), 5000);
           }
         } catch (err) {
           console.error("KOT printing error:", err);
-          alert("KOT could not be printed. Check printer connection: " + (err.message || err));
+          alert("KOT was not confirmed. Keep this cart and retry; the same bill will not be saved twice. " + (err.message || err));
         } finally {
           orderSubmitSaving = false;
           if (kotBtn) {
