@@ -403,8 +403,23 @@ The current template defines:
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signature secret |
 | `STRIPE_PUBLISHABLE_KEY` | Browser-safe Stripe key |
 | `OBJECT_STORAGE_*` | Tenant file-storage configuration |
+| `TEST_DATABASE_ADMIN_URL` | PostgreSQL admin connection string for test setup and migrations (default: `postgresql://postgres:postgres@127.0.0.1:5432/restaurant_pos_test` for local/CI port 5432, or port 55432 for validation container) |
+| `TEST_DATABASE_URL` | PostgreSQL connection string for the unprivileged `pos_integration_app` test role enforced by RLS |
 
 Payment keys and object-storage credentials must never be exposed to browser JavaScript.
+
+### Test suites and database configuration
+
+The repository separates database-free tests from live PostgreSQL-dependent suites:
+
+- `npm test`: Database-free unit tests (700+ assertions).
+- `npm run test:legacy`: Database-free legacy characterization and domain tests.
+- `npm run test:postgres`: Core PostgreSQL schema, tenant isolation, and RLS tests.
+- `npm run test:integration`: Billing and refund/sales-reporting integration tests.
+- `npm run test:fullstack`: End-to-end multi-tenant lifecycle tests, including mandatory backup/restore verification (`legacy-order-restore-postgres.test.mjs`).
+- `npm run test:browser:saas-core`: Playwright browser acceptance tests.
+
+Destructive test setup runs exclusively against the database specified in `TEST_DATABASE_ADMIN_URL`. Production credentials (`DATABASE_URL`) are never loaded automatically into test setup, and a safety guard prevents executing destructive operations if `TEST_DATABASE_ADMIN_URL` matches a production database. If the PostgreSQL port (configured port 5432 or 55432) is not reachable, a clear `TEST_DATABASE_UNREACHABLE` prerequisite error is returned instead of an unhandled `ECONNREFUSED`.
 
 ### Database SSL modes
 
