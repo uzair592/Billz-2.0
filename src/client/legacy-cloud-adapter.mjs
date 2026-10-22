@@ -74,10 +74,16 @@ export function buildCloudOrderPayload(order, mappings) {
     items: order.items.map((item) => {
       const extras = (item.extras || [])
         .filter((extra) => extra && (extra.key || extra.stockItemId))
-        .map((extra) => ({
-          stockItemId: extra.stockItemId || requireMapping(mappings.stockItems, extra.key, `Stock extra (${extra.key})`),
-          quantity: Number(extra.qty ?? extra.quantity ?? 0),
-        }));
+        .map((extra) => {
+          const unit = extra.unit
+            || mappings?.stockItemUnits?.[extra.key]
+            || (mappings?.stockItemDefs?.[extra.key]?.sellUnit === "number" ? "pcs" : undefined);
+          return {
+            stockItemId: extra.stockItemId || requireMapping(mappings.stockItems, extra.key, `Stock extra (${extra.key})`),
+            quantity: Number(extra.qty ?? extra.quantity ?? 0),
+            ...(unit ? { unit } : {}),
+          };
+        });
       return {
         menuItemId: requireMapping(mappings.menuItems, item.id, "Menu item"),
         quantity: Number(item.qty),

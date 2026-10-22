@@ -23,6 +23,7 @@ const POSTGRES_TESTS = [
   "bootstrap-first-restaurant.test.mjs",
   "graceful-shutdown.test.mjs",
   "backup-restore.test.mjs",
+  "ingredient-extras-postgres.test.mjs",
 ];
 
 if (!await isDatabaseAvailable()) {

@@ -1,6 +1,7 @@
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError, businessDateInTimezone } from "./business-date.mjs";
 import { hasPermission, PERMISSION } from "../authorization/permissions.mjs";
+import { formatExtraDisplay } from "./ingredient-unit-converter.mjs";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const CURSOR_PATTERN = /^([0-9]{4}-[0-9]{2}-[0-9]{2})\.(\d{1,19})$/;
@@ -309,20 +310,26 @@ export function createOrderHistoryService(pool, { clock = () => new Date() } = {
           const itemIds = itemResult.rows.map((r) => r.id);
           const extrasResult = itemIds.length > 0
             ? await client.query(
-                `SELECT id, order_item_id, stock_item_id, name_snapshot, quantity_base_units, price_minor, cost_minor
-                   FROM order_item_extras
-                  WHERE restaurant_id = $1 AND order_item_id = ANY($2::uuid[])
-                  ORDER BY created_at`,
+                `SELECT oie.id, oie.order_item_id, oie.stock_item_id, oie.name_snapshot, oie.quantity_base_units, oie.price_minor, oie.cost_minor,
+                        s.base_unit, s.sell_unit, s.base_units_per_sell_unit
+                   FROM order_item_extras oie
+                   LEFT JOIN stock_items s ON s.restaurant_id = oie.restaurant_id AND s.id = oie.stock_item_id
+                  WHERE oie.restaurant_id = $1 AND oie.order_item_id = ANY($2::uuid[])
+                  ORDER BY oie.created_at`,
                 [restaurantId, itemIds],
               )
             : { rows: [] };
           const extrasByItemId = new Map();
           for (const extra of extrasResult.rows) {
             if (!extrasByItemId.has(extra.order_item_id)) extrasByItemId.set(extra.order_item_id, []);
+            const def = { base_unit: extra.base_unit, sell_unit: extra.sell_unit, base_units_per_sell_unit: extra.base_units_per_sell_unit };
+            const display = formatExtraDisplay(extra.name_snapshot, extra.quantity_base_units, def);
             extrasByItemId.get(extra.order_item_id).push({
               id: extra.id,
               stockItemId: extra.stock_item_id,
               name: extra.name_snapshot,
+              quantity: display.quantity,
+              unit: display.unit,
               quantityBaseUnits: Number(extra.quantity_base_units),
               priceMinor: minor(extra.price_minor),
               ...(canViewReports ? { costMinor: minor(extra.cost_minor) } : {}),

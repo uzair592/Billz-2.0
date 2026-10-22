@@ -15774,12 +15774,22 @@
         function renderTicketCard(t) {
           const typeBadgeColor = t.orderType === "dine_in" ? "#4f46e5" : (t.orderType === "delivery" ? "#ea580c" : "#0284c7");
           const typeLabel = t.orderType === "dine_in" ? `🍽️ ${t.tableName || 'Dine-In'}` : (t.orderType === "delivery" ? "🛵 Delivery" : "🛍️ Takeaway");
-          const itemsHtml = (t.items || []).map(item => `
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; font-size: 14px;">
-              <span style="font-weight: 700; color: #0f172a;"><span style="color: #ea580c; font-size: 15px; margin-right: 6px;">${escapeHtmlForExport(item.quantity)}x</span> ${escapeHtmlForExport(item.name)}</span>
-              ${item.notes ? `<small style="color: #94a3b8; font-style: italic;">(${escapeHtmlForExport(item.notes)})</small>` : ""}
+          const itemsHtml = (t.items || []).map(item => {
+            const extrasHtml = (item.extras || []).map(extra => {
+              const extraName = extra.name || extra.label || extra.key;
+              const extraQty = extra.quantity !== undefined ? extra.quantity : extra.qty;
+              const extraUnit = extra.unit ? ` ${extra.unit}` : "";
+              return `<div class="kds-item-extra" style="font-size: 12px; color: #64748b; padding-left: 20px;">➕ ${escapeHtmlForExport(extraName)} (${escapeHtmlForExport(extraQty)}${escapeHtmlForExport(extraUnit)})</div>`;
+            }).join("");
+            return `
+            <div style="display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px dashed #f1f5f9; font-size: 14px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 700; color: #0f172a;"><span style="color: #ea580c; font-size: 15px; margin-right: 6px;">${escapeHtmlForExport(item.quantity)}x</span> ${escapeHtmlForExport(item.name)}</span>
+                ${item.notes ? `<small style="color: #94a3b8; font-style: italic;">(${escapeHtmlForExport(item.notes)})</small>` : ""}
+              </div>
+              ${extrasHtml}
             </div>
-          `).join("");
+          `}).join("");
 
           let actionButtons = "";
           if (t.status === "new") {
@@ -16718,13 +16728,16 @@
         }
 
         if (!item.extras) item.extras = [];
+        const def = stockItemDefs[key];
+        const isPieces = def && def.sellUnit === "number";
+        const unit = isPieces ? "pcs" : "g";
         if (
           cartExtrasEditingIndex !== null &&
           item.extras[cartExtrasEditingIndex]
         ) {
-          item.extras[cartExtrasEditingIndex] = { key, qty };
+          item.extras[cartExtrasEditingIndex] = { key, qty, unit };
         } else {
-          item.extras.push({ key, qty });
+          item.extras.push({ key, qty, unit });
         }
 
         resetCartExtraForm();
@@ -17384,9 +17397,11 @@
           // ➕ Extra ingredients (e.g. "extra cheese") — kitchen-only detail, never shown on the customer copy
           const extrasHtml = (item.extras || [])
             .map((extra) => {
-              const def = stockItemDefs[extra.key];
-              const unitLabel = def && def.sellUnit === "number" ? "pcs" : "g";
-              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(def ? def.label : extra.key)} ${escapeHtmlForExport(extra.qty)}${escapeHtmlForExport(unitLabel)}</div>`;
+              const def = (extra.key && stockItemDefs[extra.key]) || Object.values(stockItemDefs).find(d => d.id === extra.stockItemId || d.label === extra.name);
+              const label = def?.label || extra.name || extra.key;
+              const unitLabel = extra.unit || (def && def.sellUnit === "number" ? "pcs" : (def ? "g" : ""));
+              const displayQty = extra.quantity !== undefined ? extra.quantity : extra.qty;
+              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(label)} ${escapeHtmlForExport(displayQty)}${escapeHtmlForExport(unitLabel)}</div>`;
             })
             .join("");
           tr.innerHTML = `
@@ -32193,13 +32208,16 @@
         }
 
         if (!item.extras) item.extras = [];
+        const def = stockItemDefs[key];
+        const isPieces = def && def.sellUnit === "number";
+        const unit = isPieces ? "pcs" : "g";
         if (
           editOrderExtrasEditingIndex !== null &&
           item.extras[editOrderExtrasEditingIndex]
         ) {
-          item.extras[editOrderExtrasEditingIndex] = { key, qty };
+          item.extras[editOrderExtrasEditingIndex] = { key, qty, unit };
         } else {
-          item.extras.push({ key, qty });
+          item.extras.push({ key, qty, unit });
         }
 
         resetEditOrderExtraForm();

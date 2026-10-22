@@ -5,6 +5,7 @@ import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError, businessDateInTimezone } from "./business-date.mjs";
 import { createInventoryConsumptionService } from "./inventory-consumption-service.mjs";
 import { hasPermission, PERMISSION } from "../authorization/permissions.mjs";
+import { resolveExtraBaseUnitsPerItem, formatExtraDisplay } from "./ingredient-unit-converter.mjs";
 
 function computeRequestHash(input) {
   const canonical = {
@@ -97,33 +98,6 @@ function effectiveItemPrice(item) {
   return { priceMinor: regularPriceMinor, offer: null };
 }
 
-function resolveExtraBaseUnitsPerItem(extra, def) {
-  const qty = Number(extra.quantity);
-  const baseUnitsPerSell = Number(def.base_units_per_sell_unit) || 1;
-  const unit = extra.unit ? String(extra.unit).toLowerCase() : null;
-  const baseUnit = String(def.base_unit || "").toLowerCase();
-  const sellUnit = String(def.sell_unit || "").toLowerCase();
-
-  if (unit) {
-    if (unit === baseUnit || (baseUnit === "gram" && unit === "g") || (baseUnit === "piece" && (unit === "pcs" || unit === "pc" || unit === "unit"))) {
-      return qty;
-    }
-    if (unit === "kg" && baseUnit === "gram") {
-      return qty * 1000;
-    }
-    if (unit === sellUnit || (sellUnit === "number" && (unit === "pcs" || unit === "pc" || unit === "piece"))) {
-      return qty * baseUnitsPerSell;
-    }
-  }
-
-  if ((sellUnit === "g" || sellUnit === "gram") && baseUnit === "gram") {
-    return qty;
-  }
-  if ((sellUnit === "number" || sellUnit === "piece") && baseUnit === "piece") {
-    return qty;
-  }
-  return qty * baseUnitsPerSell;
-}
 
 export async function prepareOrderLines(client, { restaurantId, branchId, businessDate, input }) {
   const requestedIds = input.items.map((item) => item.menuItemId);
@@ -282,6 +256,8 @@ export async function prepareOrderLines(client, { restaurantId, branchId, busine
         quantityBaseUnits: totalBaseUnits,
         quantityBaseUnitsPerItem: qtyPerItemBaseUnits,
         priceMinor: Number(extra.priceMinor) || 0,
+        unit: formatExtraDisplay(def.name, totalBaseUnits, def).unit,
+        displayQuantity: formatExtraDisplay(def.name, totalBaseUnits, def).quantity,
       };
     });
     return {
@@ -701,7 +677,8 @@ export function createOrderService(
                 extras: (line.extras || []).map((e) => ({
                   stockItemId: e.stockItemId,
                   name: e.nameSnapshot,
-                  quantity: e.quantityBaseUnits,
+                  quantity: e.displayQuantity ?? e.quantityBaseUnits,
+                  unit: e.unit,
                 })),
                 notes: line.notes || null,
               })),

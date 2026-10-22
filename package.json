@@ -8,7 +8,7 @@
     "test:postgres": "node tests/run-postgres-tests.mjs",
     "test:legacy": "node --test tests/legacy-*.test.mjs tests/money-engine.test.mjs tests/order-status.test.mjs",
     "test:integration": "node tests/helpers/check-db.mjs && node --test tests/billing-postgres.test.mjs && node --test tests/refund-sales-report-postgres.test.mjs",
-    "test:fullstack": "node --test --test-concurrency=1 tests/saas-core-fullstack.test.mjs tests/admin-launch-postgres.test.mjs tests/launch-readiness-postgres.test.mjs tests/admin-control-postgres.test.mjs tests/deployment-postgres.test.mjs tests/admin-mfa-postgres.test.mjs tests/production-verification-postgres.test.mjs tests/legacy-order-restore-postgres.test.mjs tests/order-actions-postgres.test.mjs",
+    "test:fullstack": "node --test --test-concurrency=1 tests/saas-core-fullstack.test.mjs tests/admin-launch-postgres.test.mjs tests/launch-readiness-postgres.test.mjs tests/admin-control-postgres.test.mjs tests/deployment-postgres.test.mjs tests/admin-mfa-postgres.test.mjs tests/production-verification-postgres.test.mjs tests/legacy-order-restore-postgres.test.mjs tests/order-actions-postgres.test.mjs tests/ingredient-extras-postgres.test.mjs",
     "test:browser:saas-core": "npx playwright test --config=playwright.saas-core.config.mjs",
     "backup:verify": "node src/server/database/backup-verify.mjs",
     "test:load": "node scripts/load-test.mjs",

@@ -3,6 +3,7 @@ import { MoneyEngine } from "../../domain/money-engine.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
 import { prepareOrderLines, pricingInput } from "./order-service.mjs";
+import { resolveExtraBaseUnitsPerItem, formatExtraDisplay } from "./ingredient-unit-converter.mjs";
 
 export function createOrderAmendmentService(pool, { clock = () => new Date(), kitchenService = null } = {}) {
   return Object.freeze({
@@ -35,12 +36,31 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         if (new Set(suppliedIds).size !== suppliedIds.length || suppliedIds.some(id => !byId.has(id))) {
           throw apiError("One or more order lines have changed.", "ORDER_ITEMS_CHANGED", 409);
         }
+
+        const existingExtrasRes = suppliedIds.length > 0
+          ? await client.query(
+              `SELECT id, order_item_id, stock_item_id, quantity_base_units, cost_minor, price_minor, name_snapshot
+                 FROM order_item_extras
+                WHERE restaurant_id = $1 AND order_item_id = ANY($2::uuid[])`,
+              [restaurantId, suppliedIds],
+            )
+          : { rows: [] };
+        const existingExtrasByItemId = new Map();
+        for (const row of existingExtrasRes.rows) {
+          if (!existingExtrasByItemId.has(row.order_item_id)) existingExtrasByItemId.set(row.order_item_id, []);
+          existingExtrasByItemId.get(row.order_item_id).push(row);
+        }
+
         const allExtrasStockItemIds = new Set();
         for (const item of input.items) {
           for (const extra of item.extras || []) {
             if (extra?.stockItemId) allExtrasStockItemIds.add(extra.stockItemId);
           }
         }
+        for (const row of existingExtrasRes.rows) {
+          if (row.stock_item_id) allExtrasStockItemIds.add(row.stock_item_id);
+        }
+
         let extraStockMap = new Map();
         if (allExtrasStockItemIds.size > 0) {
           const res = await client.query(
@@ -57,24 +77,32 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
           extraStockMap = new Map(res.rows.map(r => [r.id, r]));
         }
 
-        function prepareLineExtras(rawExtras, lineQty) {
+        function prepareLineExtras(rawExtras, lineQty, existingLineExtras = []) {
+          const existingByStockId = new Map(existingLineExtras.map(e => [e.stock_item_id, e]));
           return (rawExtras || []).map(extra => {
             const def = extraStockMap.get(extra.stockItemId);
             if (!def) throw apiError("One or more extra ingredients are unavailable.", "EXTRA_UNAVAILABLE", 409);
-            const qty = Number(extra.quantity);
-            if (!Number.isFinite(qty) || qty <= 0) throw apiError("Extra ingredient quantity must be positive.", "INVALID_EXTRA_QUANTITY", 400);
-            const conversion = Number(def.base_units_per_sell_unit) || 1;
-            const baseUnitsPerItem = (def.sell_unit === "number" && def.base_unit === "gram")
-              ? qty * conversion
-              : qty;
+            const baseUnitsPerItem = resolveExtraBaseUnitsPerItem(extra, def);
             const totalBaseUnits = baseUnitsPerItem * lineQty;
-            const costPerBaseUnit = Number(def.avg_cost) || 0;
+
+            // Preserve frozen costs for unchanged or quantity-amended extras; use current avg_cost for newly added extras
+            const existing = existingByStockId.get(extra.stockItemId);
+            let costPerBaseUnit;
+            if (existing && Number(existing.quantity_base_units) > 0) {
+              costPerBaseUnit = Number(existing.cost_minor) / Number(existing.quantity_base_units);
+            } else {
+              costPerBaseUnit = Number(def.avg_cost) || 0;
+            }
+            const display = formatExtraDisplay(def.name, totalBaseUnits, def);
+
             return {
               stockItemId: extra.stockItemId,
               nameSnapshot: def.name,
               quantityBaseUnits: totalBaseUnits,
               priceMinor: Number(extra.priceMinor) || 0,
               costMinor: Math.round(costPerBaseUnit * totalBaseUnits),
+              unit: display.unit,
+              displayQuantity: display.quantity,
             };
           });
         }
@@ -87,11 +115,37 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         const lines = input.items.map(line => {
           if (!line.orderItemId) return { ...prepared.menuLines[nextNew++], id: randomUUID() };
           const old = byId.get(line.orderItemId);
-          const preparedExistingExtras = line.extras !== undefined ? prepareLineExtras(line.extras, line.quantity) : undefined;
-          return { id: old.id, menuItemId: old.menu_item_id, name: old.item_name_snapshot,
-            quantity: line.quantity, priceMinor: Number(old.unit_price_minor), unitCostMinor: Number(old.unit_cost_minor),
-            snapshot: old.recipe_snapshot, notes: old.notes, extras: preparedExistingExtras };
+          const existingLineExtras = existingExtrasByItemId.get(old.id) || [];
+          const oldExtrasTotalCost = existingLineExtras.reduce((s, e) => s + Number(e.cost_minor), 0);
+          const oldQty = Number(old.quantity) || 1;
+          const baseRecipeUnitCostMinor = Math.max(0, Number(old.unit_cost_minor) - Math.round(oldExtrasTotalCost / oldQty));
+
+          let preparedExistingExtras = undefined;
+          let newLineUnitCostMinor = Number(old.unit_cost_minor);
+
+          if (line.extras !== undefined) {
+            preparedExistingExtras = prepareLineExtras(line.extras, line.quantity, existingLineExtras);
+            const newExtrasTotalCost = preparedExistingExtras.reduce((s, e) => s + e.costMinor, 0);
+            newLineUnitCostMinor = Math.round(baseRecipeUnitCostMinor + (newExtrasTotalCost / line.quantity));
+          } else if (line.quantity !== oldQty) {
+            const ratio = line.quantity / oldQty;
+            const scaledExtrasTotalCost = Math.round(oldExtrasTotalCost * ratio);
+            newLineUnitCostMinor = Math.round(baseRecipeUnitCostMinor + (scaledExtrasTotalCost / line.quantity));
+          }
+
+          return {
+            id: old.id,
+            menuItemId: old.menu_item_id,
+            name: old.item_name_snapshot,
+            quantity: line.quantity,
+            priceMinor: Number(old.unit_price_minor),
+            unitCostMinor: newLineUnitCostMinor,
+            snapshot: old.recipe_snapshot,
+            notes: old.notes,
+            extras: preparedExistingExtras,
+          };
         });
+
         const oldCharges = (await client.query(`SELECT name, charge_type, charge_value FROM order_charges
           WHERE restaurant_id=$1 AND order_id=$2 ORDER BY created_at, id`, [restaurantId, orderId])).rows;
         const charges = oldCharges.map(row => ({ name: row.name, type: row.charge_type,
@@ -109,6 +163,8 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
           }
           for (const deduction of snapshot.skippedDeductions || []) skipped.push({ menuItemId: line.menuItemId, ...deduction });
         }
+
+        const totalCostOfGoodsMinor = lines.reduce((sum, line) => sum + line.unitCostMinor * line.quantity, 0);
         const updated = (await client.query(`UPDATE orders SET customer_name=$3, customer_phone=$4,
           subtotal_minor=$5, discount_type=$6, discount_value=$7, discount_minor=$8, delivery_minor=$9,
           additional_charges_minor=$10, total_minor=$11, cost_of_goods_minor=$12,
@@ -118,18 +174,19 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
           input.customerName ?? order.customer_name, input.customerPhone ?? order.customer_phone,
           pricing.minor.subtotal, discount.type, discount.type === "percent" ? discount.value : discount.valueMinor / 100,
           pricing.minor.discount, pricing.minor.delivery, pricing.minor.additionalCharges, pricing.minor.total,
-          lines.reduce((sum,line) => sum + line.unitCostMinor * line.quantity, 0),
+          totalCostOfGoodsMinor,
           prepared.hasIncompleteCosting || skipped.length > 0, JSON.stringify(skipped), userId, now])).rows[0];
+
         for (const old of oldItems) {
           if (!suppliedIds.includes(old.id)) {
             await client.query(`DELETE FROM order_item_extras WHERE restaurant_id=$1 AND order_item_id=$2`, [restaurantId, old.id]);
             await client.query(`DELETE FROM order_items WHERE restaurant_id=$1 AND id=$2 AND order_id=$3`, [restaurantId, old.id, orderId]);
           }
         }
-        for (const [index,line] of lines.entries()) {
+        for (const [index, line] of lines.entries()) {
           if (line.snapshot) {
-            await client.query(`UPDATE order_items SET quantity=$3, line_total_minor=$4, sort_order=$5
-              WHERE restaurant_id=$1 AND id=$2 AND order_id=$6`, [restaurantId, line.id, line.quantity, line.priceMinor * line.quantity, index, orderId]);
+            await client.query(`UPDATE order_items SET quantity=$3, line_total_minor=$4, unit_cost_minor=$5, sort_order=$6
+              WHERE restaurant_id=$1 AND id=$2 AND order_id=$7`, [restaurantId, line.id, line.quantity, line.priceMinor * line.quantity, line.unitCostMinor, index, orderId]);
             if (line.extras !== undefined) {
               await client.query(`DELETE FROM order_item_extras WHERE restaurant_id=$1 AND order_item_id=$2`, [restaurantId, line.id]);
               for (const extra of line.extras || []) {
@@ -182,23 +239,112 @@ export function createOrderAmendmentService(pool, { clock = () => new Date(), ki
         for (const charge of pricing.additionalCharges) await client.query(`INSERT INTO order_charges
           (restaurant_id,order_id,name,charge_type,charge_value,amount_minor) VALUES($1,$2,$3,$4,$5,$6)`,
           [restaurantId,orderId,charge.name,charge.type,charge.type === "flat" ? Math.round(charge.value*100) : charge.value,Math.round(charge.amount*100)]);
-        // Keep already prepared tickets intact. Send only quantity changes to the kitchen.
-        const delta = lines.flatMap(line => {
-          const difference = line.quantity - Number(byId.get(line.id)?.quantity || 0);
-          return difference ? [{ menuItemId: line.menuItemId, name: line.name, quantity: Math.abs(difference),
-            extras: (line.extras || []).map((e) => ({
-              stockItemId: e.stockItemId,
-              name: e.nameSnapshot,
-              quantity: e.quantityBaseUnits,
-            })),
-            notes: difference > 0 ? "ADD to order" : "REMOVE from order", adjustment: difference > 0 ? "add" : "remove" }] : [];
-        });
-        for (const old of oldItems.filter(old => !suppliedIds.includes(old.id))) delta.push({ menuItemId:old.menu_item_id,
-          name:old.item_name_snapshot,quantity:Number(old.quantity),notes:"REMOVE from order",adjustment:"remove" });
+
+        // Generate kitchen instruction deltas, including accurate deltas for quantity changes and extras-only edits
+        const delta = [];
+        for (const line of lines) {
+          const old = byId.get(line.id);
+          const oldQty = old ? Number(old.quantity) : 0;
+          const diff = line.quantity - oldQty;
+          const existingLineExtras = old ? (existingExtrasByItemId.get(old.id) || []) : [];
+          const oldExtrasMap = new Map(existingLineExtras.map(e => [e.stock_item_id, e]));
+
+          if (diff !== 0) {
+            // Item quantity changed: send delta item quantity with delta extras
+            const itemExtrasDelta = (line.extras || existingLineExtras.map(e => ({
+              stockItemId: e.stock_item_id,
+              nameSnapshot: e.name_snapshot,
+              quantityBaseUnits: e.quantity_base_units,
+            }))).map((e) => {
+              const def = extraStockMap.get(e.stockItemId);
+              const perItemQty = line.quantity > 0 ? (Number(e.quantityBaseUnits) / line.quantity) : 0;
+              const deltaQty = perItemQty * Math.abs(diff);
+              const display = formatExtraDisplay(e.nameSnapshot || e.name, deltaQty, def);
+              return {
+                stockItemId: e.stockItemId,
+                name: e.nameSnapshot || e.name,
+                quantity: display.quantity,
+                unit: display.unit,
+              };
+            });
+
+            delta.push({
+              menuItemId: line.menuItemId,
+              name: line.name,
+              quantity: Math.abs(diff),
+              extras: itemExtrasDelta,
+              notes: diff > 0 ? "ADD to order" : "REMOVE from order",
+              adjustment: diff > 0 ? "add" : "remove",
+            });
+          } else if (line.extras !== undefined) {
+            // Extras-only changes (item quantity did NOT change)
+            const newExtras = line.extras || [];
+            const newExtrasMap = new Map(newExtras.map(e => [e.stockItemId, e]));
+
+            for (const newEx of newExtras) {
+              const oldEx = oldExtrasMap.get(newEx.stockItemId);
+              const oldBaseUnits = oldEx ? Number(oldEx.quantity_base_units) : 0;
+              const deltaBaseUnits = Number(newEx.quantityBaseUnits) - oldBaseUnits;
+              if (deltaBaseUnits !== 0) {
+                const def = extraStockMap.get(newEx.stockItemId);
+                const display = formatExtraDisplay(newEx.nameSnapshot, Math.abs(deltaBaseUnits), def);
+                delta.push({
+                  menuItemId: line.menuItemId,
+                  name: line.name,
+                  quantity: line.quantity,
+                  extras: [{
+                    stockItemId: newEx.stockItemId,
+                    name: newEx.nameSnapshot,
+                    quantity: display.quantity,
+                    unit: display.unit,
+                  }],
+                  notes: deltaBaseUnits > 0 ? `ADD extra ${newEx.nameSnapshot}` : `REMOVE extra ${newEx.nameSnapshot}`,
+                  adjustment: deltaBaseUnits > 0 ? "add" : "remove",
+                });
+              }
+            }
+
+            for (const oldEx of existingLineExtras) {
+              if (!newExtrasMap.has(oldEx.stock_item_id)) {
+                const def = extraStockMap.get(oldEx.stock_item_id);
+                const display = formatExtraDisplay(oldEx.name_snapshot, Number(oldEx.quantity_base_units), def);
+                delta.push({
+                  menuItemId: line.menuItemId,
+                  name: line.name,
+                  quantity: line.quantity,
+                  extras: [{
+                    stockItemId: oldEx.stock_item_id,
+                    name: oldEx.name_snapshot,
+                    quantity: display.quantity,
+                    unit: display.unit,
+                  }],
+                  notes: `REMOVE extra ${oldEx.name_snapshot}`,
+                  adjustment: "remove",
+                });
+              }
+            }
+          }
+        }
+        for (const old of oldItems.filter(old => !suppliedIds.includes(old.id))) {
+          delta.push({
+            menuItemId: old.menu_item_id,
+            name: old.item_name_snapshot,
+            quantity: Number(old.quantity),
+            notes: "REMOVE from order",
+            adjustment: "remove",
+          });
+        }
+
         let kitchenTicket = null;
-        if (delta.length && kitchenService) kitchenTicket = await kitchenService.createTicketForOrder(client, {
-          restaurantId,branchId:order.branch_id,orderId,items:delta,notes:`Order #${order.order_number} changed — follow ADD / REMOVE instructions`,
-        });
+        if (delta.length && kitchenService) {
+          kitchenTicket = await kitchenService.createTicketForOrder(client, {
+            restaurantId,
+            branchId: order.branch_id,
+            orderId,
+            items: delta,
+            notes: `Order #${order.order_number} changed — follow ADD / REMOVE instructions`,
+          });
+        }
         if (kitchenTicket) await client.query(`UPDATE orders SET order_status='preparing' WHERE restaurant_id=$1 AND id=$2`, [restaurantId,orderId]);
         await client.query(`INSERT INTO order_edit_events (restaurant_id,order_id,actor_user_id,event_type,changes,note,idempotency_key,request_hash)
           VALUES($1,$2,$3,'edited',$4,'Unpaid order updated',$5,$6)`, [restaurantId,orderId,userId,JSON.stringify([
