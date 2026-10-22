@@ -48,6 +48,7 @@ services:
     command: ["node", "src/server/bootstrap-first-restaurant.mjs"]
     environment:
       DATABASE_URL: postgresql://${SMOKE_POSTGRES_USER:-pos_smoke}:${SMOKE_POSTGRES_PASSWORD:-smoke-only}@postgres:5432/${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
+      CONTROL_DATABASE_URL: postgresql://${SMOKE_POSTGRES_USER:-pos_smoke}:${SMOKE_POSTGRES_PASSWORD:-smoke-only}@postgres:5432/${SMOKE_POSTGRES_DB:-restaurant_pos_smoke}
       PASSWORD_PEPPER: ${SMOKE_PASSWORD_PEPPER:-smoke-pepper-at-least-16-chars}
       RESTAURANT_NAME: ${SMOKE_RESTAURANT_NAME:-Pilot Restaurant}
       RESTAURANT_SLUG: ${SMOKE_RESTAURANT_SLUG:-pilot-restaurant}
