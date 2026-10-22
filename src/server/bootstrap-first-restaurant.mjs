@@ -272,16 +272,25 @@ export async function bootstrapFirstRestaurant({
     // Default active cash financial account (atomically provisioned; avoid duplicate or resetting balances).
     const existingCash = await client.query(
       `SELECT id, is_active FROM financial_accounts
-       WHERE restaurant_id = $1 AND account_type = 'cash'
+       WHERE restaurant_id = $1 AND branch_id = $2 AND account_type = 'cash'
        LIMIT 1`,
-      [restaurantId],
+      [restaurantId, branchId],
     );
     if (existingCash.rows.length === 0) {
+      const nameConflict = await client.query(
+        `SELECT id, account_type FROM financial_accounts
+         WHERE restaurant_id = $1 AND display_name = 'Cash'`,
+        [restaurantId],
+      );
+      let cashName = "Cash";
+      if (nameConflict.rows.length > 0 && nameConflict.rows[0].account_type !== "cash") {
+        cashName = "Default Cash";
+      }
       await client.query(
         `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name, is_active)
-         VALUES ($1, $2, 'cash', 'Cash', true)
+         VALUES ($1, $2, 'cash', $3, true)
          ON CONFLICT (restaurant_id, display_name) DO NOTHING`,
-        [restaurantId, branchId],
+        [restaurantId, branchId, cashName],
       );
     }
 
@@ -380,17 +389,25 @@ export async function repairMissingCashAccounts({ pool, logger = console }) {
     await assertProvisioningRoleSuitability(client);
     await client.query("BEGIN");
 
+    // Acquire transaction advisory lock to guarantee concurrent repair runs are serialized safely
+    await client.query("SELECT pg_advisory_xact_lock(839217421)");
+
     const candidatesRes = await client.query(`
       SELECT r.id, r.name,
              COALESCE(
                (SELECT b.id FROM branches b WHERE b.restaurant_id = r.id AND b.is_default = true LIMIT 1),
                (SELECT b.id FROM branches b WHERE b.restaurant_id = r.id ORDER BY b.created_at ASC LIMIT 1)
-             ) AS branch_id
+             ) AS branch_id,
+             COALESCE(
+               (SELECT b.name FROM branches b WHERE b.restaurant_id = r.id AND b.is_default = true LIMIT 1),
+               (SELECT b.name FROM branches b WHERE b.restaurant_id = r.id ORDER BY b.created_at ASC LIMIT 1)
+             ) AS branch_name
       FROM restaurants r
       WHERE NOT EXISTS (
         SELECT 1 FROM financial_accounts fa
         WHERE fa.restaurant_id = r.id AND fa.account_type = 'cash'
       )
+      FOR UPDATE OF r
     `);
 
     const repaired = [];
@@ -404,14 +421,50 @@ export async function repairMissingCashAccounts({ pool, logger = console }) {
         continue;
       }
 
-      await client.query(
-        `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name, is_active)
-         VALUES ($1, $2, 'cash', 'Cash', true)
-         ON CONFLICT (restaurant_id, display_name) DO NOTHING`,
+      // Check whether a cash account already exists for this restaurant and branch
+      const cashCheck = await client.query(
+        `SELECT id FROM financial_accounts
+         WHERE restaurant_id = $1 AND branch_id = $2 AND account_type = 'cash'`,
         [row.id, row.branch_id],
       );
+      if (cashCheck.rows.length > 0) continue;
 
-      repaired.push({ id: row.id, name: row.name, branchId: row.branch_id });
+      // Handle account-name conflict clearly if 'Cash' is already taken by a non-cash account
+      const existingName = await client.query(
+        `SELECT id, account_type FROM financial_accounts
+         WHERE restaurant_id = $1 AND display_name = 'Cash'`,
+        [row.id],
+      );
+      let accountName = "Cash";
+      if (existingName.rows.length > 0) {
+        accountName = row.branch_name ? `Cash - ${row.branch_name}` : "Default Cash";
+        logger.warn?.({
+          message: "repair_cash_account_name_conflict",
+          restaurantId: row.id,
+          restaurantName: row.name,
+          originalName: "Cash",
+          resolvedName: accountName,
+        });
+      }
+
+      const insertRes = await client.query(
+        `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name, is_active)
+         VALUES ($1, $2, 'cash', $3, true)
+         ON CONFLICT (restaurant_id, display_name) DO NOTHING
+         RETURNING id, display_name`,
+        [row.id, row.branch_id, accountName],
+      );
+
+      // Only report accounts that were actually inserted
+      if (insertRes.rows.length > 0) {
+        repaired.push({
+          id: row.id,
+          name: row.name,
+          branchId: row.branch_id,
+          accountId: insertRes.rows[0].id,
+          accountName: insertRes.rows[0].display_name,
+        });
+      }
     }
 
     await client.query("COMMIT");

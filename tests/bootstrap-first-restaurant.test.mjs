@@ -413,6 +413,98 @@ describe("first-restaurant bootstrap CLI", () => {
     assert.ok(!secondRepairedIds.includes(disabledRestId));
   });
 
+  it("handles account-name conflicts clearly during cash account repair and scopes to branch", async () => {
+    // Create restaurant with a non-cash account named 'Cash'
+    const conflictRestRes = await pool.query(
+      `INSERT INTO restaurants (name, slug, timezone, currency_code, code)
+       VALUES ('Conflict Cafe', 'conflict-cafe', 'Asia/Karachi', 'PKR', 'conflict-cafe')
+       RETURNING id`,
+    );
+    const conflictRestId = conflictRestRes.rows[0].id;
+    const branchRes = await pool.query(
+      `INSERT INTO branches (restaurant_id, name, code, is_default)
+       VALUES ($1, 'Downtown', 'downtown', true)
+       RETURNING id`,
+      [conflictRestId],
+    );
+    const branchId = branchRes.rows[0].id;
+
+    // Bank account taking display_name 'Cash'
+    await pool.query(
+      `INSERT INTO financial_accounts (restaurant_id, branch_id, account_type, display_name, is_active)
+       VALUES ($1, $2, 'bank', 'Cash', true)`,
+      [conflictRestId, branchId],
+    );
+
+    // Run repair
+    const repairRes = await repairMissingCashAccounts({ pool, logger: { info() {}, warn() {} } });
+    const repairedRow = repairRes.repairedRestaurants.find((r) => r.id === conflictRestId);
+    assert.ok(repairedRow, "Conflict restaurant must be repaired");
+    assert.equal(repairedRow.branchId, branchId, "Repaired account must scope to default branch");
+    assert.equal(repairedRow.accountName, "Cash - Downtown");
+
+    // Verify both accounts exist in DB
+    const accounts = await pool.query(
+      "SELECT account_type, display_name, is_active FROM financial_accounts WHERE restaurant_id = $1 ORDER BY display_name",
+      [conflictRestId],
+    );
+    assert.equal(accounts.rows.length, 2);
+    assert.deepEqual(accounts.rows[0], { account_type: "bank", display_name: "Cash", is_active: true });
+    assert.deepEqual(accounts.rows[1], { account_type: "cash", display_name: "Cash - Downtown", is_active: true });
+  });
+
+  it("remains safe and idempotent under concurrent repair execution", async () => {
+    // Create two new restaurants without cash accounts
+    const rest1Res = await pool.query(
+      `INSERT INTO restaurants (name, slug, timezone, currency_code, code)
+       VALUES ('Concurrent Rest 1', 'concurrent-rest-1', 'Asia/Karachi', 'PKR', 'concurrent-rest-1')
+       RETURNING id`,
+    );
+    const rest1Id = rest1Res.rows[0].id;
+    await pool.query(
+      `INSERT INTO branches (restaurant_id, name, code, is_default)
+       VALUES ($1, 'Main', 'main', true)`,
+      [rest1Id],
+    );
+
+    const rest2Res = await pool.query(
+      `INSERT INTO restaurants (name, slug, timezone, currency_code, code)
+       VALUES ('Concurrent Rest 2', 'concurrent-rest-2', 'Asia/Karachi', 'PKR', 'concurrent-rest-2')
+       RETURNING id`,
+    );
+    const rest2Id = rest2Res.rows[0].id;
+    await pool.query(
+      `INSERT INTO branches (restaurant_id, name, code, is_default)
+       VALUES ($1, 'Main', 'main', true)`,
+      [rest2Id],
+    );
+
+    // Run two repairs concurrently
+    const [repair1, repair2] = await Promise.all([
+      repairMissingCashAccounts({ pool, logger: { info() {}, warn() {} } }),
+      repairMissingCashAccounts({ pool, logger: { info() {}, warn() {} } }),
+    ]);
+
+    const totalRepairedForTestRests =
+      [...repair1.repairedRestaurants, ...repair2.repairedRestaurants]
+        .filter((r) => r.id === rest1Id || r.id === rest2Id).length;
+
+    // Both restaurants must be repaired exactly once in total across the two concurrent runs
+    assert.equal(totalRepairedForTestRests, 2);
+
+    const rest1Accounts = await pool.query(
+      "SELECT id FROM financial_accounts WHERE restaurant_id = $1 AND account_type = 'cash'",
+      [rest1Id],
+    );
+    assert.equal(rest1Accounts.rows.length, 1);
+
+    const rest2Accounts = await pool.query(
+      "SELECT id FROM financial_accounts WHERE restaurant_id = $1 AND account_type = 'cash'",
+      [rest2Id],
+    );
+    assert.equal(rest2Accounts.rows.length, 1);
+  });
+
   it("tests resolveProvisioningDatabaseUrl configuration validation", () => {
     // Production requires CONTROL_DATABASE_URL
     assert.throws(

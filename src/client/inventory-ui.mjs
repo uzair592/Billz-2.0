@@ -253,50 +253,71 @@ export function createInventoryUI({
   };
 
   let root = null;
+  let layoutInitialized = false;
+  let headerEl = null;
+  let toolbarEl = null;
+  let searchInputEl = null;
+  let activeFilterEl = null;
+  let contentAreaEl = null;
+  let lowStockSectionEl = null;
+  let historyAreaEl = null;
+  let searchDebounceTimer = null;
 
-  function render() {
-    if (!root) return;
+  function initLayout() {
+    if (!root || layoutInitialized) return;
     root.textContent = "";
 
-    const header = document.createElement("div");
-    header.className = "inventory-header";
+    headerEl = document.createElement("div");
+    headerEl.className = "inventory-header";
     const title = document.createElement("h1");
     title.textContent = "Inventory";
-    header.appendChild(title);
+    headerEl.appendChild(title);
 
     const newButton = document.createElement("button");
     newButton.type = "button";
     newButton.className = "inventory-btn inventory-btn-primary";
     newButton.textContent = "New item";
     newButton.addEventListener("click", () => openItemForm());
-    header.appendChild(newButton);
+    headerEl.appendChild(newButton);
 
     const recipeButton = document.createElement("button");
     recipeButton.type = "button";
     recipeButton.className = "inventory-btn";
     recipeButton.textContent = "Recipe editor";
     recipeButton.addEventListener("click", () => openRecipeEditor());
-    header.appendChild(recipeButton);
+    headerEl.appendChild(recipeButton);
+    root.appendChild(headerEl);
 
-    root.appendChild(header);
+    toolbarEl = document.createElement("div");
+    toolbarEl.className = "inventory-toolbar";
 
-    const toolbar = document.createElement("div");
-    toolbar.className = "inventory-toolbar";
-
-    const search = document.createElement("input");
-    search.type = "search";
-    search.className = "inventory-input inventory-search";
-    search.placeholder = "Search by name or SKU";
-    search.value = state.search;
-    search.addEventListener("input", () => {
-      state.search = search.value;
-      state.cursorStack = [];
-      state.nextCursor = null;
-      loadItems();
+    searchInputEl = document.createElement("input");
+    searchInputEl.type = "search";
+    searchInputEl.className = "inventory-input inventory-search";
+    searchInputEl.placeholder = "Search by name or SKU";
+    searchInputEl.value = state.search;
+    searchInputEl.addEventListener("input", () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        state.search = searchInputEl.value;
+        state.cursorStack = [];
+        state.nextCursor = null;
+        loadItems();
+      }, 150);
     });
-    toolbar.appendChild(search);
+    searchInputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(searchDebounceTimer);
+        state.search = searchInputEl.value;
+        state.cursorStack = [];
+        state.nextCursor = null;
+        loadItems();
+      }
+    });
+    toolbarEl.appendChild(searchInputEl);
 
-    const activeFilter = selectInput(
+    activeFilterEl = selectInput(
       [
         { value: "", label: "All items" },
         { value: "true", label: "Active only" },
@@ -304,51 +325,79 @@ export function createInventoryUI({
       ],
       { value: state.isActive === null ? "" : String(state.isActive) },
     );
-    activeFilter.addEventListener("change", () => {
-      state.isActive = activeFilter.value === ""
+    activeFilterEl.addEventListener("change", () => {
+      state.isActive = activeFilterEl.value === ""
         ? null
-        : activeFilter.value === "true";
+        : activeFilterEl.value === "true";
       state.cursorStack = [];
       state.nextCursor = null;
       loadItems();
     });
-    toolbar.appendChild(activeFilter);
+    toolbarEl.appendChild(activeFilterEl);
 
     const lowStockButton = document.createElement("button");
     lowStockButton.type = "button";
     lowStockButton.className = "inventory-btn";
     lowStockButton.textContent = "Low stock";
     lowStockButton.addEventListener("click", loadLowStock);
-    toolbar.appendChild(lowStockButton);
+    toolbarEl.appendChild(lowStockButton);
+    root.appendChild(toolbarEl);
 
-    root.appendChild(toolbar);
+    contentAreaEl = document.createElement("div");
+    contentAreaEl.className = "inventory-content-area";
+    root.appendChild(contentAreaEl);
 
-    if (state.error) {
-      root.appendChild(errorState(state.error));
+    lowStockSectionEl = document.createElement("section");
+    lowStockSectionEl.className = "inventory-low-stock";
+    root.appendChild(lowStockSectionEl);
+
+    historyAreaEl = document.createElement("div");
+    historyAreaEl.className = "inventory-history-area";
+    root.appendChild(historyAreaEl);
+
+    layoutInitialized = true;
+  }
+
+  function render() {
+    if (!root) return;
+    if (!layoutInitialized || !root.contains(headerEl)) {
+      layoutInitialized = false;
+      initLayout();
     }
 
+    if (searchInputEl && document.activeElement !== searchInputEl && searchInputEl.value !== state.search) {
+      searchInputEl.value = state.search;
+    }
+
+    if (activeFilterEl && String(activeFilterEl.value) !== (state.isActive === null ? "" : String(state.isActive))) {
+      activeFilterEl.value = state.isActive === null ? "" : String(state.isActive);
+    }
+
+    contentAreaEl.textContent = "";
+    if (state.error) {
+      contentAreaEl.appendChild(errorState(state.error));
+    }
     if (state.loading) {
-      root.appendChild(loadingState());
+      contentAreaEl.appendChild(loadingState());
     } else if (state.items.length === 0) {
-      root.appendChild(emptyState(
+      contentAreaEl.appendChild(emptyState(
         state.search
           ? "No inventory items match your search."
           : "No inventory items yet. Create your first item to begin.",
       ));
     } else {
-      root.appendChild(renderTable());
-      root.appendChild(renderPagination());
+      contentAreaEl.appendChild(renderTable());
+      contentAreaEl.appendChild(renderPagination());
     }
 
-    const lowStockSection = document.createElement("section");
-    lowStockSection.className = "inventory-low-stock";
+    lowStockSectionEl.textContent = "";
     const lowStockTitle = document.createElement("h2");
     lowStockTitle.textContent = "Low stock warnings";
-    lowStockSection.appendChild(lowStockTitle);
+    lowStockSectionEl.appendChild(lowStockTitle);
     if (state.lowStockLoading) {
-      lowStockSection.appendChild(loadingState());
+      lowStockSectionEl.appendChild(loadingState());
     } else if (state.lowStock.length === 0) {
-      lowStockSection.appendChild(emptyState("No items are below their reorder level."));
+      lowStockSectionEl.appendChild(emptyState("No items are below their reorder level."));
     } else {
       const list = document.createElement("ul");
       list.className = "inventory-low-stock-list";
@@ -362,12 +411,12 @@ export function createInventoryUI({
         row.appendChild(detail);
         list.appendChild(row);
       }
-      lowStockSection.appendChild(list);
+      lowStockSectionEl.appendChild(list);
     }
-    root.appendChild(lowStockSection);
 
+    historyAreaEl.textContent = "";
     if (state.history) {
-      root.appendChild(renderHistory());
+      historyAreaEl.appendChild(renderHistory());
     }
   }
 

@@ -3,22 +3,17 @@
     ".continuity/decisions.json",
     ".continuity/decisions.json.backup",
     ".continuity/decisions.jsonl",
-    ".continuity/metrics.json",
-    "Fast_Food_POS_Custom_Bill_Header_XXXL.html",
-    "src/client/legacy-cloud-adapter.mjs",
-    "src/client/order-detail-ui.mjs",
-    "src/server/database/migration-runner.mjs",
-    "src/server/pos/kitchen-service.mjs"
+    ".continuity/metrics.json"
   ],
   "commits": [
-    "999e15ad18abc20aa083c93f45643c11a462a0ae",
-    "2e70fa2814b88b53c6f392ee8df35784e63df824",
-    "ea6bf151fdd408bd14340ed68c47a02297cb1ba1",
-    "16e6ec5e218c0467ef20b9377f49c13ee77d6b29",
-    "b504a0b51dd79797e6fa76174dfc560b74aa7ac6"
+    "a5a7872c15947686c9df9c7eb275620a369b4d72",
+    "fe8cd69ad592e12f6deec86936eabf15f3290aab",
+    "79bf230671854ff83b51c6677815ca64134caaab",
+    "57cfb829597cbc8240ef7cc112975500e96caa0f",
+    "39a5cf9e8212420a66722528599f8f12c925e0ea"
   ],
-  "decisions": 51,
-  "timestamp": 1792319533760,
+  "decisions": 42,
+  "timestamp": 1792216046230,
   "decisionIds": [
     "0ab7da2a-ee44-4892-b947-62d2c2beaf89",
     "f8620370-5b83-4e69-b527-1e7509dfeab5",
@@ -61,15 +56,6 @@
     "decision-92aceaea-backup-order-num",
     "decision-resilient-billing-kot-devices",
     "7158da3b-8879-4e0d-8502-310495e43f5d",
-    "804b72fa-b97f-44d9-b04a-c9e3b3400448",
-    "ab39a2c3-9a29-4a2d-8b4e-7abc9e82a69b",
-    "63d32ad3-3b3a-4287-885d-9e5cd82c9cb1",
-    "1430eff9-1ef9-4373-9897-fb10e55f0758",
-    "c8b2215d-f316-4641-b736-a68b21bb841b",
-    "243b230a-4fd7-4f21-9acb-d94467fb069d",
-    "e66fe812-20ca-458e-9d79-8c7ae35163d3",
-    "8e656b11-e3dc-44a2-980d-f02da2213f5e",
-    "e32f4c15-930f-429a-9720-d93ab82f17ea",
-    "10b74dd4-6920-49ca-b264-b5f0d1f43a05"
+    "804b72fa-b97f-44d9-b04a-c9e3b3400448"
   ]
 }

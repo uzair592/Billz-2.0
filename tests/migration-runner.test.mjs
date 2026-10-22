@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it, before, after } from "node:test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,9 @@ import {
   getAppliedMigrations,
   ensureMigrationsTable,
   listMigrationFiles,
+  checksumMatches,
+  acquireAdvisoryLock,
+  releaseAdvisoryLock,
 } from "../src/server/database/migration-runner.mjs";
 import {
   ADMIN_DATABASE_URL,
@@ -22,6 +25,41 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REAL_MIGRATIONS_DIR = path.join(here, "..", "database", "migrations");
 const migrationFiles = await listMigrationFiles(REAL_MIGRATIONS_DIR);
+
+function sha256(content) {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+describe("checksumMatches helper", () => {
+  it("matches identical content", () => {
+    const sql = "CREATE TABLE example (id int);\n";
+    assert.equal(checksumMatches(sha256(sql), sql), true);
+  });
+
+  it("matches when recorded checksum is LF and file content uses CRLF", () => {
+    const lfSql = "CREATE TABLE example (\n  id int\n);\n";
+    const crlfSql = "CREATE TABLE example (\r\n  id int\r\n);\r\n";
+    const lfHash = sha256(lfSql);
+    assert.equal(checksumMatches(lfHash, crlfSql), true);
+  });
+
+  it("matches when recorded checksum is CRLF and file content uses LF", () => {
+    const crlfSql = "CREATE TABLE example (\r\n  id int\r\n);\r\n";
+    const lfSql = "CREATE TABLE example (\n  id int\n);\n";
+    const crlfHash = sha256(crlfSql);
+    assert.equal(checksumMatches(crlfHash, lfSql), true);
+  });
+
+  it("does not permit genuine SQL modifications or whitespace inside statements", () => {
+    const sqlOriginal = "SELECT 1;\n";
+    const originalHash = sha256(sqlOriginal);
+
+    assert.equal(checksumMatches(originalHash, "SELECT  1;\n"), false);
+    assert.equal(checksumMatches(originalHash, "SELECT 1; \n"), false);
+    assert.equal(checksumMatches(originalHash, "SELECT 1;\n-- comment\n"), false);
+    assert.equal(checksumMatches(originalHash, "SELECT 2;\n"), false);
+  });
+});
 
 /**
  * Creates a throwaway database so migration tests never touch the
@@ -79,6 +117,27 @@ describe("migration runner", () => {
     assert.equal(result.alreadyApplied, migrationFiles.length);
   });
 
+  it("accepts already applied migrations with CRLF line endings without re-applying", async () => {
+    const scratchDir = path.join(here, "..", "test-results", `migration-crlf-${randomUUID().slice(0, 8)}`);
+    await mkdir(scratchDir, { recursive: true });
+    try {
+      for (const migration of migrationFiles) {
+        const sql = await readFile(path.join(REAL_MIGRATIONS_DIR, migration.file), "utf8");
+        const crlfSql = sql.replace(/\r?\n/g, "\r\n");
+        await writeFile(path.join(scratchDir, migration.file), crlfSql, "utf8");
+      }
+
+      const status = await verifyMigrationsCurrent({ pool, migrationsDir: scratchDir });
+      assert.equal(status.current, true);
+
+      const runResult = await runMigrations({ pool, migrationsDir: scratchDir, logger: silentLogger });
+      assert.equal(runResult.applied, 0);
+      assert.equal(runResult.alreadyApplied, migrationFiles.length);
+    } finally {
+      await rm(scratchDir, { recursive: true, force: true });
+    }
+  });
+
   it("detects a changed checksum and refuses to continue", async () => {
     // Create a scratch migrations directory with a tampered migration.
     const scratchDir = path.join(here, "..", "test-results", `migration-drift-${randomUUID().slice(0, 8)}`);
@@ -103,6 +162,10 @@ describe("migration runner", () => {
         () => runMigrations({ pool, migrationsDir: scratchDir, logger: silentLogger }),
         (error) => error.code === "MIGRATION_CHECKSUM_MISMATCH",
       );
+
+      const status = await verifyMigrationsCurrent({ pool, migrationsDir: scratchDir });
+      assert.equal(status.current, false);
+      assert.equal(status.drifted, first);
     } finally {
       await rm(scratchDir, { recursive: true, force: true });
     }
@@ -149,6 +212,40 @@ describe("migration runner", () => {
       );
     } finally {
       await client.query("SELECT pg_advisory_unlock(724191312)");
+      client.release();
+    }
+  });
+
+  it("guarantees advisory lock is released after execution, even on failure", async () => {
+    const client = await pool.connect();
+    try {
+      // Test that lock can be acquired and released cleanly by the runner
+      await runMigrations({ pool, migrationsDir: REAL_MIGRATIONS_DIR, logger: silentLogger });
+
+      // If lock was properly released, we should be able to acquire it immediately
+      const acquired = await acquireAdvisoryLock(client);
+      assert.equal(acquired, true, "Advisory lock should be free after runMigrations completes");
+      await releaseAdvisoryLock(client);
+
+      // Now verify lock release on failure
+      const scratchDir = path.join(here, "..", "test-results", `migration-lock-fail-${randomUUID().slice(0, 8)}`);
+      await mkdir(scratchDir, { recursive: true });
+      try {
+        await writeFile(
+          path.join(scratchDir, "999_fail.sql"),
+          "BEGIN;\nSELECT * FROM nonexistent_table;\nCOMMIT;\n",
+          "utf8",
+        );
+        await assert.rejects(
+          () => runMigrations({ pool, migrationsDir: scratchDir, logger: silentLogger }),
+        );
+        const acquiredAfterFail = await acquireAdvisoryLock(client);
+        assert.equal(acquiredAfterFail, true, "Advisory lock should be free after runMigrations failure");
+        await releaseAdvisoryLock(client);
+      } finally {
+        await rm(scratchDir, { recursive: true, force: true });
+      }
+    } finally {
       client.release();
     }
   });
