@@ -1,4 +1,4 @@
-import { orderActionsApi, orderHistoryApi, menuApi, describeCloudError } from "./api-client.mjs";
+import { orderActionsApi, orderHistoryApi, menuApi, inventoryApi, describeCloudError } from "./api-client.mjs";
 import { escapeFinanceText as escapeHtml } from "./finance-ui.mjs";
 import { CLOUD_CONTEXT_KEY } from "./legacy-cloud-adapter.mjs";
 
@@ -148,8 +148,12 @@ export function createOrderActionsUI({ storage, onUpdated = () => {} } = {}) {
     }
     const overlay = frame(`Edit Order · Bill #${detail.order.orderNumber}`, "Change items before payment. Existing prices stay unchanged.");
     if (pending) { pendingForm(overlay,key,orderId,"edit"); return; }
-    const catalog = await menuApi.list();
-    const lines = detail.items.map(row=>({orderItemId:row.id,name:row.name,quantity:row.quantity}));
+    const [catalog, inv] = await Promise.all([
+      menuApi.list(),
+      inventoryApi ? inventoryApi.list({ limit: 100 }).catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+    ]);
+    const stockItems = inv?.items || [];
+    const lines = detail.items.map(row=>({orderItemId:row.id,name:row.name,quantity:row.quantity,extras:(row.extras||[]).map(e=>({stockItemId:e.stockItemId,name:e.name,quantity:Number(e.quantity??e.qty??e.quantityBaseUnits??0),unit:e.unit||"g"}))}));
     overlay.querySelector("[data-body]").innerHTML = `<form>
       <div class="order-action-fields"><div><label for="order-edit-name">Customer name</label><input id="order-edit-name" name="customerName" maxlength="160" value="${escapeHtml(detail.order.customerName || "")}"></div>
       <div><label for="order-edit-phone">Phone (optional)</label><input id="order-edit-phone" name="customerPhone" type="tel" maxlength="40" value="${escapeHtml(detail.order.customerPhone || "")}"></div></div>
@@ -163,12 +167,53 @@ export function createOrderActionsUI({ storage, onUpdated = () => {} } = {}) {
     const form = overlay.querySelector("form");
     form.elements.discountType.value = detail.order.discountType === "percent" ? "percent" : "flat";
     function renderLines() {
-      overlay.querySelector("[data-lines]").innerHTML = lines.map((line,index)=>`<div class="order-action-line"><span>${escapeHtml(line.name)}</span>
-        <input type="number" min="1" max="999" step="1" value="${Number(line.quantity)}" data-index="${index}" aria-label="Quantity for ${escapeHtml(line.name)}" required>
-        <button type="button" data-remove="${index}" aria-label="Remove ${escapeHtml(line.name)}">Remove</button></div>`).join("");
+      overlay.querySelector("[data-lines]").innerHTML = lines.map((line,index)=>{
+        const extrasBadges = (line.extras || []).map((e, exIdx) => `
+          <span class="order-action-extra-badge" style="display:inline-flex; align-items:center; gap:4px; background:#f1f5f9; padding:2px 8px; border-radius:4px; font-size:12px; margin-right:4px;">
+            <span>➕ ${escapeHtml(e.name)} (${escapeHtml(e.quantity)}${escapeHtml(e.unit ? ' ' + e.unit : '')})</span>
+            <button type="button" data-extra-remove="${index}:${exIdx}" aria-label="Remove extra ${escapeHtml(e.name)}" style="background:none; border:none; color:#ef4444; font-weight:bold; cursor:pointer;">×</button>
+          </span>
+        `).join("");
+        const stockOptions = stockItems.map(s => {
+          const u = s.sellUnit === "number" || s.baseUnit === "piece" ? "pcs" : "g";
+          return `<option value="${escapeHtml(s.id)}" data-unit="${u}" data-name="${escapeHtml(s.name)}">${escapeHtml(s.name)} (${u})</option>`;
+        }).join("");
+        return `<div class="order-action-line-container" style="border-bottom:1px solid #f1f5f9; padding-bottom:8px; margin-bottom:8px;">
+          <div class="order-action-line" style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:600;">${escapeHtml(line.name)}</span>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <input type="number" min="1" max="999" step="1" value="${Number(line.quantity)}" data-index="${index}" aria-label="Quantity for ${escapeHtml(line.name)}" style="width:60px;" required>
+              <button type="button" data-remove="${index}" aria-label="Remove ${escapeHtml(line.name)}">Remove</button>
+            </div>
+          </div>
+          <div style="margin-top:4px;">${extrasBadges}</div>
+          ${stockItems.length > 0 ? `
+            <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+              <select data-extra-select="${index}" style="font-size:12px;"><option value="">+ Add Extra...</option>${stockOptions}</select>
+              <input type="number" min="0.1" step="any" value="50" data-extra-qty="${index}" style="width:50px; font-size:12px;" aria-label="Extra quantity">
+              <button type="button" data-extra-add="${index}" style="font-size:12px; padding:2px 8px;">Add</button>
+            </div>
+          ` : ""}
+        </div>`;
+      }).join("");
       form.querySelector('[type="submit"]').disabled = lines.length === 0;
       overlay.querySelectorAll("[data-index]").forEach(node=>node.oninput=()=>{lines[Number(node.dataset.index)].quantity=Number(node.value);});
       overlay.querySelectorAll("[data-remove]").forEach(node=>node.onclick=()=>{lines.splice(Number(node.dataset.remove),1);renderLines();});
+      overlay.querySelectorAll("[data-extra-remove]").forEach(node=>node.onclick=()=>{
+        const [lIdx, exIdx] = node.dataset.extraRemove.split(":").map(Number);
+        lines[lIdx].extras.splice(exIdx, 1); renderLines();
+      });
+      overlay.querySelectorAll("[data-extra-add]").forEach(node=>node.onclick=()=>{
+        const lIdx = Number(node.dataset.extraAdd);
+        const sel = overlay.querySelector(`[data-extra-select="${lIdx}"]`);
+        const qtyInput = overlay.querySelector(`[data-extra-qty="${lIdx}"]`);
+        if (!sel.value) return;
+        const opt = sel.selectedOptions[0];
+        const stockId = sel.value; const name = opt.dataset.name; const unit = opt.dataset.unit;
+        const qty = parseFloat(qtyInput.value) || 1;
+        if (!lines[lIdx].extras) lines[lIdx].extras = [];
+        lines[lIdx].extras.push({ stockItemId: stockId, name, quantity: qty, unit }); renderLines();
+      });
     }
     renderLines();
     overlay.querySelector("[data-add]").onclick = () => {
@@ -182,7 +227,7 @@ export function createOrderActionsUI({ storage, onUpdated = () => {} } = {}) {
       if (!Number.isFinite(discount) || discount < 0 || (percent && discount > 100) || !Number.isFinite(delivery) || delivery < 0) return;
       void send(overlay,key,orderId,"edit",{expectedVersion:detail.order.version,
         customerName:form.elements.customerName.value.trim(),customerPhone:form.elements.customerPhone.value.trim(),
-        items:lines.map(({orderItemId,menuItemId,quantity})=>({...(orderItemId ? {orderItemId} : {menuItemId}),quantity})),
+        items:lines.map(({orderItemId,menuItemId,quantity,extras})=>({...(orderItemId ? {orderItemId} : {menuItemId}),quantity,extras:(extras||[]).map(e=>({stockItemId:e.stockItemId,quantity:Number(e.quantity),...(e.unit?{unit:e.unit}:{})}))})),
         discount:percent?{type:"percent",value:discount}:{type:"flat",valueMinor:Math.round(discount*100)},deliveryMinor:Math.round(delivery*100)});
     };
     form.elements.customerName.focus();

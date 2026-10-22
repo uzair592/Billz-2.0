@@ -85,6 +85,12 @@ const percentChargeSchema = z.object({
   value: z.number().min(0).max(100),
 }).strict();
 
+const orderItemExtraSchema = z.object({
+  stockItemId: z.uuid(),
+  quantity: z.number().positive().max(100000),
+  unit: z.string().trim().max(30).optional(),
+}).strict();
+
 const orderSchema = z.object({
   idempotencyKey: z.uuid(),
   expectedTotalMinor: z.number().int().min(0).optional(),
@@ -99,6 +105,7 @@ const orderSchema = z.object({
   items: z.array(z.object({
     menuItemId: z.uuid(),
     quantity: z.number().int().min(1).max(999),
+    extras: z.array(orderItemExtraSchema).max(50).optional(),
     notes: z.string().trim().max(255).nullable().optional(),
   }).strict()).min(1).max(100),
   discount: z.discriminatedUnion("type", [
@@ -126,6 +133,7 @@ const amendOrderSchema = z.object({
   items: z.array(z.object({
     orderItemId: z.uuid().optional(), menuItemId: z.uuid().optional(),
     quantity: z.number().int().min(1).max(999),
+    extras: z.array(orderItemExtraSchema).max(50).optional(),
   }).strict().refine(line => Boolean(line.orderItemId) !== Boolean(line.menuItemId),
     "Provide an existing order line or a new menu item.")).min(1).max(100),
 }).strict();

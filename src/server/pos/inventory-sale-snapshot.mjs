@@ -93,6 +93,21 @@ export async function nonRestockedRefundUsage(client, { restaurantId, orderId })
     for (const item of recipe.inventoryItems || []) inventory.set(item.inventoryItemId, (inventory.get(item.inventoryItemId) || 0) + quantity * Number(item.quantityPerUnit));
     for (const item of recipe.items || []) legacy.set(item.stockItemId, (legacy.get(item.stockItemId) || 0) + quantity * Number(item.quantityBaseUnits));
   }
+  const extrasRows = (await client.query(
+    `SELECT oie.stock_item_id, SUM((oie.quantity_base_units / NULLIF(oi.quantity, 0)) * ri.quantity) AS unreturned_quantity
+       FROM order_refund_items ri
+       JOIN order_refunds r ON r.id = ri.refund_id AND r.restaurant_id = ri.restaurant_id
+       JOIN order_items oi ON oi.id = ri.order_item_id AND oi.restaurant_id = ri.restaurant_id
+       JOIN order_item_extras oie ON oie.order_item_id = oi.id AND oie.restaurant_id = ri.restaurant_id
+      WHERE r.restaurant_id = $1 AND r.order_id = $2 AND r.status = 'completed' AND ri.restock = false
+      GROUP BY oie.stock_item_id`,
+    [restaurantId, orderId],
+  )).rows;
+  for (const row of extrasRows) {
+    if (row.stock_item_id) {
+      legacy.set(row.stock_item_id, (legacy.get(row.stock_item_id) || 0) + Number(row.unreturned_quantity));
+    }
+  }
   return { inventory, legacy };
 }
 export async function reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned = new Map() }) {
