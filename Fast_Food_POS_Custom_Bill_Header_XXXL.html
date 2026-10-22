@@ -17400,8 +17400,9 @@
               const def = (extra.key && stockItemDefs[extra.key]) || Object.values(stockItemDefs).find(d => d.id === extra.stockItemId || d.label === extra.name);
               const label = def?.label || extra.name || extra.key;
               const unitLabel = extra.unit || (def && def.sellUnit === "number" ? "pcs" : (def ? "g" : ""));
+              const unitStr = unitLabel ? (unitLabel.startsWith(" ") ? unitLabel : ` ${unitLabel}`) : "";
               const displayQty = extra.quantity !== undefined ? extra.quantity : extra.qty;
-              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(label)} ${escapeHtmlForExport(displayQty)}${escapeHtmlForExport(unitLabel)}</div>`;
+              return `<div class="kitchen-extra">+ ${escapeHtmlForExport(label)} ${escapeHtmlForExport(displayQty)}${escapeHtmlForExport(unitStr)}</div>`;
             })
             .join("");
           tr.innerHTML = `

@@ -246,3 +246,20 @@ test("Edit order dialog allows viewing, adding, and removing extras and submits 
     unit: "pcs",
   });
 });
+
+test("Kitchen receipt reprint displays readable extras names, quantities and units without raw UUIDs", async ({ page }) => {
+  await setupExtrasPage(page);
+  await page.evaluate(() => switchScreen("view-orders"));
+
+  await expect(page.locator("#history-orders-rows")).toContainText("Zubair");
+  await page.locator("#history-orders-rows tr").first().click();
+
+  // Trigger reprint
+  await page.evaluate((id) => window.reprintOrderReceipt(id), orderId);
+
+  // Check the kitchen receipt slip items
+  const kitchenReceipt = page.locator("#print-kitchen-receipt-items");
+  await expect(kitchenReceipt).toContainText("Chicken Breast");
+  await expect(kitchenReceipt).toContainText("50 g");
+  await expect(kitchenReceipt).not.toContainText(chickenStockId);
+});
