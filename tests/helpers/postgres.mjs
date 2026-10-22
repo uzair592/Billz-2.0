@@ -4,9 +4,25 @@ import path from "node:path";
 import pg from "pg";
 import { projectRoot } from "./legacy-source.mjs";
 
+/**
+ * Test database configuration.
+ *
+ * Supported environments:
+ * - Local / CI PostgreSQL service: port 5432 (TEST_DATABASE_ADMIN_URL="postgresql://postgres:postgres@127.0.0.1:5432/restaurant_pos_test")
+ * - Docker validation container: port 55432 (TEST_DATABASE_ADMIN_URL="postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test")
+ *
+ * Production DATABASE_URL credentials are NEVER loaded automatically into destructive test setup.
+ */
 export const ADMIN_DATABASE_URL =
   process.env.TEST_DATABASE_ADMIN_URL
-  ?? (process.env.DATABASE_URL ? "postgresql://postgres:postgres@127.0.0.1:5432/restaurant_pos_test" : "postgresql://postgres:validation-only@127.0.0.1:55432/restaurant_pos_test");
+  ?? "postgresql://postgres:postgres@127.0.0.1:5432/restaurant_pos_test";
+
+if (process.env.DATABASE_URL && process.env.DATABASE_URL === ADMIN_DATABASE_URL && !ADMIN_DATABASE_URL.includes("test")) {
+  throw new Error(
+    "Safety guard: Refusing to run destructive test setup against production DATABASE_URL. " +
+    "Configure a dedicated TEST_DATABASE_ADMIN_URL pointing to a test database (e.g. restaurant_pos_test)."
+  );
+}
 
 export const APP_ROLE = "pos_integration_app";
 
@@ -42,6 +58,19 @@ export async function connectAdmin() {
     await pool.query("SELECT 1");
   } catch (error) {
     await pool.end();
+    if (error.code === "ECONNREFUSED" || error.message?.includes("ECONNREFUSED")) {
+      const parsed = new URL(ADMIN_DATABASE_URL);
+      const port = parsed.port || "5432";
+      const host = parsed.hostname || "127.0.0.1";
+      const dbErr = new Error(
+        `Database prerequisite error: PostgreSQL is not reachable at ${host}:${port}. ` +
+        `PostgreSQL-dependent tests require a live database. ` +
+        `Ensure PostgreSQL is running and configure TEST_DATABASE_ADMIN_URL ` +
+        `(default CI/local port: 5432, validation container port: 55432). Original error: ${error.message}`
+      );
+      dbErr.code = "TEST_DATABASE_UNREACHABLE";
+      throw dbErr;
+    }
     throw error;
   }
   return pool;

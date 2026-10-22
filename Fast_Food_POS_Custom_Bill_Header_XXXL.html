@@ -13165,6 +13165,7 @@
       >
         <button
           type="button"
+          id="cloud-modal-close-btn"
           onclick="closeCloudAccountModal()"
           style="
             position: absolute;
@@ -13181,8 +13182,7 @@
         </button>
         <h2 style="margin: 0 0 4px; font-size: 20px; color: #0f172a">☁️ Cloud sync</h2>
         <p style="margin: 0 0 18px; font-size: 13px; color: #64748b; line-height: 1.5">
-          Sign in with the restaurant code and username supplied by your administrator.
-          Cloud checkout requires a connection. Existing saved data is preserved when access expires.
+          Sign in with your username and password. Cloud checkout requires an active connection. Existing saved data is preserved when access expires.
         </p>
 
         <div
@@ -13222,8 +13222,11 @@
           >
             Sign in
           </button>
-          <button type="button" id="cloud-forgot-password" onclick="showCloudPasswordHelp()" style="margin-top:10px;background:none;border:0;color:#2563eb;cursor:pointer">Forgot password?</button>
-          <p id="cloud-password-help" class="hidden" role="status" style="font-size:13px;line-height:1.5"></p>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:12px; gap:8px;">
+            <button type="button" id="cloud-retry-button" onclick="retryCloudConnection()" style="background:#f8fafc;border:1px solid #cbd5e1;padding:8px 12px;border-radius:6px;color:#334155;font-size:12px;cursor:pointer">🔄 Retry connection</button>
+            <button type="button" id="cloud-forgot-password" onclick="showCloudPasswordHelp()" style="background:none;border:0;color:#2563eb;font-size:12px;cursor:pointer">Forgot password?</button>
+          </div>
+          <p id="cloud-password-help" class="hidden" role="status" style="font-size:13px;line-height:1.5;margin-top:8px"></p>
         </div>
 
         <div id="cloud-restaurant-panel" class="hidden" style="margin-top: 18px">
@@ -13299,12 +13302,40 @@
         status.style.color = tone === "error" ? "#b91c1c" : "#475569";
       }
 
+      function updateCloudModalControls() {
+        const isMandatory = Boolean(window.BILLZ_MANAGED && !window.BILLZ_TENANT_ID);
+        const closeBtn = document.getElementById("cloud-modal-close-btn");
+        if (closeBtn) closeBtn.style.display = isMandatory ? "none" : "block";
+      }
+
       function closeCloudAccountModal() {
         if (window.BILLZ_MANAGED && !window.BILLZ_TENANT_ID) return;
         document.getElementById("cloud-account-modal-overlay")?.classList.add("hidden");
       }
 
+      async function retryCloudConnection() {
+        cloudSetStatus("Checking connection…");
+        const sessionClient = window.BiteTechCloudSession;
+        if (!sessionClient) {
+          cloudSetStatus("Server connection unavailable. Please check your network and retry.", "error");
+          return;
+        }
+        try {
+          const account = await sessionClient.currentUser();
+          if (account?.user) {
+            cloudSetStatus("Connected. Loading restaurant…");
+            if (window.BILLZ_MANAGED) { location.reload(); return; }
+            await openCloudAccountModal();
+          } else {
+            cloudSetStatus("Server is online. Please enter your username and password to sign in.");
+          }
+        } catch (error) {
+          cloudSetStatus(error.message || "Could not reach the server. Please check your connection and retry.", "error");
+        }
+      }
+
       function cloudRenderState(session) {
+        updateCloudModalControls();
         const signedIn = Boolean(session && session.user);
         const activeRestaurant = cloudRestaurants.find(
           (restaurant) => restaurant.restaurantId === session?.restaurantId,
@@ -13338,6 +13369,7 @@
         const overlay = document.getElementById("cloud-account-modal-overlay");
         if (!overlay) return;
         overlay.classList.remove("hidden");
+        updateCloudModalControls();
         cloudSetStatus("Checking the cloud session…");
         cloudRenderState(null);
 
@@ -16403,21 +16435,56 @@
 
       function addToCart(id, name, price, originalPrice, offerLabel) {
         if (orderSubmitSaving) return;
-        document.getElementById("order-save-feedback").classList.add("hidden");
+        if (id === undefined || id === null || id === "") return;
+
+        let resolvedItem = null;
+        if (typeof menuItems !== "undefined" && Array.isArray(menuItems)) {
+          resolvedItem = menuItems.find((m) => m && (m.id === id || String(m.id) === String(id))) || null;
+        }
+
+        let finalName = name;
+        let finalPrice = price;
+        let finalOriginalPrice = originalPrice;
+        let finalOfferLabel = offerLabel;
+
+        if (resolvedItem) {
+          if (!finalName) finalName = resolvedItem.name;
+          if (finalPrice === undefined || finalPrice === null || finalPrice === "") {
+            finalPrice = typeof getEffectiveItemPrice === "function" ? getEffectiveItemPrice(resolvedItem) : resolvedItem.price;
+          }
+          if (finalOriginalPrice === undefined || finalOriginalPrice === null) {
+            const isItemOff = typeof isOfferActive === "function" && isOfferActive(resolvedItem);
+            const isCatOff = !isItemOff && typeof isCategoryOfferActive === "function" && isCategoryOfferActive(resolvedItem.category);
+            if (isItemOff || isCatOff) {
+              finalOriginalPrice = resolvedItem.price;
+              if (!finalOfferLabel && typeof getItemOfferLabel === "function") {
+                finalOfferLabel = getItemOfferLabel(resolvedItem) || null;
+              }
+            }
+          }
+        }
+
+        if (typeof finalName !== "string" || !finalName.trim()) return;
+        const parsedPrice = Number(finalPrice);
+        if (!Number.isFinite(parsedPrice) || parsedPrice < 0) return;
+
+        let parsedOriginalPrice = null;
+        if (finalOriginalPrice !== undefined && finalOriginalPrice !== null && finalOriginalPrice !== "") {
+          const numOrig = Number(finalOriginalPrice);
+          if (Number.isFinite(numOrig) && numOrig > parsedPrice) {
+            parsedOriginalPrice = numOrig;
+          }
+        }
+
+        document.getElementById("order-save-feedback")?.classList.add("hidden");
         const existing = cart.find((item) => item.id === id);
         if (existing) {
           existing.qty += 1;
         } else {
-          const cartItem = { id: id, name: name, price: price, qty: 1 };
-          // 🏷️ Snapshot the discount (item or category offer) at the moment it was added, so it stays
-          // accurate on the receipt/order history even if the offer is changed or removed afterward.
-          if (
-            originalPrice !== undefined &&
-            originalPrice !== null &&
-            originalPrice > price
-          ) {
-            cartItem.originalPrice = originalPrice;
-            cartItem.offerLabel = offerLabel || "🔥 Offer";
+          const cartItem = { id: id, name: String(finalName).trim(), price: parsedPrice, qty: 1 };
+          if (parsedOriginalPrice !== null) {
+            cartItem.originalPrice = parsedOriginalPrice;
+            cartItem.offerLabel = finalOfferLabel || "🔥 Offer";
           }
           cart.push(cartItem);
         }
