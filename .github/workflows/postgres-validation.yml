@@ -275,9 +275,22 @@ jobs:
             bite-tech-pos:smoke \
             src/server/database/migration-runner.mjs
 
+      - name: Provision separate runtime roles
+        env:
+          PGPASSWORD: ${{ env.SMOKE_PASSWORD }}
+        run: |
+          psql -h localhost -U "$SMOKE_USER" -d "$SMOKE_DB" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE pos_smoke_app LOGIN PASSWORD 'smoke-app-only' NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE pos_smoke_control LOGIN PASSWORD 'smoke-control-only' NOSUPERUSER BYPASSRLS;
+          GRANT USAGE ON SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
+          SQL
+
       - name: Bootstrap the first restaurant
         env:
-          DATABASE_URL: postgresql://${{ env.SMOKE_USER }}:${{ env.SMOKE_PASSWORD }}@localhost:5432/${{ env.SMOKE_DB }}
+          DATABASE_URL: postgresql://pos_smoke_app:smoke-app-only@localhost:5432/${{ env.SMOKE_DB }}
+          CONTROL_DATABASE_URL: postgresql://pos_smoke_control:smoke-control-only@localhost:5432/${{ env.SMOKE_DB }}
           PASSWORD_PEPPER: ${{ env.SMOKE_PEPPER }}
           RESTAURANT_NAME: Pilot Restaurant
           RESTAURANT_SLUG: pilot-restaurant
@@ -290,6 +303,7 @@ jobs:
         run: |
           docker run --rm \
             -e DATABASE_URL \
+            -e CONTROL_DATABASE_URL \
             -e PASSWORD_PEPPER \
             -e RESTAURANT_NAME \
             -e RESTAURANT_SLUG \
@@ -303,18 +317,6 @@ jobs:
             --entrypoint node \
             bite-tech-pos:smoke \
             src/server/bootstrap-first-restaurant.mjs
-
-      - name: Provision separate runtime roles
-        env:
-          PGPASSWORD: ${{ env.SMOKE_PASSWORD }}
-        run: |
-          psql -h localhost -U "$SMOKE_USER" -d "$SMOKE_DB" -v ON_ERROR_STOP=1 <<'SQL'
-          CREATE ROLE pos_smoke_app LOGIN PASSWORD 'smoke-app-only' NOSUPERUSER NOBYPASSRLS;
-          CREATE ROLE pos_smoke_control LOGIN PASSWORD 'smoke-control-only' NOSUPERUSER BYPASSRLS;
-          GRANT USAGE ON SCHEMA public TO pos_smoke_app, pos_smoke_control;
-          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
-          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO pos_smoke_app, pos_smoke_control;
-          SQL
 
       - name: Start the production container
         env:
