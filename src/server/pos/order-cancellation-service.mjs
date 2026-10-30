@@ -1,4 +1,5 @@
-import { reverseRemainingInventory, nonRestockedRefundUsage } from "./inventory-sale-snapshot.mjs";
+﻿import { reverseRemainingInventory, nonRestockedRefundUsage } from "./inventory-sale-snapshot.mjs";
+import { reverseFifoAllocations } from "./fifo-allocation-service.mjs";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
 
@@ -77,6 +78,9 @@ export function createOrderCancellationService(pool, { clock = () => new Date() 
 
           const unreturned = await nonRestockedRefundUsage(client, { restaurantId, orderId });
           const restocked = await reverseRemainingInventory(client, { restaurantId, orderId, userId, now, unreturned: unreturned.inventory });
+
+          // FIFO: reverse all batch allocations for this order (idempotent).
+          await reverseFifoAllocations(client, { restaurantId, orderId, now });
           const reversalResult = await client.query(
             `WITH sales AS (
                SELECT stock_item_id, SUM(-quantity_delta) AS quantity

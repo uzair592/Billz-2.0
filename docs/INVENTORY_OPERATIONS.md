@@ -1,42 +1,52 @@
-# Milestone 14 — Inventory & Purchasing Operations Documentation
+# Inventory & Purchasing Operations Documentation — FIFO Costing Architecture
 
 ## Overview
-Milestone 14 introduces multi-tenant inventory tracking, recipe-based automatic order stock consumption, supplier management, draft purchasing, receiving with weighted average costing (WAC), manual adjustments, waste tracking, and an append-only immutable stock movements ledger for Bite Tech POS SaaS.
+Billz-2.0 implements First-In, First-Out (FIFO) as the authoritative costing method across multi-tenant purchasing, inventory consumption, POS sales, refunds, cancellations, and financial reporting.
 
 ## Key Components & Architecture
 
 ### 1. Inventory Units
-- **Base Units**: Supported inventory base units are piece, gram, kilogram, millilitre, and litre.
-- **Storage Precision**: Stock quantities are stored as high-precision numeric values (NUMERIC(12,4)). Line totals and monetary costs are maintained in PKR integer minor units (INTEGER / BIGINT representing paisa).
+- **Base Units**: Supported inventory base units are `piece`, `gram`, `kilogram`, `millilitre`, and `litre`.
+- **Storage Precision**: Stock quantities are stored as high-precision numeric values (`NUMERIC(18,4)`). Line totals and monetary costs are maintained in integer minor units (`BIGINT` representing paisa/cents/minor units).
 
-### 2. Recipe Deductions & Exact-Once Consumption
-- **Authoritative Checkout Gate**: Inventory consumption (consumeOrderInventory) is invoked atomically inside the production createCompletedOrder checkout transaction.
-- **Recipe Ingredients**: When a completed order is submitted, the server looks up the current recipe mapping (inventory_recipes + inventory_recipe_items) for each item ordered and deducts the exact required ingredient quantities.
-- **Idempotency**: Concurrent checkout replays or repeated calls use the order's unique idempotency constraint/key, ensuring inventory is deducted exactly once per order.
-- **Fault Tolerance**: Missing recipes or negative stock do not block checkout.
+### 2. FIFO Cost Batches (`inventory_fifo_batches`)
+- **Discrete Cost Layers**: Each received purchase line generates an immutable FIFO batch record preserving:
+  - `restaurant_id`: Tenant boundary
+  - `inventory_item_id`: Item identifier
+  - `purchase_id` and `purchase_item_id`: Source document references
+  - `original_quantity`: Base units received
+  - `remaining_quantity`: Base units remaining on hand
+  - `unit_cost_minor`: Acquisition unit cost in minor currency units
+  - `effective_receipt_at`: Deterministic ordering timestamp
+  - `batch_ref`: Purchase/Invoice reference number
+  - `batch_origin`: `'purchase'`, `'opening_stock'`, `'wac_migration'`, `'manual_adjustment'`, or `'return'`
+- **Deterministic Order**: Batches are strictly ordered by `effective_receipt_at ASC, created_at ASC, id ASC`.
 
-### 3. Purchase Receiving & Weighted Average Costing (WAC)
-- **Draft Purchases**: Purchases begin in DRAFT status and can be updated until received.
-- **Receiving Confirmation**: Receiving a purchase requires explicit confirmation and transition to RECEIVED status, rendering the purchase immutable.
-- **Weighted Average Cost Formula**: When receiving inventory:
-  \text{New WAC} = \frac{(\text{Current Stock} \times \text{Current WAC}) + (\text{Received Qty} \times \text{Unit Cost})}{\text{Current Stock} + \text{Received Qty}}
-  Negative stock moving toward positive correctly uses the incoming purchase unit cost for the new stock balance.
+### 3. FIFO Consumption & Allocations (`inventory_fifo_allocations`)
+- **Authoritative Allocation**: When an order is completed, ingredients are allocated from the oldest available batches. Once an older batch is exhausted (`remaining_quantity = 0`), consumption advances to the next layer.
+- **Traceable Cost Breakdown**: Each consumption slice writes an immutable allocation row recording:
+  - `batch_id`: Consumed batch
+  - `order_id`: Associated sale
+  - `allocated_quantity`: Quantity consumed
+  - `unit_cost_minor`: Cost snapshot of the batch layer
+  - `total_cost_minor`: Exact line cost
+- **Order COGS**: Sum of all batch allocation total costs is recorded directly on the `orders` table as `cost_of_goods_minor`.
 
-### 4. Negative Stock & Low Stock Warnings
-- **Negative Stock Allowed**: Stock can drop below zero when orders complete without sufficient stock on hand. Movements record exact negative balances.
-- **Low Stock Warnings**: Items with current_stock <= reorder_level render LOW STOCK badges.
+### 4. Negative Stock & Provisional Deficits (`inventory_fifo_deficits`)
+- **Checkout Non-Blocking**: Sales are never blocked by stock deficits.
+- **Deficit Tracking**: When available batches are exhausted, the unallocated quantity is recorded in `inventory_fifo_deficits`.
+- **Costing Status**:
+  - `resolved`: Complete FIFO batch coverage
+  - `provisional`: Partial stock shortfall covered by deficit
+  - `unresolved`: Entirely uncosted / missing recipe
+- **Subsequent Reconciliation**: When new purchases arrive, earlier deficits are reconciled without silently modifying historical invoices.
 
-### 5. Adjustments & Waste
-- Manual adjustments (ADJUSTMENT) and waste recordings (WASTE) write signed movements to inventory_movements and update inventory_items.current_stock.
+### 5. Cancellations & Refunds
+- **Order Cancellation**: Restores consumed quantities back to their original FIFO batches and records compensating `sale_reversal` allocation rows.
+- **Customer Refunds**: Restocking restores the original batch allocations and unit costs, linking movements to the refund.
 
-### 6. Append-Only Immutable Ledger
-- inventory_movements table is protected by a PostgreSQL database trigger (inventory_movement_immutable()) preventing UPDATE and DELETE operations.
+### 6. WAC Data Migration
+- Existing stock balances created prior to FIFO adoption are migrated into initial opening batches tagged with `batch_origin = 'wac_migration'`, using the verified carrying average cost. Historical sale snapshots are preserved without rewriting past invoices.
 
-### 7. Permissions & Authorization
-- dmin and manager roles can perform all inventory/purchasing operations.
-- cashier cannot access purchase management endpoints.
-- ccountant has read-only access.
-
-### 8. Known Limitations
-- Accounts payable and supplier payment ledgers are out of scope for Milestone 14.
-- Multi-warehouse transfers and batch/expiry tracking are not included in this release.
+### 7. Append-Only Immutable Ledgers
+- Both `inventory_movements` and `inventory_fifo_allocations` are protected by database triggers that reject `UPDATE` and `DELETE` queries, ensuring complete auditability.

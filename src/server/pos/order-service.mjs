@@ -9,7 +9,16 @@ import { resolveExtraBaseUnitsPerItem, formatExtraDisplay } from "./ingredient-u
 
 function computeRequestHash(input) {
   const canonical = {
-    items: (input.items || []).map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity })),
+    items: (input.items || []).map((i) => ({
+      menuItemId: i.menuItemId,
+      quantity: i.quantity,
+      extras: (i.extras || []).map((e) => ({
+        stockItemId: e.stockItemId ?? null,
+        quantity: e.quantity != null ? Number(e.quantity) : null,
+        unit: e.unit ? String(e.unit).trim().toLowerCase() : null,
+        priceMinor: e.priceMinor != null ? Number(e.priceMinor) : 0,
+      })).sort((a, b) => String(a.stockItemId).localeCompare(String(b.stockItemId))),
+    })),
     orderType: input.orderType ?? null,
     tableId: input.tableId ?? null,
     discount: input.discount ? { type: input.discount.type, value: input.discount.value ?? null, valueMinor: input.discount.valueMinor ?? null } : null,
@@ -594,6 +603,13 @@ export function createOrderService(
                 now,
               },
             );
+            if (inventoryConsumption && inventoryConsumption.totalFifoCostMinor > 0) {
+              costOfGoodsMinor = inventoryConsumption.totalFifoCostMinor;
+              await client.query(
+                "UPDATE orders SET cost_of_goods_minor = $1 WHERE restaurant_id = $2 AND id = $3",
+                [costOfGoodsMinor, restaurantId, orderId],
+              );
+            }
             inventoryConsumption.warnings.push(...legacyWarnings);
           } else {
             inventoryConsumption = { replayed: false, consumedItemCount: 0, warnings: legacyWarnings, movements: [] };

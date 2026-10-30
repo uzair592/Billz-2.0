@@ -4,51 +4,55 @@ import {
   lockInventoryItem,
   recordMovement,
 } from "./inventory-ledger.mjs";
+import { allocateFifo } from "./fifo-allocation-service.mjs";
 
 /**
- * Inventory consumption: deducts ingredient stock when an
- * order reaches the project's authoritative completed state.
+ * Inventory consumption service — FIFO edition.
  *
- * The consumption is exactly once per order. The
- * `inventory_consumptions` row is the durable, queryable
- * proof: it is inserted with `ON CONFLICT DO NOTHING` under
- * the order's unique (restaurant_id, order_id) constraint, so
- * a replayed or racing checkout can never deduct twice even
- * if the application layer regresses.
+ * Deducts ingredient stock when an order reaches the project's authoritative
+ * completed state. Uses the FIFO batch allocation engine instead of WAC.
  *
- * Business rules, deliberately non-blocking:
- *   - a menu product without a recipe is a warning, not an
- *     error, and consumes nothing;
- *   - a missing inventory item is a warning, not an error;
- *   - a negative resulting balance is a warning, not an
- *     error — negative stock never blocks checkout;
- *   - any genuine failure rolls the whole transaction back,
- *     so an order can never be completed with half-applied
- *     stock changes.
+ * Business rules (deliberately non-blocking):
+ *   - A menu product without a recipe is a warning, never an error.
+ *   - A missing inventory item is a warning, never an error.
+ *   - Exhausted batches (negative stock) create a provisional deficit and are
+ *     a warning, never an error. Negative stock never blocks checkout.
+ *   - Any genuine failure rolls the whole transaction back so an order can
+ *     never be completed with half-applied stock changes.
  */
 
 /**
- * Resolves the recipe components for a set of order lines and
- * aggregates the per-ingredient usage, multiplying each
- * recipe quantity by the sold quantity.
+ * Resolves recipe components for a set of order lines and aggregates the
+ * per-ingredient usage, multiplying each recipe quantity by the sold quantity.
  *
- * Returns the aggregated usage map and the list of menu items
- * that have no recipe (missing-recipe warnings).
+ * Returns the aggregated usage map and the list of menu items that have no
+ * recipe (missing-recipe warnings).
  */
 async function resolveUsage(client, restaurantId, lines) {
-  if (lines.some(line => line.inventoryRecipe !== undefined)) {
+  // Fast path: caller pre-resolved recipes and passed them in.
+  if (lines.some((line) => line.inventoryRecipe !== undefined)) {
     const usage = new Map();
     const missingRecipes = [];
     for (const line of lines) {
-      if (!line.inventoryRecipe?.length && !line.recipe?.length) missingRecipes.push({
-        type: "missing_recipe", menuItemId: line.menuItemId, quantity: Number(line.quantity),
-      });
+      if (!line.inventoryRecipe?.length && !line.recipe?.length) {
+        missingRecipes.push({
+          type: "missing_recipe",
+          menuItemId: line.menuItemId,
+          quantity: Number(line.quantity),
+        });
+      }
       for (const recipe of line.inventoryRecipe || []) {
-        usage.set(recipe.inventoryItemId, (usage.get(recipe.inventoryItemId) || 0) + Number(recipe.quantityPerUnit) * Number(line.quantity));
+        usage.set(
+          recipe.inventoryItemId,
+          (usage.get(recipe.inventoryItemId) || 0)
+            + Number(recipe.quantityPerUnit) * Number(line.quantity),
+        );
       }
     }
     return { usage, missingRecipes };
   }
+
+  // Standard path: look up recipes from the database.
   const menuItemIds = lines.map((line) => line.menuItemId);
   const uniqueMenuItemIds = [...new Set(menuItemIds)];
 
@@ -92,10 +96,17 @@ async function resolveUsage(client, restaurantId, lines) {
 }
 
 /**
- * Applies the consumption within an open tenant transaction.
- * Called by the order service inside the authoritative order
- * transaction, so the order, its items, and the inventory
- * deduction commit or roll back together.
+ * Applies FIFO consumption within an open tenant transaction.
+ * Called by the order service inside the authoritative order transaction,
+ * so the order, its items, and the inventory deduction commit or roll back
+ * together.
+ *
+ * Returns:
+ *   { replayed, consumedItemCount, totalFifoCostMinor, costingStatus, warnings, movements }
+ *
+ * costingStatus is 'resolved' when all items were fully covered by FIFO batches,
+ * 'provisional' when some quantities ran into deficit, or 'unresolved' when
+ * every item was missing from inventory.
  */
 async function consumeWithinTransaction(
   client,
@@ -107,9 +118,8 @@ async function consumeWithinTransaction(
     lines,
   );
 
-  // Claim the order exactly once. A conflicting row means a
-  // previous, committed consumption already deducted this
-  // order's stock.
+  // Claim the order exactly once. A conflicting row means a previous,
+  // committed consumption already deducted this order's stock.
   const claim = await client.query(
     `INSERT INTO inventory_consumptions (
        restaurant_id, order_id, item_count
@@ -119,21 +129,55 @@ async function consumeWithinTransaction(
     [restaurantId, orderId, usage.size],
   );
   if (claim.rows.length === 0) {
-    return { replayed: true, consumedItemCount: 0, warnings: [], movements: [] };
+    return {
+      replayed: true,
+      consumedItemCount: 0,
+      totalFifoCostMinor: 0,
+      costingStatus: "replayed",
+      warnings: [],
+      movements: [],
+    };
   }
 
   const warnings = [...missingRecipes];
   const movements = [];
+  let totalFifoCostMinor = 0;
+  // Collect per-item costing statuses to determine the order-level status.
+  const itemStatuses = [];
 
-  for (const [inventoryItemId, required] of [...usage].sort(([a],[b]) => a.localeCompare(b))) {
+  // Deterministic ordering prevents deadlocks between concurrent orders
+  // consuming the same set of items.
+  for (const [inventoryItemId, required] of [...usage].sort(([a], [b]) => a.localeCompare(b))) {
+    // Lock the inventory item row for this transaction.
     const locked = await lockInventoryItem(client, restaurantId, inventoryItemId);
     if (!locked) {
-      // The recipe references an item that no longer exists.
-      // This is a warning, never a checkout failure.
+      // Recipe references an item that no longer exists — warning, not failure.
       warnings.push({ type: "missing_item", inventoryItemId, required });
+      itemStatuses.push("unresolved");
       continue;
     }
 
+    // FIFO allocation: consume from oldest batches first.
+    const fifoResult = await allocateFifo(client, {
+      restaurantId,
+      inventoryItemId,
+      orderId,
+      requiredQuantity: required,
+      now,
+    });
+    totalFifoCostMinor += fifoResult.totalCostMinor;
+    itemStatuses.push(fifoResult.costingStatus);
+
+    if (fifoResult.deficit > 0) {
+      warnings.push({
+        type: "fifo_deficit",
+        inventoryItemId,
+        deficit: fifoResult.deficit,
+        covered: required - fifoResult.deficit,
+      });
+    }
+
+    // Update the inventory item's balance (negative stock is allowed).
     const quantityAfter = Number(locked.current_quantity) - required;
     await client.query(
       `UPDATE inventory_items
@@ -143,16 +187,24 @@ async function consumeWithinTransaction(
       [restaurantId, inventoryItemId, required, now],
     );
 
+    // Record an immutable movement in the ledger. The unit_cost_minor here
+    // represents the FIFO cost of the consumed quantity (for reporting).
+    const fifoCostPerUnit = required > 0
+      ? Math.round(fifoResult.totalCostMinor / required)
+      : 0;
+
     const movementId = await recordMovement(client, {
       restaurantId,
       inventoryItemId,
       movementType: "sale_consumption",
       quantityDelta: -required,
       quantityAfter,
+      unitCostMinor: fifoCostPerUnit,
+      totalCostMinor: fifoResult.totalCostMinor,
       referenceType: "order",
       referenceId: orderId,
       idempotencyKey: randomUUID(),
-      notes: `Order consumption`,
+      notes: `FIFO order consumption (${fifoResult.costingStatus})`,
       actorUserId: userId,
       now,
     });
@@ -162,6 +214,8 @@ async function consumeWithinTransaction(
       inventoryItemId,
       quantityDelta: -required,
       quantityAfter,
+      fifoCostMinor: fifoResult.totalCostMinor,
+      costingStatus: fifoResult.costingStatus,
     });
 
     if (quantityAfter < 0) {
@@ -173,9 +227,19 @@ async function consumeWithinTransaction(
     }
   }
 
+  // Derive the order-level costing status.
+  const costingStatus =
+    itemStatuses.length === 0 || itemStatuses.every((s) => s === "unresolved")
+      ? "unresolved"
+      : itemStatuses.some((s) => s === "provisional" || s === "unresolved")
+        ? "provisional"
+        : "resolved";
+
   return {
     replayed: false,
     consumedItemCount: movements.length,
+    totalFifoCostMinor,
+    costingStatus,
     warnings,
     movements,
   };
@@ -184,10 +248,9 @@ async function consumeWithinTransaction(
 export function createInventoryConsumptionService(pool, { clock = () => new Date() } = {}) {
   return Object.freeze({
     /**
-     * Consumes inventory for a completed order. Exposed for
-     * direct use and testing; the order service calls the
-     * same logic inside its own transaction through
-     * `consumeWithinTransaction`.
+     * Consumes inventory for a completed order. Exposed for direct use and
+     * testing; the order service calls the same logic inside its own
+     * transaction through `consumeWithinTransaction`.
      */
     async consumeOrder({ tenant, orderId, lines, userId }) {
       const restaurantId = tenant.restaurant.id;
@@ -204,8 +267,8 @@ export function createInventoryConsumptionService(pool, { clock = () => new Date
 
     /**
      * Consumes inventory inside a caller-provided transaction.
-     * The order service passes its own transaction client so
-     * the deduction is atomic with the order creation.
+     * The order service passes its own transaction client so the deduction
+     * is atomic with the order creation.
      */
     async consumeWithinTransaction(client, context) {
       return consumeWithinTransaction(client, {

@@ -260,6 +260,11 @@ account, paid or not.
 - Added refund service, refund UI, sales-report service, sales-report
   UI, HTTP contract, migration contract, and browser tests for the
   refund and reporting workflows.
+- Completed full FIFO inventory costing implementation: added forward migration 031_inventory_fifo.sql creating inventory_fifo_batches, append-only inventory_fifo_allocations with immutability trigger, and inventory_fifo_deficits with PostgreSQL RLS.
+- Implemented src/server/pos/fifo-allocation-service.mjs handling chronological batch creation, oldest-batch-first consumption, integer half-away-from-zero minor arithmetic, deficit tracking, and batch allocation restoration for order cancellations and supplier returns.
+- Integrated FIFO engine into purchase-service.mjs, inventory-consumption-service.mjs, and order-cancellation-service.mjs.
+- Integrated and reconciled PRs #25 (bootstrap slug collisions), #26 (ingredient extras end-to-end and hash fix), and #27 (auth/cart hardening and CSP migration guide).
+- Added comprehensive unit, integration, and PostgreSQL test suite (tests/fifo-costing.test.mjs) proving Scenarios A, B, and C.
 
 ## Migration guardrails
 

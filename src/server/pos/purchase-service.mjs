@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { withTenantTransaction } from "../database/tenant-transaction.mjs";
 import { apiError } from "./business-date.mjs";
 import {
@@ -10,6 +10,7 @@ import {
   recordMovement,
   weightedAverageCostMinor,
 } from "./inventory-ledger.mjs";
+import { createFifoBatch } from "./fifo-allocation-service.mjs";
 
 const MAX_PAGE_SIZE = 200;
 const DEFAULT_PAGE_SIZE = 50;
@@ -629,6 +630,19 @@ export function createPurchaseService(pool, { clock = () => new Date() } = {}) {
               notes: `Purchase ${purchase.purchase_number}`,
               actorUserId: userId,
               now,
+            });
+
+            // FIFO: create a cost batch for this received purchase line.
+            // Idempotent: ON CONFLICT on (restaurant_id, purchase_item_id).
+            await createFifoBatch(client, {
+              restaurantId,
+              inventoryItemId: item.inventory_item_id,
+              purchaseId,
+              purchaseItemId: item.id,
+              quantity: receivedQuantity,
+              unitCostMinor,
+              effectiveReceiptAt: now,
+              batchRef: purchase.purchase_number,
             });
 
             receipts.push({

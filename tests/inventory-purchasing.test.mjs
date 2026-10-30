@@ -39,6 +39,9 @@ function createFakeDb() {
     recipes: [],
     consumptions: [],
     menuItems: new Map(),
+    fifoBatches: [],
+    fifoAllocations: [],
+    fifoDeficits: [],
   };
   const failures = [];
 
@@ -382,6 +385,52 @@ function createFakeDb() {
       const row = { id: randomUUID(), restaurant_id: rid, order_id: orderId, item_count: itemCount, created_at: NOW_TEXT };
       state.consumptions.push(row);
       return { rows: [row] };
+    }
+
+
+    // ── FIFO Batches & Allocations ─────────────────────
+    if (sql.startsWith("INSERT INTO inventory_fifo_batches")) {
+      const [id, rid, itemId, purchaseId, purchaseItemId, origQty, unitCostMinor, effectiveReceiptAt, batchRef] = values;
+      const existing = state.fifoBatches.find((b) => b.restaurant_id === rid && b.purchase_item_id === purchaseItemId && purchaseItemId != null);
+      if (existing) return { rows: [] };
+      const batch = {
+        id, restaurant_id: rid, inventory_item_id: itemId, purchase_id: purchaseId, purchase_item_id: purchaseItemId,
+        original_quantity: origQty, remaining_quantity: origQty, unit_cost_minor: unitCostMinor,
+        effective_receipt_at: asTs(effectiveReceiptAt), batch_ref: batchRef, batch_origin: 'purchase',
+        created_at: NOW_TEXT,
+      };
+      state.fifoBatches.push(batch);
+      return { rows: [batch] };
+    }
+    if (sql.includes("FROM inventory_fifo_batches") && sql.includes("remaining_quantity > 0")) {
+      const [rid, itemId] = values;
+      const rows = state.fifoBatches
+        .filter((b) => b.restaurant_id === rid && b.inventory_item_id === itemId && Number(b.remaining_quantity) > 0)
+        .sort((a, b) => (a.effective_receipt_at < b.effective_receipt_at ? -1 : 1));
+      return { rows };
+    }
+    if (sql.startsWith("UPDATE inventory_fifo_batches SET remaining_quantity = remaining_quantity -")) {
+      const [rid, id, take] = values;
+      const batch = state.fifoBatches.find((b) => b.restaurant_id === rid && b.id === id);
+      if (batch) batch.remaining_quantity = Number(batch.remaining_quantity) - Number(take);
+      return { rows: [] };
+    }
+    if (sql.startsWith("INSERT INTO inventory_fifo_allocations")) {
+      const [id, rid, batchId, orderId, itemId, qty, unitCost, sliceCost, now] = values;
+      const existing = state.fifoAllocations.find((a) => a.restaurant_id === rid && a.order_id === orderId && a.batch_id === batchId && a.allocation_type === 'sale');
+      if (existing) return { rows: [] };
+      const alloc = {
+        id, restaurant_id: rid, batch_id: batchId, order_id: orderId, inventory_item_id: itemId,
+        allocated_quantity: qty, unit_cost_minor: unitCost, total_cost_minor: sliceCost,
+        allocation_type: 'sale', created_at: asTs(now),
+      };
+      state.fifoAllocations.push(alloc);
+      return { rows: [alloc] };
+    }
+    if (sql.startsWith("INSERT INTO inventory_fifo_deficits")) {
+      const [id, rid, itemId, orderId, deficit, now] = values;
+      state.fifoDeficits.push({ id, restaurant_id: rid, inventory_item_id: itemId, order_id: orderId, deficit_quantity: deficit, created_at: asTs(now) });
+      return { rows: [] };
     }
 
     throw new Error(`Unhandled query in fake database: ${sql}`);
